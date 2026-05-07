@@ -59,9 +59,10 @@
     "files": [
       "dist/**/*",
       "package.json",
+      "assets/icon.png",
       "!**/*.{md,map,ts,tsx,scss,test.js,spec.js}",
       "!**/{__pycache__,.pytest_cache,.cache,.tmp,test,tests,spec,specs}",
-      "!**/*.{ico,icns,png,svg,jpg,jpeg}",
+      "!**/*.{ico,icns,svg,jpg,jpeg}",
       "!.git",
       "!.edge-profile",
       "!supabase",
@@ -105,7 +106,13 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "AIOS uses your microphone for voice input in the chat composer.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        }
+      }
     },
     "dmg": {
       "title": "${productName} ${version}",
