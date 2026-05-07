@@ -289,27 +289,35 @@ function App() {
         if (!live || cancelled) return;
         const needsIdentify = live.connections.filter((c) => c.status === "connected" && !stored.has(c.service));
         if (needsIdentify.length === 0) return;
-        // 3. Fire identify in parallel for all of them. Each is independent.
-        await Promise.allSettled(
-          needsIdentify.map(async (c) => {
+        // 3. Process at most 2 identify tasks concurrently. Each fires a
+        // Claude CLI subprocess that holds ~50 MB + opens an MCP connection
+        // — running all 6 at once would blow memory + hit network limits.
+        const queue = [...needsIdentify];
+        const runOne = async (): Promise<void> => {
+          while (!cancelled) {
+            const c = queue.shift();
+            if (!c) return;
             const prompt = identifyPromptFor(c.service);
-            if (!prompt) return;
-            const res = await invoke<{ response: string }>("run_task", {
-              prompt,
-              claudePath,
-              streamId: `bg-identify-${c.service}-${Date.now()}`
-            });
-            const raw = (res?.response || "").trim();
-            const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-            const handleMatch = raw.match(/@[A-Za-z0-9_.-]{2,}/);
-            const label =
-              emailMatch?.[0] ||
-              (handleMatch?.[0] && !raw.toUpperCase().includes("UNKNOWN") ? handleMatch[0] : null);
-            if (label) {
-              await invoke("set_setting", { key: `connector_label_${c.service}`, value: label }).catch(() => undefined);
-            }
-          })
-        );
+            if (!prompt) continue;
+            try {
+              const res = await invoke<{ response: string }>("run_task", {
+                prompt,
+                claudePath,
+                streamId: `bg-identify-${c.service}-${Date.now()}`
+              });
+              const raw = (res?.response || "").trim();
+              const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+              const handleMatch = raw.match(/@[A-Za-z0-9_.-]{2,}/);
+              const label =
+                emailMatch?.[0] ||
+                (handleMatch?.[0] && !raw.toUpperCase().includes("UNKNOWN") ? handleMatch[0] : null);
+              if (label) {
+                await invoke("set_setting", { key: `connector_label_${c.service}`, value: label }).catch(() => undefined);
+              }
+            } catch { /* per-service identify failure is non-fatal */ }
+          }
+        };
+        await Promise.all([runOne(), runOne()]);
       } catch { /* non-fatal — Connectors page can still trigger manual identify */ }
     })();
 

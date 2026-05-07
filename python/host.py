@@ -103,10 +103,20 @@ class HostError(Exception):
         self.message = message
 
 
+import threading
+
+# Shared lock for all stdout writes. With concurrent request handlers, we
+# need to make sure two threads don't interleave their JSON-RPC responses
+# into the stdout pipe — that would corrupt the framing the Electron host
+# relies on.
+_STDOUT_LOCK = threading.Lock()
+
+
 def emit_event(message_id: str | None, event: str, data: dict[str, Any]) -> None:
     if not message_id:
         return
-    print(json.dumps({"id": message_id, "event": event, "data": data}), flush=True)
+    with _STDOUT_LOCK:
+        print(json.dumps({"id": message_id, "event": event, "data": data}), flush=True)
 
 
 def text_from_stream_message(payload: dict[str, Any]) -> str:
@@ -770,24 +780,34 @@ def respond(message_id: str, ok: bool, data: Any = None, code: str | None = None
         payload["data"] = data
     else:
         payload["error"] = {"code": code or "ERROR", "message": message or "Unknown error"}
-    print(json.dumps(payload), flush=True)
+    with _STDOUT_LOCK:
+        print(json.dumps(payload), flush=True)
+
+
+def _handle_request(line: str) -> None:
+    """Process a single JSON-RPC request. Run in a worker thread so multiple
+    in-flight commands don't block each other — critical because run_task
+    spawns Claude CLI which can take 10-25s per call. With serial dispatch,
+    a single Claude task froze every other IPC behind it."""
+    message_id = ""
+    try:
+        request = json.loads(line)
+        message_id = str(request.get("id") or "")
+        cmd = str(request.get("cmd") or "")
+        args = request.get("args") if isinstance(request.get("args"), dict) else {}
+        args["_requestId"] = message_id
+        respond(message_id, True, dispatch(cmd, args))
+    except HostError as error:
+        respond(message_id, False, code=error.code, message=error.message)
+    except Exception as error:
+        respond(message_id, False, code="HOST_ERROR", message=str(error))
 
 
 def main() -> None:
     # Initialize the database early so startup failures are visible.
     get_workspace_info()
     for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            message_id = str(request.get("id") or "")
-            cmd = str(request.get("cmd") or "")
-            args = request.get("args") if isinstance(request.get("args"), dict) else {}
-            args["_requestId"] = message_id
-            respond(message_id, True, dispatch(cmd, args))
-        except HostError as error:
-            respond(str(locals().get("message_id", "")), False, code=error.code, message=error.message)
-        except Exception as error:
-            respond(str(locals().get("message_id", "")), False, code="HOST_ERROR", message=str(error))
+        threading.Thread(target=_handle_request, args=(line,), daemon=True).start()
 
 
 if __name__ == "__main__":
