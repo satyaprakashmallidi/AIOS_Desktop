@@ -82,7 +82,11 @@ exe = EXE(
     upx=False,  # UPX can confuse antivirus / Gatekeeper; keep raw
     console=True,
     disable_windowed_traceback=False,
-    target_arch=None,
+    # On macOS, target a universal2 binary so the same sidecar runs natively
+    # on both Apple Silicon (arm64) and Intel (x64) Macs. GitHub's macos-latest
+    # runner is now arm64 — without this, the x64 .dmg would ship an arm64
+    # binary that crashes on Intel Macs.
+    target_arch='universal2' if sys.platform == 'darwin' else None,
     codesign_identity=None,
     entitlements_file=None,
 )
