@@ -1,0 +1,18 @@
+# ============================================================
+# Your AIOS Workspace — Environment Configuration
+# ============================================================
+#
+# Copy this file to .env and fill in your values:
+#   cp .env.example .env
+#
+# NEVER commit .env to version control — it contains your secrets.
+# The .gitignore file already prevents this, but be careful.
+#
+# As you install more AIOS modules, each one will tell you which
+# API keys to add here. This file grows with your workspace.
+# ============================================================
+
+# --- Add API keys below as you install modules ---
+# Each module's INSTALL.md will tell you exactly what to add.
+# Example format:
+#   SERVICE_NAME_API_KEY=your-key-here

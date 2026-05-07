@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+    DataOS — Daily Collection Schedule (macOS)
+
+    Runs all active collectors at 6:00 AM every day.
+    Install: cp config/com.aios.data-collect.plist ~/Library/LaunchAgents/
+    Load:    launchctl load ~/Library/LaunchAgents/com.aios.data-collect.plist
+    Unload:  launchctl unload ~/Library/LaunchAgents/com.aios.data-collect.plist
+    Test:    launchctl start com.aios.data-collect
+
+    IMPORTANT: Replace the placeholder paths below with your actual paths.
+    Claude will do this during installation.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.aios.data-collect</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Replace with your actual venv Python path -->
+        <string>WORKSPACE_PATH/.venv/bin/python</string>
+        <!-- Replace with your actual collect.py path -->
+        <string>WORKSPACE_PATH/scripts/collect.py</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>WORKSPACE_PATH/data/collect.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>WORKSPACE_PATH/data/collect.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>WORKSPACE_PATH</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

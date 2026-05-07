@@ -1,0 +1,71 @@
+name: Release
+
+# Triggered when you push a tag matching v*.*.* (e.g. v0.1.0).
+# Builds Windows + macOS in parallel, uploads installers to a GitHub
+# Release as draft artifacts. Promote the release to "Published" in the
+# GitHub UI when you're ready for users to receive the auto-update.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python build tools
+        run: pip install pyinstaller
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Build Python sidecar
+        run: npm run build:python
+
+      - name: Build + publish (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release -- --win
+
+      - name: Build + publish (macOS)
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Mac builds are unsigned for now. When you have an Apple
+          # Developer ID add CSC_LINK + CSC_KEY_PASSWORD secrets.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run release -- --mac
+
+      - name: Upload installer artifacts (debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/latest*.yml
+          if-no-files-found: ignore

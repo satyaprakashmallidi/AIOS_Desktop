@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aios.daily-brief</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>WORKSPACE_PATH/.venv/bin/python</string>
+        <string>WORKSPACE_PATH/scripts/daily_brief.py</string>
+        <string>--deliver</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>WORKSPACE_PATH/data/daily-brief.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>WORKSPACE_PATH/data/daily-brief.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>WORKSPACE_PATH</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>AIOS</title>
+  <!-- Ink ring (filled) -->
+  <circle cx="128" cy="128" r="120" fill="#0d0d0d"/>
+  <!-- Italic Instrument Serif "A" -->
+  <text x="128" y="184"
+        text-anchor="middle"
+        font-family="'Instrument Serif', 'Times New Roman', serif"
+        font-style="italic"
+        font-weight="400"
+        font-size="168"
+        fill="#fafaf7">A</text>
+</svg>

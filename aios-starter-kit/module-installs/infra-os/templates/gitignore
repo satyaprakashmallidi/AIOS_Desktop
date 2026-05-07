@@ -1,0 +1,42 @@
+# ============================================================
+# AIOS Workspace — .gitignore
+# Files and folders that should NEVER be committed to Git.
+# This protects your secrets, avoids bloat, and keeps your
+# repository clean.
+# ============================================================
+
+# --- Credentials (CRITICAL — never commit these) ---
+.env
+credentials/
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# --- Data (generated — reproducible from collection scripts) ---
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+data/*.log
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- IDE ---
+.vscode/
+.idea/
+
+# --- Temp files ---
+*.tmp
+*.bak
+
+# --- Node (if applicable) ---
+node_modules/

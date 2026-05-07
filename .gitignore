@@ -1,0 +1,39 @@
+node_modules/
+dist/
+release/
+build/dist/
+build/build/
+
+# Logs / temp
+*.log
+*.tmp
+.DS_Store
+
+# Env (don't commit real secrets)
+.env
+*/.env
+!.env.example
+!**/.env.example
+
+# Local databases / archives
+*.db
+*.sqlite
+*.zip
+__MACOSX/
+
+# Tooling caches / dev artifacts
+.playwright-mcp/
+.edge-profile/
+.edge-profile2/
+.edge-profile3/
+.edge-profile4/
+__pycache__/
+aios_app/
+
+# Local Claude Code config (contains shell command history with secrets)
+.claude/settings.local.json
+
+# Junk screenshots in root
+aios-chat-check.png
+chat-ui-check.png
+chat-ui-check-fixed.png
