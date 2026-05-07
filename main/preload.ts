@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld("aios", {
     ipcRenderer.invoke("aios:open-external", url),
   openOauthWindow: (url: string): Promise<{ ok: boolean; completed?: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-oauth-window", url),
+  getVersion: (): Promise<string> => ipcRenderer.invoke("aios:get-version"),
   checkForUpdates: (): Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean }> =>
     ipcRenderer.invoke("aios:check-for-updates"),
   installUpdate: (): Promise<{ ok: boolean; reason?: string; error?: string }> =>

@@ -460,7 +460,15 @@ function AppearancePanel() {
 }
 
 function AboutPanel() {
-  const version = "0.1.0";
+  const [version, setVersion] = useState<string>("…");
+
+  useEffect(() => {
+    let cancelled = false;
+    window.aios?.getVersion?.()
+      .then((v) => { if (!cancelled) setVersion(v); })
+      .catch(() => { if (!cancelled) setVersion("unknown"); });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <SettingsSection eyebrow="App" title="About AIOS Desktop" detail="The local AI command center for your business.">

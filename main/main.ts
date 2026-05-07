@@ -340,6 +340,9 @@ app.whenReady().then(() => {
     autoUpdater.checkForUpdatesAndNotify().catch((err) => log("updater", "check-failed", { error: err?.message }));
   }
 
+  // IPC: returns the currently-running app's version (from package.json).
+  ipcMain.handle("aios:get-version", () => app.getVersion());
+
   // IPC: manual "Check for updates" trigger from Settings.
   ipcMain.handle("aios:check-for-updates", async () => {
     if (!app.isPackaged) {
