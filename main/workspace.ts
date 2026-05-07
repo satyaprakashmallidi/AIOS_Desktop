@@ -29,11 +29,15 @@ export function getWorkspaceRoot(): string {
 
 export function getSourceStarterKit(): string {
   const appPath = app.getAppPath();
+  // Packaged builds: electron-builder ships aios-starter-kit at
+  // <install>/resources/aios-starter-kit/. appPath inside an asar is
+  // <install>/resources/app.asar, so "..", "aios-starter-kit" resolves
+  // to <install>/resources/aios-starter-kit. The "..", "..",
+  // "aios-starter-kit" fallback covers the dev case (running from src).
   const candidates = [
     path.resolve(appPath, "..", "aios-starter-kit"),
     path.resolve(appPath, "..", "..", "aios-starter-kit"),
-    path.resolve(process.cwd(), "..", "aios-starter-kit"),
-    path.resolve(process.cwd(), "aios-starter-kit")
+    path.resolve(appPath, "aios-starter-kit")
   ];
   const found = candidates.find((candidate) => fs.existsSync(path.join(candidate, "CLAUDE.md")));
   if (!found) {
