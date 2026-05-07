@@ -49,6 +49,65 @@ import type { OnboardingState, Screen } from "./ui";
 import { relay, RELAY_AVAILABLE } from "./lib/aios-relay";
 import "./styles.css";
 
+// Per-service identify prompts used by the App-level background connector
+// identifier. Kept at module scope so the effect can call it without
+// re-creating the map every render.
+function identifyPromptFor(service: string): string | null {
+  switch (service) {
+    case "gmail":
+      return `Identify the OAuth-authorized Gmail account by following these EXACT steps:
+
+1. Use a Composio Gmail tool with query "in:sent" and max_results 1 to fetch one sent message.
+2. Read the "From:" header. The address there is the account owner.
+3. If "in:sent" returns no messages, use query "newer_than:30d" with max_results 1 and read the "Delivered-To:" header.
+4. Reply with ONLY the bare email address — no quotes, no preamble, no markdown.
+
+If you cannot determine the address with certainty, reply with the single word: UNKNOWN`;
+    case "google-calendar":
+      return `Identify the OAuth-authorized Google Calendar account.
+
+1. Use a Composio Google Calendar tool to list the user's calendars.
+2. Find the calendar where "primary" is true. Its "id" is the user's email.
+3. Reply with ONLY that bare email — no quotes, no preamble.
+
+If you cannot determine the address with certainty, reply: UNKNOWN`;
+    case "slack":
+      return `Identify the OAuth-authorized Slack account.
+
+1. Use a Composio Slack tool to fetch the authenticated user's profile.
+2. Find the email or @handle.
+3. Reply with ONLY the email (or @handle if no email exposed) — no quotes, no preamble.
+
+If you cannot determine an identifier with certainty, reply: UNKNOWN`;
+    case "clickup":
+      return `Identify the OAuth-authorized ClickUp account.
+
+1. Use a Composio ClickUp tool to fetch the authenticated user.
+2. Find the email.
+3. Reply with ONLY the bare email — no quotes, no preamble.
+
+If you cannot determine the email, reply: UNKNOWN`;
+    case "notion":
+      return `Identify the OAuth-authorized Notion account.
+
+1. Use a Composio Notion tool to fetch the authenticated user/bot.
+2. Find the email of the user (the bot's "owner" object usually has it), or workspace name.
+3. Reply with ONLY the bare email or workspace name — no quotes, no preamble.
+
+If you cannot determine an identifier, reply: UNKNOWN`;
+    case "github":
+      return `Identify the OAuth-authorized GitHub account.
+
+1. Use a Composio GitHub tool to fetch the authenticated user.
+2. Find the email if available, otherwise the @login handle.
+3. Reply with ONLY the bare email or @login — no quotes, no preamble.
+
+If you cannot determine an identifier, reply: UNKNOWN`;
+    default:
+      return null;
+  }
+}
+
 function App() {
   const [screen, setScreen] = useState<Screen>("command");
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -199,6 +258,64 @@ function App() {
       .register(id, workspace?.platform ?? "unknown", "0.1.0")
       .catch(() => undefined); // silent — relay availability is best-effort
   }, [workspace?.deviceUserId, workspace?.platform]);
+
+  // Background connector-identify. Runs ONCE per app session (not per page
+  // mount), so switching between Modules/Connectors/Chat doesn't restart it.
+  // For each connected service without a stored email label, fires a
+  // background Claude task (e.g. GMAIL_FETCH_EMAILS sent header → email)
+  // and persists the result. Idempotent — second app launch sees stored
+  // labels and skips entirely.
+  useEffect(() => {
+    if (!RELAY_AVAILABLE) return;
+    const deviceUserId = workspace?.deviceUserId;
+    const claudePath = claude?.path;
+    if (!deviceUserId || !claudePath || !claude?.runtimeOk) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // 1. Hydrate any already-stored labels so we don't re-run identify.
+        const stored = new Set<string>();
+        const services = ["gmail", "google-calendar", "slack", "clickup", "notion", "github"];
+        for (const service of services) {
+          if (cancelled) return;
+          try {
+            const r = await invoke<{ key: string; value: string | null }>("get_setting", { key: `connector_label_${service}` });
+            if (r?.value) stored.add(service);
+          } catch { /* non-fatal */ }
+        }
+        // 2. Find connected services that have NO stored label yet.
+        const live = await relay.listConnections(deviceUserId).catch(() => null);
+        if (!live || cancelled) return;
+        const needsIdentify = live.connections.filter((c) => c.status === "connected" && !stored.has(c.service));
+        if (needsIdentify.length === 0) return;
+        // 3. Fire identify in parallel for all of them. Each is independent.
+        await Promise.allSettled(
+          needsIdentify.map(async (c) => {
+            const prompt = identifyPromptFor(c.service);
+            if (!prompt) return;
+            const res = await invoke<{ response: string }>("run_task", {
+              prompt,
+              claudePath,
+              streamId: `bg-identify-${c.service}-${Date.now()}`
+            });
+            const raw = (res?.response || "").trim();
+            const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+            const handleMatch = raw.match(/@[A-Za-z0-9_.-]{2,}/);
+            const label =
+              emailMatch?.[0] ||
+              (handleMatch?.[0] && !raw.toUpperCase().includes("UNKNOWN") ? handleMatch[0] : null);
+            if (label) {
+              await invoke("set_setting", { key: `connector_label_${c.service}`, value: label }).catch(() => undefined);
+            }
+          })
+        );
+      } catch { /* non-fatal — Connectors page can still trigger manual identify */ }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.deviceUserId, claude?.path, claude?.runtimeOk]);
 
   useEffect(() => {
     window.aios?.window?.onMaximizedChanged?.((next) => setMaximized(next));
