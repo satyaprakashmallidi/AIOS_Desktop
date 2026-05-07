@@ -79,6 +79,15 @@ contextBridge.exposeInMainWorld("aios", {
     ipcRenderer.invoke("aios:open-external", url),
   openOauthWindow: (url: string): Promise<{ ok: boolean; completed?: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-oauth-window", url),
+  checkForUpdates: (): Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean }> =>
+    ipcRenderer.invoke("aios:check-for-updates"),
+  installUpdate: (): Promise<{ ok: boolean; reason?: string; error?: string }> =>
+    ipcRenderer.invoke("aios:install-update"),
+  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { state: string; version?: string; percent?: number; message?: string }) => callback(payload);
+    ipcRenderer.on("aios:update-state", listener);
+    return () => ipcRenderer.removeListener("aios:update-state", listener);
+  },
   window: {
     minimize: () => ipcRenderer.send("window:minimize"),
     maximize: () => ipcRenderer.send("window:maximize"),

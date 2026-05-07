@@ -316,11 +316,58 @@ app.whenReady().then(() => {
   if (app.isPackaged) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.on("error", (err) => log("updater", "error", { error: err.message }));
-    autoUpdater.on("update-available", (info) => log("updater", "update-available", { version: info.version }));
-    autoUpdater.on("update-downloaded", (info) => log("updater", "update-downloaded", { version: info.version }));
+
+    const broadcast = (state: string, payload?: Record<string, unknown>) => {
+      mainWindow?.webContents.send("aios:update-state", { state, ...payload });
+    };
+
+    autoUpdater.on("checking-for-update", () => broadcast("checking"));
+    autoUpdater.on("update-available", (info) => {
+      log("updater", "update-available", { version: info.version });
+      broadcast("available", { version: info.version });
+    });
+    autoUpdater.on("update-not-available", (info) => broadcast("up-to-date", { version: info.version }));
+    autoUpdater.on("download-progress", (p) => broadcast("downloading", { percent: Math.round(p.percent) }));
+    autoUpdater.on("update-downloaded", (info) => {
+      log("updater", "update-downloaded", { version: info.version });
+      broadcast("ready", { version: info.version });
+    });
+    autoUpdater.on("error", (err) => {
+      log("updater", "error", { error: err.message });
+      broadcast("error", { message: err.message });
+    });
+
     autoUpdater.checkForUpdatesAndNotify().catch((err) => log("updater", "check-failed", { error: err?.message }));
   }
+
+  // IPC: manual "Check for updates" trigger from Settings.
+  ipcMain.handle("aios:check-for-updates", async () => {
+    if (!app.isPackaged) {
+      return { ok: false, reason: "not-packaged", currentVersion: app.getVersion() };
+    }
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return {
+        ok: true,
+        currentVersion: app.getVersion(),
+        latestVersion: result?.updateInfo?.version ?? app.getVersion(),
+        hasUpdate: !!result?.updateInfo && result.updateInfo.version !== app.getVersion()
+      };
+    } catch (err) {
+      return { ok: false, reason: "check-failed", error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // IPC: install the downloaded update + restart.
+  ipcMain.handle("aios:install-update", async () => {
+    if (!app.isPackaged) return { ok: false, reason: "not-packaged" };
+    try {
+      autoUpdater.quitAndInstall();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -89,6 +89,9 @@ export interface AiosApi {
   onHostEvent: (callback: (event: HostEvent) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
   openOauthWindow: (url: string) => Promise<{ ok: boolean; completed?: boolean; error?: string }>;
+  checkForUpdates: () => Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean }>;
+  installUpdate: () => Promise<{ ok: boolean; reason?: string; error?: string }>;
+  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string }) => void) => () => void;
   window: {
     minimize: () => void;
     maximize: () => void;

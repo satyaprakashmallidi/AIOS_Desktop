@@ -152,6 +152,9 @@ function GeneralPanel({
 }) {
   const [savedHint, setSavedHint] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [updateState, setUpdateState] = useState<string>("idle");
+  const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string }>({});
+  const [checking, setChecking] = useState(false);
 
   async function resetOnboarding() {
     setResetting(true);
@@ -164,6 +167,56 @@ function GeneralPanel({
       setSavedHint(error instanceof Error ? error.message : "Reset failed");
     } finally {
       setResetting(false);
+    }
+  }
+
+  // Subscribe to update state pushes from main (download progress, etc).
+  useEffect(() => {
+    const unsubscribe = window.aios?.onUpdateState?.((event) => {
+      setUpdateState(event.state);
+      setUpdateInfo({ version: event.version, percent: event.percent, message: event.message });
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  async function checkForUpdates() {
+    setChecking(true);
+    setUpdateState("checking");
+    setUpdateInfo({});
+    try {
+      const result = await window.aios.checkForUpdates();
+      if (!result.ok) {
+        if (result.reason === "not-packaged") {
+          setUpdateState("dev-mode");
+        } else {
+          setUpdateState("error");
+          setUpdateInfo({ message: result.error || "Check failed" });
+        }
+      } else if (!result.hasUpdate) {
+        setUpdateState("up-to-date");
+        setUpdateInfo({ version: result.currentVersion });
+      }
+      // else: "available"/"downloading"/"ready" arrives via onUpdateState
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function installNow() {
+    await window.aios.installUpdate();
+  }
+
+  function updateLabel(): string {
+    switch (updateState) {
+      case "idle": return "Check for updates";
+      case "checking": return "Checking…";
+      case "available": return `Downloading ${updateInfo.version ?? ""}…`;
+      case "downloading": return `Downloading ${updateInfo.percent ?? 0}%`;
+      case "ready": return `Restart to install ${updateInfo.version ?? ""}`;
+      case "up-to-date": return `You're on the latest (${updateInfo.version ?? ""})`;
+      case "dev-mode": return "Updates only run in installed builds";
+      case "error": return updateInfo.message || "Update check failed";
+      default: return "Check for updates";
     }
   }
 
@@ -188,6 +241,27 @@ function GeneralPanel({
               <RotateCcw size={14} />
               {resetting ? "Resetting..." : "Reset"}
             </button>
+          }
+        />
+        <SettingsRow
+          title="App version"
+          description={updateLabel()}
+          control={
+            updateState === "ready" ? (
+              <button type="button" className="button button-primary compact" onClick={installNow}>
+                Restart & install
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button button-secondary compact"
+                onClick={checkForUpdates}
+                disabled={checking || updateState === "checking" || updateState === "downloading" || updateState === "available"}
+              >
+                <RotateCcw size={14} />
+                {checking || updateState === "checking" ? "Checking…" : "Check for updates"}
+              </button>
+            )
           }
         />
       </SettingsSection>
