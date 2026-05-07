@@ -1,9 +1,11 @@
 # PyInstaller spec for the AIOS Python sidecar.
 #
-# Bundles host.py + workspace.py into a single binary. The output goes to
-# build/dist/aios-host(.exe) and is then included as extraResources by
-# electron-builder, which places it at <app>/Contents/Resources/aios-host/
-# on macOS and <app>/resources/aios-host/ on Windows.
+# Bundles host.py + workspace.py into a single binary. The COLLECT step
+# below writes to ./dist/aios-host/ (PyInstaller's default dist path with
+# COLLECT name='aios-host'). electron-builder picks that up via the
+# extraResources entry and places it at:
+#   macOS:   <app>/Contents/Resources/aios-host/
+#   Windows: <app>/resources/aios-host/
 #
 # Build: pyinstaller --noconfirm --clean build/aios-host.spec
 #   (run from the repo root)

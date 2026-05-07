@@ -71,7 +71,7 @@
     ],
     "extraResources": [
       {
-        "from": "build/dist",
+        "from": "dist/aios-host",
         "to": "aios-host",
         "filter": [
           "**/*"
@@ -101,7 +101,7 @@
           ]
         }
       ],
-      "icon": "build/icon.icns",
+      "icon": "build/icon.png",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -109,7 +109,7 @@
     },
     "dmg": {
       "title": "${productName} ${version}",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.png"
     },
     "win": {
       "target": [
@@ -120,7 +120,7 @@
           ]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
