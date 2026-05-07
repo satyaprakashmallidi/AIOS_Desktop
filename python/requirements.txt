@@ -1,1 +1,6 @@
-# Python host currently uses only the standard library.
+# Python sidecar dependencies. Installed in CI before PyInstaller bundles
+# the host.
+
+# Speech-to-text used by transcribe_audio (voice input in the chat composer).
+# Calls Google's free speech endpoint — no API key required.
+SpeechRecognition>=3.10

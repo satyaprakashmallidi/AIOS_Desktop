@@ -20,15 +20,26 @@ python_dir = os.path.join(repo_root, 'python')
 
 block_cipher = None
 
+from PyInstaller.utils.hooks import collect_all
+
+# SpeechRecognition ships a bundled FLAC encoder binary plus a few support
+# files that PyInstaller's static analyzer misses if we only import the
+# module name. collect_all grabs the binaries + data files + submodules.
+sr_binaries = sr_datas = sr_hiddenimports = []
+try:
+    sr_datas, sr_binaries, sr_hiddenimports = collect_all('speech_recognition')
+except Exception:
+    # Library not installed yet (e.g., running spec without `pip install -r
+    # python/requirements.txt`). The runtime import in transcribe_audio
+    # surfaces a clean "missing dependency" error in that case.
+    pass
+
 a = Analysis(
     [os.path.join(python_dir, 'host.py')],
     pathex=[python_dir],
-    binaries=[],
-    datas=[],
+    binaries=sr_binaries,
+    datas=sr_datas,
     hiddenimports=[
-        # workspace.py and its dependencies — PyInstaller's static analysis
-        # picks up direct imports, but a few stdlib modules can be missed
-        # on minimal builds.
         'workspace',
         'sqlite3',
         'json',
@@ -37,6 +48,9 @@ a = Analysis(
         'uuid',
         'shutil',
         'platform',
+        # Voice transcription (lazy-imported in workspace.transcribe_audio).
+        'speech_recognition',
+        *sr_hiddenimports,
     ],
     hookspath=[],
     hooksconfig={},

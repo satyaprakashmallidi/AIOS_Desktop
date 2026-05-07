@@ -35,8 +35,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python build tools
-        run: pip install pyinstaller
+      - name: Install Python build tools + sidecar deps
+        run: |
+          pip install pyinstaller
+          pip install -r python/requirements.txt
 
       - name: Install npm deps
         run: npm ci

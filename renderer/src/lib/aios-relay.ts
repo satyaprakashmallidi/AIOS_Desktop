@@ -4,7 +4,13 @@
 // The deviceUserId is generated and persisted by the Python sidecar on
 // first launch — read it from `workspace.deviceUserId` and pass it in.
 
-const RELAY_URL = (import.meta.env.VITE_AIOS_RELAY_URL as string | undefined)?.replace(/\/$/, "");
+// Hardcoded production relay URL. The Supabase Edge Function URL itself is
+// not a secret — the relay uses Bearer device_user_id auth, and the actual
+// COMPOSIO_API_KEY lives in Supabase secrets server-side. VITE_AIOS_RELAY_URL
+// can still override at build-time for local testing against a different
+// deployment.
+const DEFAULT_RELAY_URL = "https://cnvimnicyeljkihbjztv.supabase.co/functions/v1/aios-relay";
+const RELAY_URL = ((import.meta.env.VITE_AIOS_RELAY_URL as string | undefined) || DEFAULT_RELAY_URL).replace(/\/$/, "");
 
 export interface RelayConnection {
   id: string;
