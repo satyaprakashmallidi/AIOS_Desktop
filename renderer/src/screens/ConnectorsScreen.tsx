@@ -8,6 +8,8 @@ import {
   ExternalLink,
   FileText,
   Github,
+  Inbox,
+  Linkedin,
   Loader2,
   Mail,
   MessageSquare,
@@ -93,6 +95,19 @@ const CONNECTOR_CATALOG: Connector[] = [
     label: "Google Sheets",
     description: "Read structured data from sheets you own.",
     Icon: Sheet
+  },
+  // Communication / social connectors (v0.1.11+)
+  {
+    service: "outlook",
+    label: "Outlook",
+    description: "Read mail, draft replies, search threads, manage your inbox.",
+    Icon: Inbox
+  },
+  {
+    service: "linkedin",
+    label: "LinkedIn",
+    description: "Read your profile, post updates, browse connections.",
+    Icon: Linkedin
   }
 ];
 
@@ -158,7 +173,9 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         stripe: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "STRIPE_RETRIEVE_BALANCE" and arguments {}. Read available[0].currency (uppercased). Reply with "Stripe (CURRENCY)" — e.g. "Stripe (USD)". ONLY that, nothing else. If unsure, reply: UNKNOWN.`,
         youtube: `Reply with the single word: UNKNOWN`,
         "google-analytics": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLE_ANALYTICS_LIST_ACCOUNTS" and arguments {}. Find the first account's "displayName". Reply with ONLY that name, nothing else. If no accounts, reply: UNKNOWN.`,
-        "google-sheets": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`
+        "google-sheets": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        outlook: `Reply with the single word: UNKNOWN`,
+        linkedin: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {

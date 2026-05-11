@@ -1277,6 +1277,9 @@ KNOWN_CONNECTORS = [
     "youtube",
     "google-analytics",
     "google-sheets",
+    # Communication / social connectors (v0.1.11+)
+    "outlook",
+    "linkedin",
 ]
 
 

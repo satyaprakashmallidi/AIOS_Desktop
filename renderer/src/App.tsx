@@ -124,6 +124,13 @@ function identifyPromptFor(service: string): string | null {
       // No GOOGLE_SHEETS_GET_USER_INFO in Composio's catalog. List user's
       // sheets and use the first sheet's owner email as the label.
       return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`;
+    case "outlook":
+      // Composio's Outlook catalog has 301 tools but no public docs list a
+      // single "get me" slug. Safe default — connection still works, just no
+      // auto-label on the card.
+      return `Reply with the single word: UNKNOWN`;
+    case "linkedin":
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`;
     default:
       return null;
   }
