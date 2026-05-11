@@ -207,18 +207,27 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   }
 
   // Hydrate local labels from the settings DB on first mount so we don't
-  // re-spawn a Claude task on every refresh.
+  // re-spawn a Claude task on every refresh. Parallel batch — 12 sequential
+  // IPC roundtrips would cost ~1-2s on cold open; Promise.all collapses that
+  // into a single round-trip wall time (~150ms).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        const services = CONNECTOR_CATALOG.filter((c) => !c.comingSoon).map((c) => c.service);
+        const results = await Promise.all(
+          services.map((service) =>
+            invoke<{ key: string; value: string | null }>("get_setting", { key: `connector_label_${service}` })
+              .then((r) => [service, r?.value] as const)
+              .catch(() => [service, null] as const)
+          )
+        );
+        if (cancelled) return;
         const stored: Record<string, string> = {};
-        for (const c of CONNECTOR_CATALOG) {
-          if (c.comingSoon) continue;
-          const r = await invoke<{ key: string; value: string | null }>("get_setting", { key: `connector_label_${c.service}` });
-          if (r?.value) stored[c.service] = r.value;
+        for (const [service, value] of results) {
+          if (value) stored[service] = value;
         }
-        if (!cancelled && Object.keys(stored).length > 0) {
+        if (Object.keys(stored).length > 0) {
           setLocalLabels((cur) => ({ ...stored, ...cur }));
         }
       } catch { /* non-fatal */ }
@@ -261,11 +270,12 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         window.setTimeout(() => { void syncMcpToClaude(); }, 0);
       }
       // For any newly-connected service without a local label, ask Claude to
-      // identify the account. We wait a beat so the MCP is loaded into Claude
-      // before the identify task spawns.
+      // identify the account. Short delay (250ms) so syncMcpToClaude's file
+      // write has settled before identify spawns — was 1500ms, but the Mac
+      // strict-mcp-config path doesn't actually need that long.
       for (const c of res.connections) {
         if (c.status === "connected" && !localLabels[c.service]) {
-          window.setTimeout(() => { void identifyAccount(c.service); }, 1500);
+          window.setTimeout(() => { void identifyAccount(c.service); }, 250);
         }
       }
     } catch (err) {
@@ -381,42 +391,55 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   //   1. Polling for completion → stop the poll AND tell Composio to drop
   //      the pending account so retry can start fresh.
   //   2. Stalled state → same cleanup, just no poll to stop.
-  // Footgun guard: re-check live status first. If the connection is actually
-  // 'connected' (e.g., poll timed out but OAuth has since completed), we
-  // refresh and bail out instead of nuking a working connection.
+  // Optimistic UI: flip the card back to not_connected immediately so the
+  // user gets instant feedback. The 3 chained network calls (listConnections
+  // → disconnect → refresh) run in the background. If a probe later finds
+  // that the OAuth actually succeeded mid-cancel, refresh restores it.
   async function cancel(service: string, connectionId?: string) {
-    setBusyService(service);
     setError(null);
+    // Stop the active poll first so it can't write back into liveConnections.
     const guard = activePollsRef.current.get(service);
     if (guard) {
       guard.aborted = true;
       activePollsRef.current.delete(service);
     }
-    try {
-      const fresh = await relay.listConnections(deviceUserId);
-      setLiveConnections(fresh.connections);
-      const found = fresh.connections.find((c) => c.service === service);
-      if (found?.status === "connected") {
-        // It actually went through — don't disconnect, just clear the stalled flag.
-        clearStalled(service);
-        return;
+    // Optimistic: instant visual feedback — drop the pending row + stalled flag.
+    const previousConnections = liveConnections;
+    setLiveConnections((current) => current.filter((c) => c.service !== service));
+    clearStalled(service);
+    // Network cleanup runs in the background.
+    void (async () => {
+      try {
+        if (connectionId) {
+          await relay.disconnect(deviceUserId, connectionId).catch(() => undefined);
+        }
+        // Re-sync with relay to catch the edge case where OAuth completed
+        // simultaneously — refresh will restore the row as "connected" if so.
+        const fresh = await relay.listConnections(deviceUserId);
+        setLiveConnections(fresh.connections);
+      } catch (err) {
+        // Roll back optimistic update on hard failure so the user can retry.
+        setLiveConnections(previousConnections);
+        const msg = err instanceof RelayError ? err.message : err instanceof Error ? err.message : String(err);
+        setError(msg);
       }
-      clearStalled(service);
-      if (connectionId) {
-        await relay.disconnect(deviceUserId, connectionId).catch(() => undefined);
-      }
-      await refresh();
-    } catch (err) {
-      const msg = err instanceof RelayError ? err.message : err instanceof Error ? err.message : String(err);
-      setError(msg);
-    } finally {
-      setBusyService(null);
-    }
+    })();
   }
 
   async function retry(service: string, connectionId?: string) {
-    // Same cleanup as cancel, but re-initiates immediately afterwards.
-    await cancel(service, connectionId);
+    // Same cleanup as cancel, but re-initiates immediately afterwards. Must
+    // await the disconnect inline (instead of fire-and-forget) so the upsert
+    // in handleInitiate doesn't race a pending DELETE on the same row.
+    const guard = activePollsRef.current.get(service);
+    if (guard) {
+      guard.aborted = true;
+      activePollsRef.current.delete(service);
+    }
+    setLiveConnections((current) => current.filter((c) => c.service !== service));
+    clearStalled(service);
+    if (connectionId) {
+      await relay.disconnect(deviceUserId, connectionId).catch(() => undefined);
+    }
     await connect(service);
   }
 
@@ -482,17 +505,14 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
           </div>
         ) : null}
 
-        {loading ? (
-          <div className="connectors-loading">
-            <div className="connectors-loading-card">
-              <span className="connectors-loading-orb"><Loader2 size={20} className="spin" /></span>
-              <strong>Loading <em>connectors</em></strong>
-              <span>Pulling your connected services from the relay.</span>
-            </div>
+        {loading && liveConnections.length === 0 ? (
+          <div className="connectors-status-pill">
+            <Loader2 size={14} className="spin" />
+            <span>Syncing with relay…</span>
           </div>
-        ) : (
-          <div className="connectors-grid">
-            {connectors.map((connector) => (
+        ) : null}
+        <div className="connectors-grid">
+          {connectors.map((connector) => (
               <ConnectorCard
                 key={connector.service}
                 connector={connector}
@@ -505,7 +525,6 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
               />
             ))}
           </div>
-        )}
       </div>
     </section>
   );
