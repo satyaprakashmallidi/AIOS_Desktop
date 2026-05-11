@@ -307,13 +307,13 @@ export function TasksScreen({ plans = [] }: { plans?: WorkspaceEntry[] }) {
 
     return (
         <section className="tasks-screen" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent', overflow: 'hidden' }}>
-            <div className="tasks-hero" style={{ padding: '32px 40px', background: 'transparent', borderBottom: '1px solid #e5e5e0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div className="tasks-hero" style={{ padding: '24px 20px', background: 'transparent', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                 <div className="tasks-hero-text">
-                    <p className="layer-badge" style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: '#91847d', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className="layer-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#2a2826' }} />
+                    <p className="layer-badge" style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="layer-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--ink)' }} />
                         Layer · Tasks
                     </p>
-                    <h1 style={{ margin: '4px 0 0', fontSize: '24px', fontWeight: 700, color: '#2a2826' }}>Task <em>Kanban</em></h1>
+                    <h1 style={{ margin: '4px 0 0', fontSize: '24px', fontWeight: 700, color: 'var(--ink)' }}>Task <em>Kanban</em></h1>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -344,11 +344,11 @@ export function TasksScreen({ plans = [] }: { plans?: WorkspaceEntry[] }) {
                         
                         <div className="detail-modal-body" style={{ padding: '24px' }}>
                             <div style={{ marginBottom: '20px' }}>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#2a2826' }}>Select Plan</label>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--ink)' }}>Select Plan</label>
                                 <select
                                     value={selectedPlanPath}
                                     onChange={(e) => setSelectedPlanPath(e.target.value)}
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e5e5e0', fontSize: '14px', background: '#fff', outline: 'none' }}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', background: 'var(--surface)', color: 'var(--ink)', outline: 'none' }}
                                     disabled={saving}
                                 >
                                     <option value="">No Plan (General Task)</option>
@@ -359,34 +359,34 @@ export function TasksScreen({ plans = [] }: { plans?: WorkspaceEntry[] }) {
                             </div>
 
                             <div style={{ marginBottom: '20px' }}>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#2a2826' }}>Assignee</label>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--ink)' }}>Assignee</label>
                                 <input
                                     type="text"
                                     value={assignee}
                                     onChange={(e) => setAssignee(e.target.value)}
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e5e5e0', fontSize: '14px', outline: 'none' }}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', background: 'var(--surface)', color: 'var(--ink)', outline: 'none' }}
                                     placeholder="e.g. Main, Manager, fury…"
                                     disabled={saving}
                                 />
                             </div>
 
                             <div style={{ marginBottom: '20px' }}>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#2a2826' }}>Task Instructions</label>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--ink)' }}>Task Instructions</label>
                                 <textarea
                                     value={newMessage}
                                     onChange={(e) => setNewMessage(e.target.value)}
-                                    style={{ width: '100%', height: '120px', padding: '12px', borderRadius: '8px', border: '1px solid #e5e5e0', fontSize: '14px', resize: 'none', outline: 'none' }}
+                                    style={{ width: '100%', height: '120px', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', background: 'var(--surface)', color: 'var(--ink)', resize: 'none', outline: 'none' }}
                                     placeholder="Describe the task…"
                                     disabled={saving}
                                 />
                             </div>
 
                             <div>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#2a2826' }}>Priority</label>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--ink)' }}>Priority</label>
                                 <select
                                     value={newPriority}
                                     onChange={(e) => setNewPriority(Number(e.target.value) || 3)}
-                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e5e5e0', fontSize: '14px', background: '#fff', outline: 'none' }}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', background: 'var(--surface)', color: 'var(--ink)', outline: 'none' }}
                                     disabled={saving}
                                 >
                                     <option value={5}>5 (highest)</option>
@@ -408,18 +408,18 @@ export function TasksScreen({ plans = [] }: { plans?: WorkspaceEntry[] }) {
                 </div>
             )}
 
-            <div className="kanban-scroller" style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: '24px', background: 'transparent', minWidth: 0 }}>
-                <div className="kanban-container" style={{ display: 'flex', gap: '20px', height: '100%', width: '100%', minWidth: 'min-content', paddingBottom: '16px' }}>
+            <div className="kanban-scroller" style={{ flex: 1, width: '100%', overflowX: 'auto', overflowY: 'hidden', padding: '0 20px 20px', background: 'transparent', minWidth: 0 }}>
+                <div className="kanban-container" style={{ display: 'flex', gap: '16px', height: '100%', width: '100%' }}>
                     {COLUMNS.map(column => {
                         const columnTasks = getColumnTasks(column.id);
 
                         return (
-                            <div key={column.id} className="kanban-column" style={{ flex: '1 1 240px', minWidth: '240px', maxWidth: '400px', minHeight: '100%', display: 'flex', flexDirection: 'column', background: '#f4f4f0', borderRadius: '12px', border: '1px solid #e5e5e0', overflow: 'hidden' }}>
-                                <div className="column-header" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', borderBottom: '1px solid #e5e5e0' }}>
+                            <div key={column.id} className="kanban-column" style={{ flex: '1 1 0', minWidth: '280px', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--surface-soft)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                                <div className="column-header" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', borderBottom: '1px solid var(--border)' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <div className={`column-dot ${column.dot}`} style={{ width: '8px', height: '8px', borderRadius: '50%' }} />
-                                        <h3 style={{ fontSize: '11px', fontWeight: 700, color: '#2a2826', letterSpacing: '0.05em', margin: 0 }}>{column.title}</h3>
-                                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#91847d', background: '#f4f4f0', padding: '2px 6px', borderRadius: '10px' }}>{columnTasks.length}</span>
+                                        <h3 style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink)', letterSpacing: '0.05em', margin: 0 }}>{column.title}</h3>
+                                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gray-500)', background: 'var(--surface-soft)', padding: '2px 6px', borderRadius: '10px' }}>{columnTasks.length}</span>
                                     </div>
                                 </div>
 
@@ -429,23 +429,23 @@ export function TasksScreen({ plans = [] }: { plans?: WorkspaceEntry[] }) {
                                             key={task.id}
                                             onClick={() => openDetails(task)}
                                             className="kanban-card"
-                                            style={{ background: '#fff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e5e0', cursor: 'pointer', position: 'relative', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
+                                            style={{ background: 'var(--surface)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border)', cursor: 'pointer', position: 'relative', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}
                                         >
                                             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: task.agentId?.toLowerCase().includes('fury') ? '#fca5a5' : '#93c5fd' }} />
                                             
-                                            <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 600, color: '#2a2826', lineHeight: 1.4 }}>{task.name}</h4>
-                                            <p style={{ margin: '0 0 16px', fontSize: '11px', color: '#91847d', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{summarizeTaskNote(task)}</p>
+                                            <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 600, color: 'var(--ink)', lineHeight: 1.4 }}>{task.name}</h4>
+                                            <p style={{ margin: '0 0 16px', fontSize: '11px', color: 'var(--gray-500)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{summarizeTaskNote(task)}</p>
 
                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                    <div style={{ width: '18px', height: '18px', borderRadius: '4px', background: '#e5e5e0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700 }}>{(task.agentId || 'J').charAt(0).toUpperCase()}</div>
-                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#2a2826' }}>{task.metadata?.assignedAgentId || task.agentId || 'Manager'}</span>
+                                                    <div style={{ width: '18px', height: '18px', borderRadius: '4px', background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', fontWeight: 700, color: 'var(--ink)' }}>{(task.agentId || 'J').charAt(0).toUpperCase()}</div>
+                                                    <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--ink)' }}>{task.metadata?.assignedAgentId || task.agentId || 'Manager'}</span>
                                                 </div>
-                                                <span style={{ fontSize: '9px', color: '#91847d' }}>{task.metadata?.createdAt ? new Date(task.metadata.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'now'}</span>
+                                                <span style={{ fontSize: '9px', color: 'var(--gray-500)' }}>{task.metadata?.createdAt ? new Date(task.metadata.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'now'}</span>
                                             </div>
 
                                             <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                                <span className={`status-badge ${getTaskStatus(task)}`} style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', background: '#f4f4f0', color: '#2a2826', border: '1px solid #e5e5e0' }}>
+                                                <span className={`status-badge ${getTaskStatus(task)}`} style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', background: 'var(--surface-soft)', color: 'var(--ink)', border: '1px solid var(--border)' }}>
                                                     {formatStatusLabel(getTaskStatus(task))}
                                                 </span>
                                             </div>

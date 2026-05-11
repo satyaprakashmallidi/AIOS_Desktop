@@ -162,16 +162,18 @@ function App() {
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [theme, setTheme] = useState<string>("auto");
 
   // Fast cold-start path. Loads only the 3 IPC calls needed for first paint:
   // workspace info (paths, deviceUserId, cached claude path), onboarding state
   // (which screen to show), and the session list (sidebar). Everything else is
   // deferred to refreshWorkspaceBackground after splash dismisses.
   async function refreshWorkspaceCritical(): Promise<{ workspace: WorkspaceInfo; sessions: ChatSession[] }> {
-    const [workspaceInfo, onboardingState, sessionList] = await Promise.all([
+    const [workspaceInfo, onboardingState, sessionList, themeSetting] = await Promise.all([
       invoke<WorkspaceInfo>("get_workspace_info"),
       invoke<OnboardingState>("get_onboarding_state"),
-      invoke<ChatSession[]>("get_sessions")
+      invoke<ChatSession[]>("get_sessions"),
+      invoke<{ value: string | null }>("get_setting", { key: "theme" }).catch(() => ({ value: "auto" }))
     ]);
 
     let nextSessions = sessionList;
@@ -183,6 +185,7 @@ function App() {
     startTransition(() => {
       setWorkspace(workspaceInfo);
       setOnboarding(onboardingState);
+      setTheme(themeSetting?.value || "auto");
       // Merge — preserves any in-flight chat (see mergeSessions doc above).
       setSessions((current) => mergeSessions(current, nextSessions));
       setActiveSessionId((current) => current ?? nextSessions[0]?.id ?? null);
@@ -328,6 +331,24 @@ function App() {
         setLoading(false);
       });
   }, []);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // Sync theme changes from settings (every 2s for reactive feel across instances)
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await invoke<{ value: string | null }>("get_setting", { key: "theme" });
+        if (res?.value && res.value !== theme) {
+          setTheme(res.value);
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [theme]);
 
   // Phase 2: background work that fires once the splash has dismissed.
   // Verifies Claude in the background, fetches the rest of the workspace
