@@ -5412,6 +5412,21 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   margin: 0 auto !important;
 }
 
+/* Strictly hide all text and groups in collapsed V2 sidebar */
+.sidebar-collapsed aside.aios-sb-v2 .brand-copy,
+.sidebar-collapsed aside.aios-sb-v2 .sidebar-quick-action span,
+.sidebar-collapsed aside.aios-sb-v2 .nav-item span,
+.sidebar-collapsed aside.aios-sb-v2 .aios-recent-group,
+.sidebar-collapsed aside.aios-sb-v2 .aios-sidebar-settings span {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
 /* ─── Daily Brief Modal ─────────────────────────────────────────────────── */
 /* ─── Daily Brief Modal — calm paper card ────────────────────────────────── */
 .daily-brief-overlay {
