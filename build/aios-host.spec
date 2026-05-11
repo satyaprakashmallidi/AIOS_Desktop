@@ -17,6 +17,11 @@ import sys
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(SPEC), '..'))
 python_dir = os.path.join(repo_root, 'python')
+target_arch = os.environ.get('AIOS_PYINSTALLER_TARGET_ARCH')
+if sys.platform != 'darwin':
+    target_arch = None
+elif target_arch not in ('arm64', 'x86_64', 'universal2'):
+    target_arch = 'universal2'
 
 block_cipher = None
 
@@ -82,11 +87,9 @@ exe = EXE(
     upx=False,  # UPX can confuse antivirus / Gatekeeper; keep raw
     console=True,
     disable_windowed_traceback=False,
-    # On macOS, target a universal2 binary so the same sidecar runs natively
-    # on both Apple Silicon (arm64) and Intel (x64) Macs. GitHub's macos-latest
-    # runner is now arm64 — without this, the x64 .dmg would ship an arm64
-    # binary that crashes on Intel Macs.
-    target_arch='universal2' if sys.platform == 'darwin' else None,
+    # On macOS release builds, CI sets this to match the electron-builder arch
+    # so native sidecar bits line up with the app bundle.
+    target_arch=target_arch,
     codesign_identity=None,
     entitlements_file=None,
 )

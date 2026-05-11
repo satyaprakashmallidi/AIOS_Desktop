@@ -308,6 +308,11 @@ def get_workspace_info() -> dict[str, Any]:
         "settingsDb": str(db_path()),
         "modules": list_modules(),
         "deviceUserId": get_or_create_device_user_id(),
+        # Cached Claude info from prior session — lets the renderer skip a
+        # subprocess-spawning find_claude call on cold start. Background
+        # verification still runs after splash dismisses.
+        "claudePath": get_setting("claude_path"),
+        "claudeVersion": get_setting("claude_version"),
     }
 
 
@@ -343,6 +348,49 @@ def reset_onboarding() -> dict[str, Any]:
         )
         conn.commit()
     return get_onboarding_state()
+
+
+def reset_workspace() -> dict[str, Any]:
+    """Wipe ALL user data: context files, plans, outputs, shares, gtd, imports,
+    module-installs (it'll be re-copied from the starter kit on next launch),
+    and the SQLite tables that hold sessions / onboarding / modules / auto-tasks
+    / daily briefs.
+
+    Preserves: settings (claude_path, theme, anthropic_api_key, connector
+    labels) so the user doesn't have to reconnect Claude. Preserves
+    device_user_id so already-connected services stay bound at the relay.
+
+    Removes the CLAUDE.md marker so `ensureRuntimeWorkspace` re-copies the
+    full starter kit on the next app start (renderer triggers via
+    window.location.reload after this returns).
+    """
+    root = workspace_root()
+    user_dirs = ["context", "outputs", "plans", "shares", "gtd", "imports", "module-installs"]
+    for d in user_dirs:
+        target = root / d
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+
+    with closing(connect()) as conn:
+        for table in ("sessions", "onboarding", "modules", "auto_tasks", "auto_task_runs", "daily_briefs"):
+            try:
+                conn.execute(f"DELETE FROM {table}")
+            except sqlite3.OperationalError:
+                pass  # table may not exist yet on a brand-new workspace
+        conn.execute("INSERT OR IGNORE INTO onboarding (id, current_step, answers) VALUES (1, 0, '{}')")
+        conn.execute(
+            "DELETE FROM app_state WHERE key IN ('first_install_date', 'last_brief_seen_date')"
+        )
+        conn.commit()
+
+    marker = root / "CLAUDE.md"
+    if marker.exists():
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+
+    return {"reset": True, "root": str(root)}
 
 
 def complete_onboarding(answers: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1196,11 +1244,31 @@ def claude_settings_path() -> Path:
     return Path.home() / ".claude" / "settings.json"
 
 
+def _sanitize_mcp_entry_for_storage(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """Mirror of host._sanitize_mcp_entry — applied at WRITE time so the
+    persisted ~/.claude/settings.json entry stays clean and never has Composio's
+    extra SDK fields (auth, name, description, etc.) that Claude's strict
+    inline parser rejects."""
+    if not isinstance(cfg, dict):
+        return None
+    url = cfg.get("url")
+    if not isinstance(url, str) or not url:
+        return None
+    headers = cfg.get("headers") if isinstance(cfg.get("headers"), dict) else {}
+    server_type = cfg.get("type") if cfg.get("type") in ("http", "sse") else "http"
+    return {"type": server_type, "url": url, "headers": headers}
+
+
 def update_claude_mcp_config(name: str, config: dict[str, Any] | None) -> dict[str, Any]:
     """Merge a single MCP server entry into ~/.claude/settings.json.
 
     If config is None, the named server is removed. Other unrelated keys in
     settings.json are preserved untouched.
+
+    HTTP/SSE configs are passed through `_sanitize_mcp_entry_for_storage` so we
+    only persist `{type, url, headers}` — the strict Claude --mcp-config parser
+    rejects entries with Composio's extra SDK fields. stdio configs (have
+    `command`) bypass the sanitizer.
     """
     if not isinstance(name, str) or not name.strip():
         raise HostError("BAD_REQUEST", "MCP server name is required.") if "HostError" in globals() else ValueError("MCP server name is required")
@@ -1224,7 +1292,16 @@ def update_claude_mcp_config(name: str, config: dict[str, Any] | None) -> dict[s
     if config is None:
         mcp_servers.pop(name, None)
     else:
-        mcp_servers[name] = config
+        # Sanitize HTTP/SSE entries; pass stdio (which has `command`) through unchanged.
+        if isinstance(config, dict) and "command" not in config:
+            sanitized = _sanitize_mcp_entry_for_storage(config)
+            if sanitized is None:
+                raise ValueError(
+                    f"MCP entry for '{name}' is missing a usable URL — refusing to persist."
+                )
+            mcp_servers[name] = sanitized
+        else:
+            mcp_servers[name] = config
 
     settings["mcpServers"] = mcp_servers
     path.write_text(json.dumps(settings, indent=2), encoding="utf-8")

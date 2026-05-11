@@ -27,6 +27,9 @@ __MACOSX/
 .edge-profile2/
 .edge-profile3/
 .edge-profile4/
+.aios-dev-user-data/
+supabase/.temp/
+supabase/supabase/.temp/
 __pycache__/
 aios_app/
 

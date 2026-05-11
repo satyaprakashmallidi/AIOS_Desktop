@@ -4,6 +4,7 @@ export type AiosCommand =
   | "save_onboarding_answer"
   | "complete_onboarding"
   | "reset_onboarding"
+  | "reset_workspace"
   | "read_file"
   | "write_file"
   | "append_file"

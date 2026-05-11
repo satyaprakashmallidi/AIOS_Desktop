@@ -6,7 +6,7 @@ import { findClaude, validateClaude } from "./claude-finder";
 import { initLogger, log } from "./logger";
 import { PythonHost } from "./python-host";
 import { AutoTaskScheduler } from "./scheduler";
-import { ensureRuntimeWorkspace } from "./workspace";
+import { ensureRuntimeWorkspace, getSourceStarterKit } from "./workspace";
 
 let mainWindow: BrowserWindow | null = null;
 let host: PythonHost | null = null;
@@ -14,6 +14,14 @@ let scheduler: AutoTaskScheduler | null = null;
 
 app.setName("aios-desktop");
 app.setAppUserModelId("com.aios.desktop");
+if (!app.isPackaged) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("in-process-gpu");
+  app.commandLine.appendSwitch("disable-features", "VizDisplayCompositor");
+  app.setPath("userData", path.join(process.cwd(), ".aios-dev-user-data"));
+}
 
 const mainHandledCommands = new Set<AiosCommand>([
   "find_claude",
@@ -278,14 +286,21 @@ app.whenReady().then(() => {
   });
 
   const workspaceRoot = ensureRuntimeWorkspace();
+  const starterKitRoot = getSourceStarterKit();
   initLogger(workspaceRoot);
-  host = new PythonHost(workspaceRoot);
+  host = new PythonHost(workspaceRoot, starterKitRoot);
   host.onEvent((event) => {
     mainWindow?.webContents.send("aios:host-event", event);
   });
-  host.start();
+  let hostStarted = false;
+  try {
+    host.start();
+    hostStarted = true;
+  } catch (error) {
+    log("python", "host failed to start", { error: error instanceof Error ? error.message : String(error) });
+  }
   scheduler = new AutoTaskScheduler(host);
-  scheduler.start();
+  if (hostStarted) scheduler.start();
 
   ipcMain.handle("aios:invoke", async (_event, cmd: AiosCommand, args: Record<string, unknown> = {}) => {
     try {

@@ -46,11 +46,30 @@ export function getSourceStarterKit(): string {
   return found;
 }
 
+// App-shipped infrastructure directories that should always be present in the
+// runtime workspace. These are template/code, not user data — safe to re-copy
+// from the starter kit when missing. NEVER add user-data dirs here (context,
+// data, outputs, plans, shares, gtd, imports — those belong to the user).
+const INFRA_DIRS = ["module-installs", ".claude", "reference"];
+
 export function ensureRuntimeWorkspace(): string {
   const workspaceRoot = getWorkspaceRoot();
   const marker = path.join(workspaceRoot, "CLAUDE.md");
+  const starterKit = getSourceStarterKit();
   if (!fs.existsSync(marker)) {
-    copyDirClean(getSourceStarterKit(), workspaceRoot);
+    copyDirClean(starterKit, workspaceRoot);
+  } else {
+    // Idempotent infrastructure resync. Older workspaces (from earlier app
+    // versions, or partial first-launch copies) can be missing module-installs/
+    // — without this, the Modules page shows every row as "Source missing".
+    // Only copies dirs that are entirely absent; never overwrites existing files.
+    for (const dir of INFRA_DIRS) {
+      const source = path.join(starterKit, dir);
+      const target = path.join(workspaceRoot, dir);
+      if (fs.existsSync(source) && !fs.existsSync(target)) {
+        copyDirClean(source, target);
+      }
+    }
   }
   fs.mkdirSync(path.join(workspaceRoot, "data"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "logs"), { recursive: true });

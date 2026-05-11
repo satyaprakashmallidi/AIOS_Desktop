@@ -13,6 +13,7 @@ from workspace import (
     begin_auto_task_run,
     complete_onboarding,
     reset_onboarding,
+    reset_workspace,
     copy_module_assets,
     create_auto_task,
     create_thread,
@@ -267,6 +268,26 @@ def _resume_flags(session_id: str | None) -> list[str]:
     return []
 
 
+def _sanitize_mcp_entry(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """Strip an MCP server entry down to fields Claude's --mcp-config accepts.
+
+    Composio's @composio/core SDK returns session.mcp with extra keys (name,
+    description, auth, etc.) that Claude's strict inline-config parser rejects
+    with 'Does not adhere to MCP server configuration schema'. The persisted
+    settings.json works only because the file reader is lenient; the inline
+    parser is strict. Same sanitizer is applied at write-time in workspace.py
+    so the persisted entry stays clean too.
+    """
+    if not isinstance(cfg, dict):
+        return None
+    url = cfg.get("url")
+    if not isinstance(url, str) or not url:
+        return None
+    headers = cfg.get("headers") if isinstance(cfg.get("headers"), dict) else {}
+    server_type = cfg.get("type") if cfg.get("type") in ("http", "sse") else "http"
+    return {"type": server_type, "url": url, "headers": headers}
+
+
 def _mcp_isolation_flags() -> list[str]:
     """Pull AIOS's composio MCP config out of ~/.claude/settings.json and pass
     it inline via --mcp-config + --strict-mcp-config so Claude *only* sees the
@@ -279,9 +300,10 @@ def _mcp_isolation_flags() -> list[str]:
         with settings_path.open("r", encoding="utf-8") as fh:
             settings = json.load(fh)
         composio_cfg = (settings.get("mcpServers") or {}).get("composio")
-        if not composio_cfg:
+        sanitized = _sanitize_mcp_entry(composio_cfg) if composio_cfg else None
+        if not sanitized:
             return []
-        config_json = json.dumps({"mcpServers": {"composio": composio_cfg}})
+        config_json = json.dumps({"mcpServers": {"composio": sanitized}})
         return ["--strict-mcp-config", "--mcp-config", config_json]
     except Exception:
         return []
@@ -574,9 +596,19 @@ def restore_context_template(args: dict[str, Any]) -> dict[str, Any]:
     if name not in _CONTEXT_TEMPLATES:
         raise HostError("BAD_REQUEST", f"Unknown context template: {name}")
 
-    starter = Path(__file__).resolve().parent.parent / "aios-starter-kit" / "context" / f"{name}.md"
-    if not starter.exists():
-        raise HostError("NOT_FOUND", f"Starter template missing on disk: {starter}")
+    starter_roots: list[Path] = []
+    env_root = os.environ.get("AIOS_STARTER_KIT_ROOT")
+    if env_root:
+        starter_roots.append(Path(env_root))
+    starter_roots.append(Path(__file__).resolve().parent.parent / "aios-starter-kit")
+    starter_roots.append(Path.cwd() / "aios-starter-kit")
+    starter = next(
+        (root / "context" / f"{name}.md" for root in starter_roots if (root / "context" / f"{name}.md").exists()),
+        None,
+    )
+    if starter is None:
+        checked = ", ".join(str(root / "context" / f"{name}.md") for root in starter_roots)
+        raise HostError("NOT_FOUND", f"Starter template missing on disk. Checked: {checked}")
 
     target = workspace_root() / "context" / f"{name}.md"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -705,6 +737,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         ),
         "complete_onboarding": lambda a: complete_onboarding(a.get("answers") if isinstance(a.get("answers"), dict) else None),
         "reset_onboarding": lambda _a: reset_onboarding(),
+        "reset_workspace": lambda _a: reset_workspace(),
         "read_file": lambda a: read_file(require_str(a, "path")),
         "write_file": lambda a: write_file(require_str(a, "path"), require_str(a, "content")),
         "append_file": lambda a: append_file(require_str(a, "path"), require_str(a, "content")),

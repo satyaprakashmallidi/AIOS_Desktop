@@ -4,6 +4,7 @@ export type AiosCommand =
   | "save_onboarding_answer"
   | "complete_onboarding"
   | "reset_onboarding"
+  | "reset_workspace"
   | "read_file"
   | "write_file"
   | "append_file"
@@ -166,6 +167,11 @@ export interface WorkspaceInfo {
   settingsDb: string;
   modules: ModuleInfo[];
   deviceUserId: string;
+  // Cached from settings DB so the renderer can render an optimistic Claude
+  // status on cold start without paying for a subprocess spawn. Verified in
+  // the background after splash dismisses.
+  claudePath?: string | null;
+  claudeVersion?: string | null;
 }
 
 export interface ClaudeStatus {

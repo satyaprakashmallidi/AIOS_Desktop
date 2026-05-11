@@ -127,7 +127,36 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
 
+  // Fast cold-start path. Loads only the 3 IPC calls needed for first paint:
+  // workspace info (paths, deviceUserId, cached claude path), onboarding state
+  // (which screen to show), and the session list (sidebar). Everything else is
+  // deferred to refreshWorkspaceBackground after splash dismisses.
+  async function refreshWorkspaceCritical(): Promise<{ workspace: WorkspaceInfo; sessions: ChatSession[] }> {
+    const [workspaceInfo, onboardingState, sessionList] = await Promise.all([
+      invoke<WorkspaceInfo>("get_workspace_info"),
+      invoke<OnboardingState>("get_onboarding_state"),
+      invoke<ChatSession[]>("get_sessions")
+    ]);
+
+    let nextSessions = sessionList;
+    if (!nextSessions.length) {
+      const mainThread = await invoke<ChatSession>("create_thread", { title: "Main" });
+      nextSessions = [mainThread];
+    }
+
+    startTransition(() => {
+      setWorkspace(workspaceInfo);
+      setOnboarding(onboardingState);
+      setSessions(nextSessions);
+      setActiveSessionId((current) => current ?? nextSessions[0]?.id ?? null);
+    });
+    return { workspace: workspaceInfo, sessions: nextSessions };
+  }
+
+  // Full workspace refresh — used by the 60s polling AND in the background
+  // after cold start. Re-fetches every screen's data; safe to call repeatedly.
   async function refreshWorkspace() {
     const [
       workspaceInfo,
@@ -188,50 +217,54 @@ function App() {
     }
   }
 
+  // Run a fresh Claude detection. Used by:
+  //   - The "Auto-detect" button in Settings/Onboarding (full re-validation)
+  //   - The cold-start background pass (verifies the cached path still works)
+  //
+  // find_claude already runs `claude --version` to validate during detection,
+  // so we don't need a separate test_claude_connection call — that was pure
+  // duplication on the old cold-start path and easily cost 1-3s on Windows.
   async function detectClaude() {
     const detected = await invoke<ClaudeStatus>("find_claude");
-    if (!detected.found || !detected.path) {
-      const next = {
-        ...detected,
-        runtimeOk: false,
-        runtimeError: detected.error ?? "Claude executable was not found."
-      };
-      setClaude(next);
-      return next;
-    }
-    try {
-      const runtime = await invoke<{ ok: boolean; version: string | null; error?: string }>("test_claude_connection", { path: detected.path });
-      const next = {
-        ...detected,
-        runtimeOk: runtime.ok,
-        runtimeError: runtime.ok ? undefined : runtime.error ?? "Claude runtime check failed."
-      };
-      setClaude(next);
-      return next;
-    } catch (error) {
-      const next = {
-        ...detected,
-        runtimeOk: false,
-        runtimeError: error instanceof Error ? error.message : String(error)
-      };
-      setClaude(next);
-      return next;
-    }
+    const next: ClaudeStatus = {
+      ...detected,
+      runtimeOk: detected.found && !!detected.path,
+      runtimeError: detected.found ? undefined : detected.error ?? "Claude executable was not found."
+    };
+    setClaude(next);
+    return next;
   }
 
   useEffect(() => {
-    // Show a Retry escape hatch after 10s if startup IPC is still hanging,
-    // but DO NOT auto-clear loading — entering the app with empty React state
-    // makes it look like data vanished even though SQLite is intact.
+    // Cold-start happens in two phases for a fast splash dismissal:
+    //
+    //  Phase 1 (CRITICAL — blocks the splash):
+    //    3 IPC calls in parallel: get_workspace_info, get_onboarding_state,
+    //    get_sessions. workspace_info now also returns the cached claude_path
+    //    + claude_version so we can render an OPTIMISTIC ClaudeStatus right
+    //    away — no subprocess spawn on the critical path. Splash dismisses
+    //    as soon as this resolves (target: <1s on Mac, <2s on Win).
+    //
+    //  Phase 2 (BACKGROUND — fires after splash dismissed):
+    //    Runs detectClaude (verifies the cached path still works), the rest
+    //    of the workspace data (modules, context, outputs, plans, shares,
+    //    recent activity), and the daily-brief status check. None of this
+    //    blocks first paint — the chat screen renders immediately with
+    //    optimistic Claude state and gets corrected if verification fails.
     const slowTimer = window.setTimeout(() => setLoadingSlow(true), 10000);
-    Promise.all([refreshWorkspace(), detectClaude()])
-      .then(async () => {
-        try {
-          const todayDate = new Date().toISOString().slice(0, 10);
-          const status = await invoke<DailyBriefStatus>("get_today_brief_status", { localDate: todayDate });
-          if (status?.shouldShow) setBriefStatus(status);
-        } catch {
-          /* swallow — daily brief is best-effort */
+    refreshWorkspaceCritical()
+      .then(({ workspace }) => {
+        // Optimistic Claude status from cached settings — assume the path
+        // saved in the prior session still works. detectClaude in phase 2
+        // will swap this out if validation now fails.
+        if (workspace.claudePath) {
+          setClaude({
+            found: true,
+            path: workspace.claudePath,
+            version: workspace.claudeVersion ?? null,
+            checked: [],
+            runtimeOk: true
+          });
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
@@ -239,6 +272,42 @@ function App() {
         window.clearTimeout(slowTimer);
         setLoading(false);
       });
+  }, []);
+
+  // Phase 2: background work that fires once the splash has dismissed.
+  // Verifies Claude in the background, fetches the rest of the workspace
+  // data, and checks today's daily brief. None of this blocks first paint.
+  useEffect(() => {
+    if (loading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Background Claude verification — corrects the optimistic state if
+        // the cached path no longer works (Claude uninstalled, PATH changed).
+        await detectClaude().catch(() => undefined);
+        if (cancelled) return;
+        // Fill in the non-critical workspace data (modules, context, outputs,
+        // plans, shares, recent activity). These were skipped on the critical
+        // path because no screen needs them for first paint.
+        await refreshWorkspace().catch(() => undefined);
+        if (cancelled) return;
+        // Daily brief status — best-effort, swallows errors.
+        try {
+          const todayDate = new Date().toISOString().slice(0, 10);
+          const status = await invoke<DailyBriefStatus>("get_today_brief_status", { localDate: todayDate });
+          if (!cancelled && status?.shouldShow) setBriefStatus(status);
+        } catch { /* swallow */ }
+      } catch { /* non-fatal — background work */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  useEffect(() => {
+    window.aios
+      ?.getVersion?.()
+      .then((version) => setAppVersion(version))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -249,15 +318,17 @@ function App() {
     }
   }, [loading, onboarding?.completedAt, screen]);
 
-  // Once we have a deviceUserId, register with the connectors relay (idempotent).
+  // Once we have a deviceUserId AND the real app version, register with the
+  // connectors relay (idempotent). Gating on appVersion avoids an extra
+  // register call with a stale placeholder before getVersion() resolves.
   useEffect(() => {
     if (!RELAY_AVAILABLE) return;
     const id = workspace?.deviceUserId;
-    if (!id) return;
+    if (!id || !appVersion) return;
     relay
-      .register(id, workspace?.platform ?? "unknown", "0.1.0")
+      .register(id, workspace?.platform ?? "unknown", appVersion)
       .catch(() => undefined); // silent — relay availability is best-effort
-  }, [workspace?.deviceUserId, workspace?.platform]);
+  }, [appVersion, workspace?.deviceUserId, workspace?.platform]);
 
   // Background connector-identify. Runs ONCE per app session (not per page
   // mount), so switching between Modules/Connectors/Chat doesn't restart it.

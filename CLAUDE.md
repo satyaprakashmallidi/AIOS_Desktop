@@ -39,7 +39,8 @@ AIOS Desktop is an Electron app that ships to end users on Windows and macOS. Ea
 │ Python sidecar (python/host.py)                                      │
 │  • dispatch registry → workspace.py functions                         │
 │  • spawns `claude --print --strict-mcp-config ...` for run_task      │
-│  • SQLite at %APPDATA%/aios-desktop/ai-sales-os/data/settings.db     │
+│  • SQLite at %APPDATA%/...desktop/data/settings.db (Win) or          │
+│    ~/Library/Application Support/aios-desktop/.../settings.db (Mac)  │
 └──────────┬───────────────────────────────────────────────────────────┘
            │ stdio
            ▼
@@ -151,6 +152,10 @@ The user's machine had a leftover account binding from before our fixes. To full
 4. Clear `~/.claude/settings.json` `mcpServers.composio`
 5. User reconnects via Connectors page
 
+For a clean *workspace* reset (context, chats, plans, outputs — not connectors), use the **Settings → Reset workspace** button in-app. To nuke the entire workspace from outside the app:
+- Mac: `rm -rf ~/Library/Application\ Support/aios-desktop/`
+- Windows (PowerShell): `Remove-Item -Recurse -Force "$env:APPDATA\aios-desktop"`
+
 ---
 
 ## Onboarding (v2)
@@ -248,16 +253,15 @@ supabase/
   migrations/0001_init.sql             device_users + device_connections schema
 ```
 
-## Prerequisites (NOT auto-installed)
+## Prerequisites
 
-The app does **not** bundle Python or Claude CLI. Both are checked at startup; if missing the user sees a clear error.
+The app bundles its Python sidecar via PyInstaller, so end users do **not** need Python installed. Claude Code CLI is still checked at startup; if missing, the user sees a clear onboarding path.
 
 | Dep | Min version | Install |
 |-----|-------------|---------|
-| Python | 3.10+ | macOS: `brew install python` (or python.org). Windows: python.org installer (check "Add to PATH") |
 | Claude Code CLI | latest | `npm install -g @anthropic-ai/claude-code` (requires Node) |
 
-The Onboarding "Connect Claude Code" stage handles Claude detection gracefully (auto-detect → Test → manual path). Python is harder because if the sidecar can't spawn at all, we can't even reach the renderer cleanly. Today this surfaces as `Python interpreter was not found` in the splash error banner with a list of attempted commands. **Future work**: bundle Python via PyInstaller for true plug-and-play.
+The Onboarding "Connect Claude Code" stage handles Claude detection gracefully (auto-detect → Test → manual path). In development, the app still falls back to a system Python interpreter if the PyInstaller sidecar has not been built yet; packaged builds use the bundled sidecar at `<app>/resources/aios-host/`.
 
 Mac auto-detect search paths (`main/claude-finder.ts`):
 - `which claude`
@@ -284,6 +288,8 @@ End-user workspace lives at `%APPDATA%/aios-desktop/ai-sales-os/` (Win) or `~/Li
 - `CLAUDE.md` — workspace-side context that Claude reads on every session
 
 The starter kit template lives at `aios-starter-kit/` in the repo and is copied into the user's workspace on first launch.
+
+**Dev mode uses an isolated workspace.** When `app.isPackaged` is false (i.e. `npm run dev`), `main.ts` sets `userData` to `<cwd>/.aios-dev-user-data/` so dev runs never touch the installed app's SQLite or context files. The dev workspace lives at `<cwd>/.aios-dev-user-data/ai-sales-os/`. Because the path is relative to `process.cwd()`, always launch dev from the repo root or you'll get a different workspace each time. The `.aios-dev-user-data/` folder is gitignored.
 
 ## Verification — quick smoke test
 

@@ -10,7 +10,8 @@ import {
   RefreshCw,
   RotateCcw,
   SlidersHorizontal,
-  Terminal
+  Terminal,
+  Trash2
 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { PanelHeader, StatusBadge } from "../components/ui";
@@ -152,6 +153,7 @@ function GeneralPanel({
 }) {
   const [savedHint, setSavedHint] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [wiping, setWiping] = useState(false);
   const [updateState, setUpdateState] = useState<string>("idle");
   const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string }>({});
   const [checking, setChecking] = useState(false);
@@ -167,6 +169,20 @@ function GeneralPanel({
       setSavedHint(error instanceof Error ? error.message : "Reset failed");
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function resetWorkspace() {
+    if (!confirm("Erase ALL context, chats, plans, and outputs? Claude path and connectors are kept. This cannot be undone.")) return;
+    setWiping(true);
+    try {
+      await invoke("reset_workspace");
+      // Reload so ensureRuntimeWorkspace re-copies a fresh starter kit and the
+      // renderer re-reads onboarding/workspace state from scratch.
+      window.location.reload();
+    } catch (error) {
+      setSavedHint(error instanceof Error ? error.message : "Workspace reset failed");
+      setWiping(false);
     }
   }
 
@@ -240,6 +256,16 @@ function GeneralPanel({
             <button type="button" className="button button-secondary compact" onClick={resetOnboarding} disabled={resetting}>
               <RotateCcw size={14} />
               {resetting ? "Resetting..." : "Reset"}
+            </button>
+          }
+        />
+        <SettingsRow
+          title="Reset workspace"
+          description="Erase ALL context, chats, plans, and outputs. Keeps Claude path and connectors. Use this for a truly fresh start."
+          control={
+            <button type="button" className="button button-secondary compact" onClick={resetWorkspace} disabled={wiping}>
+              <Trash2 size={14} />
+              {wiping ? "Erasing..." : "Erase data"}
             </button>
           }
         />

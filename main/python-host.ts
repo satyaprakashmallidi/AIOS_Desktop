@@ -23,7 +23,10 @@ export class PythonHost {
   private eventHandlers = new Set<(event: HostEvent) => void>();
   private seq = 0;
 
-  constructor(private readonly workspaceRoot: string) {}
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly starterKitRoot: string
+  ) {}
 
   start(): void {
     if (this.child) return;
@@ -33,7 +36,11 @@ export class PythonHost {
     if (bundled) {
       this.child = spawn(bundled, [], {
         cwd: this.workspaceRoot,
-        env: { ...process.env, AIOS_WORKSPACE_ROOT: this.workspaceRoot },
+        env: {
+          ...process.env,
+          AIOS_WORKSPACE_ROOT: this.workspaceRoot,
+          AIOS_STARTER_KIT_ROOT: this.starterKitRoot
+        },
         stdio: "pipe",
         windowsHide: true
       });
@@ -50,7 +57,11 @@ export class PythonHost {
       const python = this.findPythonCommand();
       this.child = spawn(python.command, [...python.argsPrefix, pythonHostPath], {
         cwd: this.workspaceRoot,
-        env: { ...process.env, AIOS_WORKSPACE_ROOT: this.workspaceRoot },
+        env: {
+          ...process.env,
+          AIOS_WORKSPACE_ROOT: this.workspaceRoot,
+          AIOS_STARTER_KIT_ROOT: this.starterKitRoot
+        },
         stdio: "pipe",
         windowsHide: true
       });
