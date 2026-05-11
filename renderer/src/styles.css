@@ -293,7 +293,7 @@ code, pre { font-family: var(--font-mono); }
 }
 
 .app-shell.sidebar-collapsed {
-  grid-template-columns: 80px minmax(0, 1fr);
+  grid-template-columns: 68px minmax(0, 1fr);
 }
 
 .app-shell.setup-required {
@@ -5367,6 +5367,49 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   height: 16px !important;
   color: currentColor !important;
   flex: none !important;
+}
+
+/* ─── Sidebar Collapsed V2 Centering ────────────────────────────────────── */
+.sidebar-collapsed aside.aios-sb-v2 {
+  align-items: center !important;
+  padding: 14px 0 12px !important;
+}
+
+.sidebar-collapsed aside.aios-sb-v2 .sidebar-brand {
+  justify-content: center !important;
+  padding: 4px 0 14px !important;
+}
+
+.sidebar-collapsed aside.aios-sb-v2 .sidebar-quick-action {
+  justify-content: center !important;
+  padding: 0 !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  margin: 6px auto 8px !important;
+}
+
+.sidebar-collapsed aside.aios-sb-v2 .nav-item {
+  justify-content: center !important;
+  padding: 0 !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  margin: 0 auto !important;
+}
+
+.sidebar-collapsed aside.aios-sb-v2 .aios-sidebar-footer {
+  align-items: center !important;
+  padding: 8px 0 0 !important;
+}
+
+.sidebar-collapsed aside.aios-sb-v2 .aios-sidebar-settings {
+  justify-content: center !important;
+  padding: 0 !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  margin: 0 auto !important;
 }
 
 /* ─── Daily Brief Modal ─────────────────────────────────────────────────── */
