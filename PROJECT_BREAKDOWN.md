@@ -590,14 +590,20 @@ Service slug → env var mapping: `service.toUpperCase().replace(/-/g, "_")` →
 
 ### Currently wired connectors
 
-| Service | Auth config | Slug | Status |
+| Service | Auth config | Slug | Used by |
 |---|---|---|---|
-| Gmail | `ac_y-OIEuSxFKkE` | `gmail` | Live |
-| Google Calendar | `ac_cpWhovJpJ3kR` | `google-calendar` | Live |
-| Slack | `ac_jFwxYiIjQlUQ` | `slack` | Live |
-| ClickUp | `ac_Aje5GIG8qKi6` | `clickup` | Live |
-| Notion | `ac_EwoOuiTf19rs` | `notion` | Live |
-| GitHub | `ac_JEd7dBt0V4CU` | `github` | Live |
+| Gmail | `ac_y-OIEuSxFKkE` | `gmail` | — |
+| Google Calendar | `ac_cpWhovJpJ3kR` | `google-calendar` | — |
+| Slack | `ac_jFwxYiIjQlUQ` | `slack` | IntelOS |
+| ClickUp | `ac_Aje5GIG8qKi6` | `clickup` | — |
+| Notion | `ac_EwoOuiTf19rs` | `notion` | — |
+| GitHub | `ac_JEd7dBt0V4CU` | `github` | InfraOS |
+| Stripe | `ac_lreLxEiFkTlp` | `stripe` | DataOS |
+| YouTube | `ac_DRbRugQFigNA` | `youtube` | DataOS |
+| Google Analytics | `ac_WOs6TpNhcvC-` | `google-analytics` | DataOS |
+| Google Sheets | `ac_289PHe7QdUXw` | `google-sheets` | DataOS |
+
+All 10 have `is_enabled_for_tool_router: true` + corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. Same code path for all — no per-service handlers.
 
 ### MCP isolation in `python/host.py`
 

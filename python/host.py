@@ -32,6 +32,7 @@ from workspace import (
     get_setting,
     get_workspace_info,
     list_auto_tasks,
+    list_connector_status,
     list_directory,
     list_recent_auto_runs,
     list_workspace_files,
@@ -310,26 +311,18 @@ def _mcp_isolation_flags() -> list[str]:
 
 
 _COMPOSIO_SYSTEM_PROMPT = (
-    "You have access to integrations for the user's connected services "
-    "(Gmail, Slack, Calendar, Notion, GitHub, etc.). When a request needs "
-    "one of those services, use the meta-tools to discover and execute:\n"
-    "  1. mcp__composio__COMPOSIO_SEARCH_TOOLS — find the right tool slug\n"
-    "  2. mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL — call it\n"
-    "\n"
-    "STRICT OUTPUT RULES — these are non-negotiable:\n"
-    "• Never mention Composio, MCP, tool routers, tool slugs, or any "
-    "infrastructure. The user does not know or care these exist.\n"
-    "• Never describe what tool you used or how you got the data. Just "
-    "answer the question with the result.\n"
-    "• Never tell the user to authorize, click links, sign in, or 'connect' "
-    "anything. If a service genuinely isn't connected, say only: 'That "
-    "service isn't connected yet — open the Connectors page in the sidebar.'\n"
-    "• Never invent OAuth URLs, quick-connect links, or `lk_…` codes.\n"
-    "• Never mention the user's Anthropic / Claude login email, any "
-    "user-identity metadata you may have in context, or compare it with "
-    "connected accounts. Connected accounts are intentionally separate.\n"
-    "• Never preface answers with 'Using Gmail tools…' / 'I'll fetch…' / "
-    "'Let me search…' — just deliver the answer."
+    "Tools: COMPOSIO_SEARCH_TOOLS finds a slug, COMPOSIO_MULTI_EXECUTE_TOOL "
+    "runs it. Use these — don't assume what's connected.\n"
+    "User is non-technical. Be brief, plain, direct.\n"
+    "• Hide internals: paths, SQLite, IDs, account labels, install dates.\n"
+    "• Hide infrastructure: Composio, MCP, tool router, slugs.\n"
+    "• Don't preface ('Let me fetch…') or describe tools used.\n"
+    "• If a service isn't connected: 'That isn't connected yet — open Connectors.'\n"
+    "• If a workspace script has a small bug (wrong slug, response shape, "
+    "minor typo), silently fix it in place and report only the high-level "
+    "outcome ('connected', 'data fetched'). Don't show errors or the patch.\n"
+    "• Don't invent OAuth URLs or `lk_…` codes.\n"
+    "• Don't reference the user's Claude login email or compare with connected accounts."
 )
 
 
@@ -780,6 +773,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "delete_import_folder": delete_import_folder,
         "update_claude_mcp": update_claude_mcp,
         "rotate_device_user_id": rotate_device_user_id_handler,
+        "list_connector_status": lambda _a: list_connector_status(),
         "list_auto_tasks": lambda _a: list_auto_tasks(),
         "create_auto_task": lambda a: create_auto_task(
             require_str(a, "name"), require_str(a, "prompt"), require_str(a, "schedule")

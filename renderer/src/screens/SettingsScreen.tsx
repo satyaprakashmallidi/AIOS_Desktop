@@ -155,7 +155,7 @@ function GeneralPanel({
   const [resetting, setResetting] = useState(false);
   const [wiping, setWiping] = useState(false);
   const [updateState, setUpdateState] = useState<string>("idle");
-  const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string }>({});
+  const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string; manualDownloadUrl?: string }>({});
   const [checking, setChecking] = useState(false);
 
   async function resetOnboarding() {
@@ -190,7 +190,12 @@ function GeneralPanel({
   useEffect(() => {
     const unsubscribe = window.aios?.onUpdateState?.((event) => {
       setUpdateState(event.state);
-      setUpdateInfo({ version: event.version, percent: event.percent, message: event.message });
+      setUpdateInfo({
+        version: event.version,
+        percent: event.percent,
+        message: event.message,
+        manualDownloadUrl: event.manualDownloadUrl
+      });
     });
     return () => unsubscribe?.();
   }, []);
@@ -211,14 +216,28 @@ function GeneralPanel({
       } else if (!result.hasUpdate) {
         setUpdateState("up-to-date");
         setUpdateInfo({ version: result.currentVersion });
+      } else if (result.manualDownloadUrl) {
+        // Mac path: there's no in-place update, but a newer release exists.
+        setUpdateState("manual-available");
+        setUpdateInfo({
+          version: result.latestVersion,
+          manualDownloadUrl: result.manualDownloadUrl
+        });
       }
-      // else: "available"/"downloading"/"ready" arrives via onUpdateState
+      // else: "available"/"downloading"/"ready" arrives via onUpdateState (Win)
     } finally {
       setChecking(false);
     }
   }
 
   async function installNow() {
+    // Mac (manual-available): open the release page in the system browser
+    // since Mac builds aren't code-signed and electron-updater's in-place
+    // swap fails ShipIt validation.
+    if (updateInfo.manualDownloadUrl) {
+      await window.aios.openExternal(updateInfo.manualDownloadUrl);
+      return;
+    }
     await window.aios.installUpdate();
   }
 
@@ -229,6 +248,7 @@ function GeneralPanel({
       case "available": return `Downloading ${updateInfo.version ?? ""}…`;
       case "downloading": return `Downloading ${updateInfo.percent ?? 0}%`;
       case "ready": return `Restart to install ${updateInfo.version ?? ""}`;
+      case "manual-available": return `v${updateInfo.version ?? ""} available · download manually`;
       case "up-to-date": return `You're on the latest (${updateInfo.version ?? ""})`;
       case "dev-mode": return "Updates only run in installed builds";
       case "error": return updateInfo.message || "Update check failed";
@@ -276,6 +296,11 @@ function GeneralPanel({
             updateState === "ready" ? (
               <button type="button" className="button button-primary compact" onClick={installNow}>
                 Restart & install
+              </button>
+            ) : updateState === "manual-available" ? (
+              <button type="button" className="button button-primary compact" onClick={installNow}>
+                <ExternalLink size={14} />
+                Open release page
               </button>
             ) : (
               <button

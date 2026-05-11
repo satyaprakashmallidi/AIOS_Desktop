@@ -29,16 +29,25 @@ export function getWorkspaceRoot(): string {
 
 export function getSourceStarterKit(): string {
   const appPath = app.getAppPath();
-  // Packaged builds: electron-builder ships aios-starter-kit at
-  // <install>/resources/aios-starter-kit/. appPath inside an asar is
-  // <install>/resources/app.asar, so "..", "aios-starter-kit" resolves
-  // to <install>/resources/aios-starter-kit. The "..", "..",
-  // "aios-starter-kit" fallback covers the dev case (running from src).
-  const candidates = [
-    path.resolve(appPath, "..", "aios-starter-kit"),
-    path.resolve(appPath, "..", "..", "aios-starter-kit"),
-    path.resolve(appPath, "aios-starter-kit")
-  ];
+  // Path resolution differs by build mode:
+  // - Packaged: appPath is <install>/resources/app.asar; aios-starter-kit
+  //   is at <install>/resources/aios-starter-kit (sibling, via extraResources).
+  // - Dev: appPath is the repo root; aios-starter-kit is at <repo>/aios-starter-kit
+  //   (in-tree). The `../aios-starter-kit` path would point ONE level above
+  //   the repo, which may contain a stray/leftover starter kit (we hit this
+  //   in dev with an old `-v1`-suffixed copy at the grandparent dir).
+  // So: dev always uses in-tree; packaged always uses sibling.
+  const candidates = app.isPackaged
+    ? [
+        path.resolve(appPath, "..", "aios-starter-kit"),
+        path.resolve(appPath, "..", "..", "aios-starter-kit"),
+        path.resolve(appPath, "aios-starter-kit")
+      ]
+    : [
+        path.resolve(appPath, "aios-starter-kit"),
+        path.resolve(appPath, "..", "aios-starter-kit"),
+        path.resolve(appPath, "..", "..", "aios-starter-kit")
+      ];
   const found = candidates.find((candidate) => fs.existsSync(path.join(candidate, "CLAUDE.md")));
   if (!found) {
     throw new Error(`Unable to locate aios-starter-kit. Checked: ${candidates.join(", ")}`);

@@ -18,6 +18,29 @@ setup_time: 30-60 minutes
 
 ---
 
+## Required Connectors
+
+- **Stripe** — payments / subscription data ✓ fully wired (MRR, charges, subs)
+- **Google Sheets** — read structured data from sheets ✓ fully wired
+- **YouTube** — video metrics (PARTIAL — see below)
+- **Google Analytics** — site analytics (LIMITED — see below)
+
+All four must be set up on the AIOS Connectors page before installing. The `/install` command will refuse to proceed if any are missing. Do **NOT** ask the user for `STRIPE_API_KEY_*`, GA4 service account JSON, or Google Sheets service account JSON — those paths are deprecated. DataOS's collector scripts invoke each service via Composio through the AIOS relay using the user's OAuth-authorized connection.
+
+If the user doesn't use one of these services (e.g., they don't have a YouTube channel), tell them they can skip that connector — DataOS silently skips that source.
+
+### Two services with known limitations
+
+**YouTube:** Composio's YouTube toolkit doesn't expose a "list my channels" tool, so the collector can't auto-discover the user's channel. **`YOUTUBE_CHANNEL_ID` is still required in `.env`** — find it at `https://www.youtube.com/account_advanced`. OAuth via the connector replaces the old `YOUTUBE_API_KEY` requirement, but the channel ID is still needed.
+
+**Google Analytics:** Composio's GA toolkit currently only exposes account-level tools (list accounts, get account, list audiences) — no report-running endpoint. **The GA collector connects and confirms it's reachable, but cannot pull daily traffic metrics yet.** If the user needs live GA numbers, they'd need a custom collector using the GA Data API SDK directly. Mention this only if the user asks; otherwise just note that GA is "connected, limited data" in the daily log.
+
+### Optional API keys (services NOT in the connector catalog)
+
+- **Bitly** — `BITLY_ACCESS_TOKEN` in `.env` if the user wants link-shortener analytics. No Composio connector available.
+
+---
+
 ## FOR CLAUDE
 
 You are helping a user install DataOS — their business data warehouse. Follow these rules:

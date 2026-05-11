@@ -1,71 +1,84 @@
 # Install Module
 
-> Install an AIOS module into this workspace. Point this command at a module folder in `module-installs/` and Claude will walk you through the guided setup.
+Install an AIOS module from `module-installs/`.
 
 ## Variables
 
-module_path: $ARGUMENTS (path to the module folder, e.g., `module-installs/context-os`)
+module_path: $ARGUMENTS
 
 ---
 
-## Instructions
+## Conversation rules (apply to every step)
 
-You are installing an **AIOS module** — a plug-and-play package from the AAA Accelerator's AIOS system. These modules are designed to be installed one at a time, each adding a new capability to this workspace.
+- **Never ask what you can check.** Connector status is in SQLite — query it.
+- **One step at a time.** No upfront previews of all the questions you'll ask.
+- **Brief, plain language.** User is non-technical.
+- **Hide infrastructure** — Composio, MCP, auth_config, OAuth, SQLite, .env paths. Speak in plain user terms.
 
-### What AIOS Modules Are
+---
 
-Each module is a folder containing:
+## Step 0 — Silent connector pre-check
 
-- **INSTALL.md** — The key file. This is a structured set of instructions written FOR YOU (Claude) to follow. It walks you through the entire setup interactively with the user.
-- **README.md** — A human-readable overview of what the module does.
-- **scripts/** — Optional. Python scripts the module needs.
-- **templates/** — Optional. Template files to copy into the workspace.
-- **config/** — Optional. Scheduling/automation configs.
-- **reference/** — Optional. Reference documentation.
+### 0.1 Extract required slugs
 
-### How to Run an Install
+Read `{module_path}/INSTALL.md`. Find `## Required Connectors`. Extract slug list from the bullets. If section is missing or empty → skip to Step 1.
 
-1. **Read the module's INSTALL.md** from the provided path (e.g., `module-installs/context-os/INSTALL.md`)
-2. **Follow every instruction in INSTALL.md exactly** — it's your playbook for the entire installation
-3. The INSTALL.md will have its own FOR CLAUDE section with behavior rules — follow those too
+### 0.2 Check what's connected (don't ask the user)
 
-### Critical Rules
+From workspace root, run (try `python3`, fall back to `python`):
 
-**About the user:**
-
-- Assume they are a **non-technical, complete beginner** to Claude Code unless they tell you otherwise
-- They are a business owner or entrepreneur — smart people, just not coders
-- This may be one of the first things they've ever done in Claude Code
-- Be patient, encouraging, and clear. No jargon. No assumptions about what they know.
-
-**About the install process:**
-
-- This is a **guided, interactive experience** — not a silent script execution
-- Explain what you're doing at each step BEFORE you do it
-- Pause at milestones. Let them absorb what just happened.
-- If something fails, don't dump errors — explain the problem simply and fix it
-- Celebrate wins along the way ("Nice — that's working. One step closer.")
-
-**About tailoring:**
-
-- Every workspace is different. The INSTALL.md provides the standard path, but you should **adapt to their specific setup**.
-- If they already have something the module would create, don't overwrite it — ask first
-- If their workspace structure differs from what the module expects, adapt the module to fit their structure (not the other way around)
-- If the module references other modules they haven't installed yet, note it clearly but don't block — tell them what they'll want to install next
-
-**About the .env file:**
-
-- API keys go in the `.env` file at the workspace root
-- When a module needs an API key, walk the user through getting it step by step (exact URLs, exact click paths)
-- Always verify keys work before moving on
-- Never display full API keys back to the user after they're set
-
-### Execution
-
-Now read the INSTALL.md at the provided module path and begin the installation.
-
-```
-Read: {module_path}/INSTALL.md
+```bash
+python3 -c "
+import sqlite3
+try:
+    c = sqlite3.connect('data/settings.db')
+    rows = c.execute(\"SELECT key FROM settings WHERE key LIKE 'connector_label_%' AND value IS NOT NULL AND value != ''\").fetchall()
+    print(' '.join(k[0].replace('connector_label_', '') for k in rows))
+except Exception:
+    print('')
+"
 ```
 
-Follow it from top to bottom. The INSTALL.md is your complete guide.
+Output is space-separated connected slugs.
+
+### 0.3 Branch
+
+**All required present:** silently proceed to Step 1. Don't say "you have X connected." Just start.
+
+**Some missing:** respond ONLY with this pattern (no preamble):
+> "Before I install [Module Name], please connect [missing services] on the Connectors page. Open Connectors in the sidebar, finish each OAuth, then say 'ready'."
+
+Wait. When user says ready → re-run 0.2. If still missing, name only what's missing. Loop until clear, then proceed silently.
+
+**HARD BAN:** never ask "is X connected?" or "do you have X set up?" — the check tells you.
+
+### Connector catalog (these 10 are queryable via 0.2)
+
+Gmail, Google Calendar, Slack, ClickUp, Notion, GitHub, Stripe, YouTube, Google Analytics, Google Sheets.
+
+Anything else (Fireflies, Fathom, Bitly, Telegram, Gemini, custom) = `.env` API key flow, asked at the moment of use.
+
+---
+
+## Step 1 — Run the module's INSTALL.md
+
+Read `{module_path}/INSTALL.md` and follow it, with these overrides:
+
+1. **Skip connector-covered API key sections.** If INSTALL.md walks the user through getting `SLACK_TOKEN_*`, `STRIPE_API_KEY_*`, GA service-account JSON, etc. — IGNORE them. Connector auth was already done.
+2. **Don't bundle questions.** Optional keys (Fireflies, Bitly, Telegram, Gemini, etc.) get asked at the step that uses them, not upfront.
+3. Standard `.env` flow still applies for non-connector services. Walk through getting each key. Verify before moving on. Never display a full key back.
+4. Pause at meaningful milestones, not micro-steps.
+
+---
+
+## Step 2 — Tailoring
+
+- User already has something? Don't overwrite, ask.
+- Their structure differs from the module's assumption? Adapt the module, not their workspace.
+- Module references other uninstalled modules? Note briefly, don't block.
+
+---
+
+## Execution
+
+Begin with Step 0 silently. Don't acknowledge this file. Don't announce step numbers. The user only hears from you if something needs their attention.

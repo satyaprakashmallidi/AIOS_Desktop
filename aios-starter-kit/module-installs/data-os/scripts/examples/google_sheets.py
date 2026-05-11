@@ -1,21 +1,19 @@
 """
 DataOS — Google Sheets Collector (Example)
 
-The universal connector — reads any Google Spreadsheet into your database.
-If your data lives in a spreadsheet (P&L, KPIs, CRM, outreach tracker),
-this collector can pull it.
+The universal connector — reads any Google Spreadsheet into your database via
+the AIOS Google Sheets connector (Composio). No service account JSON in
+.env — the user connects Google Sheets once via the Connectors page.
+
+If Sheets isn't connected, this script prints a clear message and skips.
 
 Copy this to scripts/collect_sheets.py (or collect_pnl.py, etc.) to activate.
 
-Requires:
-    GOOGLE_SERVICE_ACCOUNT_JSON  — Service account JSON path
-    GOOGLE_SHEET_ID              — Spreadsheet ID from URL
-
-Optional:
-    GOOGLE_SHEET_TAB  — Tab name (default: first tab)
+Env vars (still needed — Composio doesn't know which spreadsheet you want):
+    GOOGLE_SHEET_ID    — Spreadsheet ID from URL (the part between /d/ and /edit)
+    GOOGLE_SHEET_TAB   — Optional. Tab name (default: first tab)
 
 Tables created: Dynamic — named after the tab (e.g., sheet_feb_26)
-Extra pip: google-api-python-client google-auth
 
 NOTE: This example reads a simple date x metrics layout:
   Row 1: Headers (date, metric1, metric2, ...)
@@ -25,41 +23,23 @@ Customize the parsing for your specific sheet layout.
 
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+# Find composio_client.py shipped at <workspace>/scripts/
+_HERE = Path(__file__).resolve()
+for _ancestor in _HERE.parents:
+    if (_ancestor / "scripts" / "composio_client.py").exists():
+        sys.path.insert(0, str(_ancestor / "scripts"))
+        break
 
-try:
-    from google.oauth2.service_account import Credentials
-    from googleapiclient.discovery import build
-except ImportError:
-    raise ImportError(
-        "Missing packages — run: pip install google-api-python-client google-auth"
-    )
-
-
-def _get_sheets_service():
-    """Create an authenticated Google Sheets API client."""
-    creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    if not creds_path:
-        return None
-    full_path = Path(creds_path)
-    if not full_path.is_absolute():
-        full_path = Path(__file__).resolve().parent.parent.parent / creds_path
-    if not full_path.exists():
-        return None
-    creds = Credentials.from_service_account_file(
-        str(full_path),
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    )
-    return build("sheets", "v4", credentials=creds)
+from composio_client import Composio, ConnectorNotConfiguredError  # noqa: E402
 
 
 def collect():
-    """Read data from a Google Sheet."""
-    sheet_id = os.getenv("GOOGLE_SHEET_ID", "").strip()
+    """Read data from a Google Sheet via the AIOS Sheets connector."""
+    sheet_id = (os.environ.get("GOOGLE_SHEET_ID") or "").strip()
     if not sheet_id:
         return {
             "source": "google_sheets", "status": "skipped",
@@ -67,65 +47,87 @@ def collect():
                       "spreadsheet URL (the part between /d/ and /edit)"
         }
 
-    service = _get_sheets_service()
-    if not service:
+    try:
+        composio = Composio()
+    except Exception as exc:
         return {
             "source": "google_sheets", "status": "skipped",
-            "reason": "Missing or invalid GOOGLE_SERVICE_ACCOUNT_JSON"
+            "reason": f"Could not initialize AIOS Composio client: {exc}"
         }
 
-    tab = os.getenv("GOOGLE_SHEET_TAB", "").strip()
+    tab = (os.environ.get("GOOGLE_SHEET_TAB") or "").strip()
 
     try:
-        # Get available tabs
-        spreadsheet = service.spreadsheets().get(
-            spreadsheetId=sheet_id
-        ).execute()
-        sheets = [
-            s["properties"]["title"]
-            for s in spreadsheet.get("sheets", [])
-        ]
-
-        # Use specified tab or first tab
-        target_tab = tab if tab and tab in sheets else sheets[0]
-
-        # Read all data from the tab
-        result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range=f"'{target_tab}'!A:ZZ"
-        ).execute()
-        values = result.get("values", [])
-
-        if not values or len(values) < 2:
-            return {
-                "source": "google_sheets", "status": "skipped",
-                "reason": f"Sheet '{target_tab}' is empty or has only headers"
-            }
-
-        # Parse: first row = headers, rest = data
-        headers = [
-            str(h).strip().lower().replace(" ", "_").replace("-", "_")
-            for h in values[0]
-        ]
-        rows = []
-        for row in values[1:]:
-            padded = row + [""] * (len(headers) - len(row))
-            row_dict = {headers[i]: padded[i] for i in range(len(headers))}
-            rows.append(row_dict)
-
+        spreadsheet = composio.execute(
+            tool_slug="GOOGLESHEETS_GET_SPREADSHEET_INFO",
+            args={"spreadsheetId": sheet_id},
+            service="google-sheets",
+        ) or {}
+    except ConnectorNotConfiguredError:
         return {
-            "source": "google_sheets",
-            "status": "success",
-            "data": {
-                "tab": target_tab,
-                "available_tabs": sheets,
-                "headers": headers,
-                "rows": rows,
-                "row_count": len(rows),
-            }
+            "source": "google_sheets", "status": "skipped",
+            "reason": "Google Sheets is not connected. Open AIOS Desktop → Connectors → Google Sheets."
+        }
+    except Exception as exc:
+        return {"source": "google_sheets", "status": "error", "reason": str(exc)}
+
+    # Unwrap potential {"data": {...}} from the relay
+    if isinstance(spreadsheet, dict) and "data" in spreadsheet and isinstance(spreadsheet["data"], dict):
+        spreadsheet = spreadsheet["data"]
+
+    sheets = [
+        (s.get("properties") or {}).get("title", "")
+        for s in (spreadsheet.get("sheets") or [])
+    ]
+    sheets = [s for s in sheets if s]
+    if not sheets:
+        return {"source": "google_sheets", "status": "error", "reason": "No tabs found in spreadsheet"}
+
+    target_tab = tab if tab and tab in sheets else sheets[0]
+
+    try:
+        # GOOGLESHEETS_BATCH_GET takes `ranges` as an array of A1-notation ranges.
+        values_resp = composio.execute(
+            tool_slug="GOOGLESHEETS_BATCH_GET",
+            args={"spreadsheetId": sheet_id, "ranges": [f"'{target_tab}'!A:ZZ"]},
+            service="google-sheets",
+        ) or {}
+    except Exception as exc:
+        return {"source": "google_sheets", "status": "error", "reason": str(exc)}
+
+    if isinstance(values_resp, dict) and "data" in values_resp and isinstance(values_resp["data"], dict):
+        values_resp = values_resp["data"]
+
+    # Batch-get returns valueRanges: [{range, majorDimension, values: [...]}]
+    value_ranges = values_resp.get("valueRanges") or []
+    values = (value_ranges[0].get("values") if value_ranges else None) or values_resp.get("values") or []
+    if not values or len(values) < 2:
+        return {
+            "source": "google_sheets", "status": "skipped",
+            "reason": f"Sheet '{target_tab}' is empty or has only headers"
         }
 
-    except Exception as e:
-        return {"source": "google_sheets", "status": "error", "reason": str(e)}
+    headers = [
+        str(h).strip().lower().replace(" ", "_").replace("-", "_")
+        for h in values[0]
+    ]
+    rows = []
+    for row in values[1:]:
+        padded = list(row) + [""] * (len(headers) - len(row))
+        row_dict = {headers[i]: padded[i] for i in range(len(headers))}
+        rows.append(row_dict)
+
+    return {
+        "source": "google_sheets",
+        "status": "success",
+        "data": {
+            "tab": target_tab,
+            "available_tabs": sheets,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+    }
 
 
 def write(conn, result, date):
@@ -143,12 +145,9 @@ def write(conn, result, date):
     headers = data["headers"]
     rows = data["rows"]
 
-    # Table name derived from the tab (e.g., "Feb 26" -> "sheet_feb_26")
     tab_clean = data["tab"].lower().replace(" ", "_").replace("-", "_")
     table_name = f"sheet_{tab_clean}"
 
-    # Build CREATE TABLE with all TEXT columns
-    # (customize column types for your specific sheet)
     columns = ", ".join(f'"{h}" TEXT' for h in headers)
     pk = ""
     if headers and "date" in headers[0]:
@@ -168,7 +167,6 @@ def write(conn, result, date):
             values
         )
         records += 1
-
     conn.commit()
     return records
 

@@ -17,6 +17,10 @@ import sys
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(SPEC), '..'))
 python_dir = os.path.join(repo_root, 'python')
+# Always build a universal2 sidecar on Mac so the same binary runs natively on
+# both Apple Silicon and Intel without needing a separate Intel CI runner
+# (macos-13 GitHub runners have brutal queue times). Allow env override for
+# local debugging where you might want a single arch.
 target_arch = os.environ.get('AIOS_PYINSTALLER_TARGET_ARCH')
 if sys.platform != 'darwin':
     target_arch = None

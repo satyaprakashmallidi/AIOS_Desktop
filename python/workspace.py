@@ -11,12 +11,25 @@ from pathlib import Path
 from typing import Any
 
 
+# Module registry.
+#
+# `requiredConnectors` is the set of Connectors-page service slugs that the
+# module MUST have configured before install. Claude's /install command reads
+# this and refuses to proceed if any are missing, telling the user to open the
+# Connectors page first. This eliminates the duplicate-auth experience —
+# modules never ask the user to paste API keys for services we already
+# manage via Composio.
+#
+# Modules with empty `requiredConnectors` either don't need external services
+# (ContextOS, ProductivityOS) or use services we don't have a connector for
+# (Daily Brief: Gemini + Telegram — neither is in Composio's catalog).
 MODULE_REGISTRY: dict[str, dict[str, Any]] = {
     "context-os": {
         "name": "ContextOS",
         "phase": 1,
         "capability": "Builds the business brain Claude uses in every session.",
         "requires": [],
+        "requiredConnectors": [],
         "artifacts": ["context/"],
         "connections": [],
         # ContextOS is built into the app — the Context page IS the install flow.
@@ -32,6 +45,7 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "phase": 3,
         "capability": "Adds Git, GitHub backup, the /commit command, and a docs system.",
         "requires": [],
+        "requiredConnectors": ["github"],
         "artifacts": [".git/", ".claude/commands/commit.md", "HISTORY.md"],
         "connections": ["GitHub"],
         "installedMarkers": [
@@ -45,6 +59,9 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "phase": 4,
         "capability": "Pulls numbers from external sources and turns them into usable metrics.",
         "requires": ["context-os"],
+        # All four DataOS connectors are Composio-managed. Bitly is an optional
+        # add-on (no connector) — see INSTALL.md.
+        "requiredConnectors": ["stripe", "youtube", "google-analytics", "google-sheets"],
         "artifacts": ["data/", "context/current-data.md"],
         "connections": ["Stripe", "Analytics", "Sheets"],
         "installedMarkers": [
@@ -60,6 +77,9 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "phase": 5,
         "capability": "Captures signals from meetings and team communication.",
         "requires": ["context-os"],
+        # Slack is the only required connector; Fireflies/Fathom meeting
+        # recorders are optional API-key integrations (no connector).
+        "requiredConnectors": ["slack"],
         "artifacts": ["data/", "scripts/"],
         "connections": ["Fireflies / Fathom", "Slack"],
         "installedMarkers": [
@@ -74,6 +94,7 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "phase": 6,
         "capability": "Adds a GTD system: inbox, projects, next actions, weekly review.",
         "requires": ["context-os"],
+        "requiredConnectors": [],
         "artifacts": ["gtd/", ".claude/commands/process.md"],
         "connections": [],
         "installedMarkers": [
@@ -88,6 +109,7 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "phase": 2,
         "capability": "A friendly morning briefing — what's on your plate today, automatically.",
         "requires": [],
+        "requiredConnectors": [],
         "artifacts": ["outputs/daily-brief/"],
         "connections": [],
         # Daily Brief is built into the app — it auto-pops every morning and lives on the Brief page.
@@ -756,6 +778,7 @@ def list_modules() -> list[dict[str, Any]]:
                     "requires": registry.get("requires", []),
                     "artifacts": registry.get("artifacts", []),
                     "connections": registry.get("connections", []),
+                    "requiredConnectors": registry.get("requiredConnectors", []),
                     "builtIn": bool(registry.get("builtIn")),
                     "builtInRoute": registry.get("builtInRoute"),
                     "builtInButtonLabel": registry.get("builtInButtonLabel"),
@@ -783,6 +806,7 @@ def list_modules() -> list[dict[str, Any]]:
                 "requires": registry.get("requires", []),
                 "artifacts": registry.get("artifacts", []),
                 "connections": registry.get("connections", []),
+                "requiredConnectors": registry.get("requiredConnectors", []),
                 "sourceExists": False,
                 "installed": registered_row is not None,
                 "installedAt": registered_row["installed_at"] if registered_row else None,
@@ -1236,6 +1260,43 @@ def rotate_device_user_id() -> str:
     new_id = str(uuid.uuid4())
     set_app_state("device_user_id", new_id)
     return new_id
+
+
+# All connector service slugs the AIOS Desktop knows about — used by
+# list_connector_status to enumerate which connectors are configured. Keep in
+# sync with renderer/src/screens/ConnectorsScreen.tsx::CONNECTOR_CATALOG.
+KNOWN_CONNECTORS = [
+    "gmail",
+    "google-calendar",
+    "slack",
+    "clickup",
+    "notion",
+    "github",
+    # DataOS connectors (added in the modules-connectors refactor)
+    "stripe",
+    "youtube",
+    "google-analytics",
+    "google-sheets",
+]
+
+
+def list_connector_status() -> dict[str, Any]:
+    """Return the configured state of every known connector. Used by the
+    /install slash command and the Modules screen to decide whether a module's
+    required connectors are ready.
+
+    A connector is considered "connected" if its `connector_label_<service>`
+    setting is populated — that label is written by ConnectorsScreen after
+    Claude identifies the OAuth-authorized account.
+    """
+    statuses: dict[str, dict[str, Any]] = {}
+    for service in KNOWN_CONNECTORS:
+        label = get_setting(f"connector_label_{service}")
+        statuses[service] = {
+            "connected": bool(label),
+            "label": label if label else None,
+        }
+    return {"connectors": statuses}
 
 
 def claude_settings_path() -> Path:

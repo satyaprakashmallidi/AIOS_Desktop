@@ -1007,7 +1007,8 @@ code, pre { font-family: var(--font-mono); }
   --page-accent-strong: #b45309;
   padding: 32px 36px 64px;
   background: var(--paper);
-  min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
 }
 .modules-shell { max-width: 980px; margin: 0 auto; display: grid; gap: 24px; }
 
@@ -1215,8 +1216,11 @@ code, pre { font-family: var(--font-mono); }
 .modules-row:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 .modules-row.is-installed { background: var(--surface); }
 .modules-row.is-builtin { background: var(--surface); }
+/* Locked / missing keep the same white card — state is conveyed by the status
+   chip and the action button. The previous beige background looked washed-out
+   against the paper page bg (--surface-soft is too close to --paper). */
 .modules-row.is-locked,
-.modules-row.is-missing { background: var(--surface-soft); }
+.modules-row.is-missing { background: var(--surface); opacity: 0.92; }
 
 .modules-row-main {
   all: unset;
@@ -1291,26 +1295,52 @@ code, pre { font-family: var(--font-mono); }
 .modules-row-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-widest);
+  align-items: center;
+  gap: 14px 18px;
   color: var(--gray-500);
   margin-top: 4px;
 }
-.modules-meta-item { display: inline-flex; align-items: center; gap: 6px; }
+.modules-meta-item { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .modules-meta-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: var(--tracking-widest);
   color: var(--gray-400);
+  flex-shrink: 0;
 }
-.modules-meta-dep { font-weight: 500; }
-.modules-meta-dep.ok { color: var(--success); }
-.modules-meta-dep.missing { color: var(--warning); }
+.modules-meta-label > svg { color: var(--gray-400); }
+
+/* Dep + connector chips. Compact pills, no commas, color-coded for state.
+   Replaces the old caps-mono inline list that got long + hard to scan when
+   DataOS needed 4 connectors. */
+.modules-meta-dep {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--gray-700);
+  white-space: nowrap;
+}
+.modules-meta-dep.ok {
+  background: var(--sage-soft);
+  border-color: var(--sage-line);
+  color: var(--sage);
+}
+.modules-meta-dep.missing {
+  background: rgba(217, 119, 6, 0.06);
+  border-color: rgba(217, 119, 6, 0.22);
+  color: #b45309;
+}
 .modules-meta-mono {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2928,7 +2958,8 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .settings-screen {
   padding: 40px 40px 80px;
   background: var(--paper);
-  min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
 }
 .settings-shell {
   display: grid;
@@ -5391,7 +5422,8 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   --page-accent-soft: rgba(245, 158, 11, 0.10);
   padding: 32px 36px 64px;
   background: var(--paper);
-  min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
 }
 .briefs-shell { max-width: 980px; margin: 0 auto; display: grid; gap: 26px; }
 .briefs-hero {
@@ -6157,7 +6189,11 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   --page-accent-soft: var(--sage-soft);
   padding: 32px 36px 64px;
   background: var(--paper);
-  min-height: 100%;
+  /* height (not min-height) caps the element so overflow-y: auto actually
+     triggers when content is taller. min-height: 100% would let the element
+     grow to fit content, defeating the scroll. */
+  height: 100%;
+  overflow-y: auto;
 }
 .connectors-shell { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 
@@ -6440,7 +6476,8 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   --page-accent-soft: rgba(99, 102, 241, 0.08);
   padding: 32px 36px 64px;
   background: var(--paper);
-  min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
 }
 .imports-shell { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 

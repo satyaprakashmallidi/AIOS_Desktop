@@ -325,16 +325,27 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  // Auto-update from GitHub Releases. Only checks in packaged builds —
-  // electron-updater no-ops in dev. We let it download silently in the
-  // background; users get the new version on next launch.
-  if (app.isPackaged) {
+  const broadcast = (state: string, payload?: Record<string, unknown>) => {
+    mainWindow?.webContents.send("aios:update-state", { state, ...payload });
+  };
+
+  // electron-updater's in-place auto-update requires the .app bundle to be
+  // code-signed on macOS (Squirrel.Mac validates the new bundle's signature
+  // against the running app's signature before swapping). Our Mac builds
+  // are unsigned today, so any in-place update attempt throws:
+  //   "code failed to satisfy specified code requirement(s)"
+  // Until we get an Apple Developer ID cert + notarization, Mac users get a
+  // "manual download" experience: we hit GitHub's API to see what's the
+  // latest release, and offer a button that opens the release page in their
+  // default browser.
+  //
+  // Windows is unaffected — NSIS doesn't have the same signing constraint,
+  // and our auto-update has been working there.
+  const isMac = process.platform === "darwin";
+
+  if (app.isPackaged && !isMac) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
-
-    const broadcast = (state: string, payload?: Record<string, unknown>) => {
-      mainWindow?.webContents.send("aios:update-state", { state, ...payload });
-    };
 
     autoUpdater.on("checking-for-update", () => broadcast("checking"));
     autoUpdater.on("update-available", (info) => {
@@ -355,6 +366,62 @@ app.whenReady().then(() => {
     autoUpdater.checkForUpdatesAndNotify().catch((err) => log("updater", "check-failed", { error: err?.message }));
   }
 
+  // Compare semver-like versions: returns true if `latest` is strictly newer
+  // than `current`. Stripping a leading "v" lets us compare GH tag names
+  // ("v0.1.9") against package.json versions ("0.1.9") interchangeably.
+  function isNewerVersion(latest: string, current: string): boolean {
+    const parse = (v: string) => v.replace(/^v/i, "").split(/[.-]/).map((n) => Number(n) || 0);
+    const lp = parse(latest);
+    const cp = parse(current);
+    for (let i = 0; i < Math.max(lp.length, cp.length); i++) {
+      const l = lp[i] ?? 0;
+      const c = cp[i] ?? 0;
+      if (l > c) return true;
+      if (l < c) return false;
+    }
+    return false;
+  }
+
+  // Mac-only manual update check: query GitHub's releases/latest endpoint
+  // (no auth required for public repos), compare versions, broadcast a
+  // "manual-available" state with the release URL when newer.
+  async function checkForUpdatesManual(): Promise<{
+    ok: boolean;
+    currentVersion: string;
+    latestVersion?: string;
+    hasUpdate?: boolean;
+    manualDownloadUrl?: string;
+    reason?: string;
+    error?: string;
+  }> {
+    const currentVersion = app.getVersion();
+    try {
+      broadcast("checking");
+      const res = await fetch(
+        "https://api.github.com/repos/satyaprakashmallidi/AIOS_Desktop/releases/latest",
+        { headers: { Accept: "application/vnd.github+json", "User-Agent": "AIOS-Desktop" } }
+      );
+      if (!res.ok) {
+        broadcast("error", { message: `GitHub API ${res.status}` });
+        return { ok: false, currentVersion, reason: "check-failed", error: `GitHub API ${res.status}` };
+      }
+      const data = (await res.json()) as { tag_name?: string; html_url?: string };
+      const tag = data.tag_name ?? "";
+      const latestVersion = tag.replace(/^v/i, "");
+      const url = data.html_url ?? `https://github.com/satyaprakashmallidi/AIOS_Desktop/releases/latest`;
+      if (isNewerVersion(latestVersion, currentVersion)) {
+        broadcast("manual-available", { version: latestVersion, manualDownloadUrl: url });
+        return { ok: true, currentVersion, latestVersion, hasUpdate: true, manualDownloadUrl: url };
+      }
+      broadcast("up-to-date", { version: currentVersion });
+      return { ok: true, currentVersion, latestVersion, hasUpdate: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      broadcast("error", { message });
+      return { ok: false, currentVersion, reason: "check-failed", error: message };
+    }
+  }
+
   // IPC: returns the currently-running app's version (from package.json).
   ipcMain.handle("aios:get-version", () => app.getVersion());
 
@@ -362,6 +429,11 @@ app.whenReady().then(() => {
   ipcMain.handle("aios:check-for-updates", async () => {
     if (!app.isPackaged) {
       return { ok: false, reason: "not-packaged", currentVersion: app.getVersion() };
+    }
+    if (isMac) {
+      // Mac uses manual download path because electron-updater requires
+      // code-signed bundles for ShipIt to swap the app in place.
+      return await checkForUpdatesManual();
     }
     try {
       const result = await autoUpdater.checkForUpdates();
@@ -379,6 +451,13 @@ app.whenReady().then(() => {
   // IPC: install the downloaded update + restart.
   ipcMain.handle("aios:install-update", async () => {
     if (!app.isPackaged) return { ok: false, reason: "not-packaged" };
+    if (isMac) {
+      // On Mac there is no downloaded update to install — the renderer
+      // should be calling openExternal(manualDownloadUrl) directly when the
+      // state is "manual-available". Returning a clear reason in case it
+      // doesn't.
+      return { ok: false, reason: "manual-only-on-mac" };
+    }
     try {
       autoUpdater.quitAndInstall();
       return { ok: true };

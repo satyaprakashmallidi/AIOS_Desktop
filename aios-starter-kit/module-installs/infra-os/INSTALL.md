@@ -18,6 +18,16 @@ setup_time: 20-30 minutes
 
 ---
 
+## Required Connectors
+
+- **GitHub** — Set up on the Connectors page before installing.
+
+The user must connect GitHub via the AIOS Connectors page first. The `/install` command will refuse to proceed if it's missing. Do **NOT** ask the user for a Personal Access Token, walk them through "github.com/settings/tokens", or write any GitHub credentials to `.env` — those steps are deprecated for any service in the connector catalog.
+
+Note: this connector is for GitHub API operations (issues, PRs, etc.). Git itself (`git push`/`git pull`) uses the user's local git credentials (SSH key or git credential helper), which is separate. If their local `git push` fails for auth reasons, suggest they configure git credentials normally — that's standard, not AIOS-specific.
+
+---
+
 ## FOR CLAUDE
 
 You are helping a user set up InfraOS — the version control, documentation, and security layer for their AIOS workspace. Follow these rules:

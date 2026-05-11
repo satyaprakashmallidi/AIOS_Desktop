@@ -1,45 +1,86 @@
 """
 DataOS — Stripe Revenue Collector (Example)
 
-Collects revenue, subscription, and churn metrics from Stripe.
-Supports multiple accounts — add STRIPE_API_KEY_YOURNAME=sk_live_... to .env.
+Collects revenue, subscription, and MRR metrics from Stripe via the AIOS
+Stripe connector (Composio). No STRIPE_API_KEY_* in .env — the user connects
+Stripe once via the Connectors page in AIOS Desktop.
+
+If Stripe isn't connected, this script prints a clear message and skips —
+DataOS continues with other sources.
 
 Copy this to scripts/collect_stripe.py to activate.
 
-Requires:
-    At least one STRIPE_API_KEY_* in .env
-    Get keys at: dashboard.stripe.com/apikeys (use restricted, read-only)
-
 Tables created: stripe_daily
-Extra pip: stripe
 """
 
-import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+# Find composio_client.py shipped at <workspace>/scripts/
+_HERE = Path(__file__).resolve()
+for _ancestor in _HERE.parents:
+    if (_ancestor / "scripts" / "composio_client.py").exists():
+        sys.path.insert(0, str(_ancestor / "scripts"))
+        break
 
-try:
-    import stripe
-except ImportError:
-    raise ImportError(
-        "Missing 'stripe' package — run: pip install stripe"
-    )
+from composio_client import Composio, ConnectorNotConfiguredError  # noqa: E402
 
 
-def _collect_account(api_key, account_name):
-    """Collect data from a single Stripe account."""
-    stripe.api_key = api_key
+def _safe_iter_pages(composio: Composio, slug: str, args: dict):
+    """Yield items across paginated Stripe responses.
 
-    # Detect account currency
+    Composio's Stripe tools return Stripe's native pagination shape:
+        { "data": [...], "has_more": bool, "next_page_starting_after": "..." }
+    """
+    while True:
+        result = composio.execute(tool_slug=slug, args=args, service="stripe") or {}
+        data = result.get("data", []) or []
+        for item in data:
+            yield item
+        if not result.get("has_more"):
+            return
+        cursor = result.get("next_page_starting_after") or (data[-1].get("id") if data else None)
+        if not cursor:
+            return
+        args = {**args, "starting_after": cursor}
+
+
+def collect():
+    """Collect Stripe data via the AIOS Stripe connector."""
     try:
-        account = stripe.Account.retrieve()
-        currency = (account.get("default_currency") or "usd").upper()
-    except Exception:
-        currency = "USD"
+        composio = Composio()
+    except Exception as exc:
+        return {
+            "source": "stripe", "status": "skipped",
+            "reason": f"Could not initialize AIOS Composio client: {exc}"
+        }
+
+    # Detect currency via STRIPE_RETRIEVE_BALANCE — Composio's Stripe toolkit
+    # doesn't expose a generic "get my account" tool, but the balance object
+    # has a top-level `available[].currency` which gives us the account currency.
+    try:
+        balance = composio.execute(
+            tool_slug="STRIPE_RETRIEVE_BALANCE", args={}, service="stripe"
+        ) or {}
+    except ConnectorNotConfiguredError:
+        return {
+            "source": "stripe", "status": "skipped",
+            "reason": "Stripe is not connected. Open AIOS Desktop → Connectors → Stripe."
+        }
+    except Exception as exc:
+        return {"source": "stripe", "status": "error", "reason": str(exc)}
+
+    # Unwrap potential {"data": {...}} wrapper from the relay
+    if isinstance(balance, dict) and "data" in balance and isinstance(balance["data"], dict):
+        balance = balance["data"]
+
+    available = balance.get("available") or []
+    currency = ((available[0] or {}).get("currency") if available else "usd").upper()
+    # Account name isn't available via Composio's Stripe tools — use a generic
+    # label. Identify-side prompt does the same.
+    account_name = "stripe"
 
     # Current month boundaries
     now = datetime.now(timezone.utc)
@@ -49,46 +90,56 @@ def _collect_account(api_key, account_name):
     # Active subscriptions + MRR calculation
     active_subs = 0
     mrr = 0.0
-    subs_iter = stripe.Subscription.list(status="active", limit=100)
-    for sub in subs_iter.auto_paging_iter():
-        active_subs += 1
-        for item in sub.get("items", {}).get("data", []):
-            amount = item.get("price", {}).get("unit_amount", 0) or 0
-            interval = item.get("price", {}).get("recurring", {}).get("interval", "month")
-            qty = item.get("quantity", 1) or 1
-            monthly = amount * qty / 100
-            if interval == "year":
-                monthly /= 12
-            elif interval == "week":
-                monthly *= 4.33
-            mrr += monthly
+    try:
+        for sub in _safe_iter_pages(composio, "STRIPE_LIST_SUBSCRIPTIONS", {"status": "active", "limit": 100}):
+            active_subs += 1
+            for item in ((sub.get("items") or {}).get("data") or []):
+                price = item.get("price") or {}
+                amount = price.get("unit_amount") or 0
+                interval = ((price.get("recurring") or {}).get("interval")) or "month"
+                qty = item.get("quantity") or 1
+                monthly = amount * qty / 100
+                if interval == "year":
+                    monthly /= 12
+                elif interval == "week":
+                    monthly *= 4.33
+                mrr += monthly
+    except Exception as exc:
+        return {"source": "stripe", "status": "error", "reason": f"list subscriptions: {exc}"}
 
     # New subscriptions this month
     new_subs = 0
-    for _ in stripe.Subscription.list(
-        created={"gte": month_start_ts}, limit=100
-    ).auto_paging_iter():
-        new_subs += 1
+    try:
+        for _ in _safe_iter_pages(composio, "STRIPE_LIST_SUBSCRIPTIONS",
+                                  {"created[gte]": month_start_ts, "limit": 100}):
+            new_subs += 1
+    except Exception:
+        pass
 
     # Revenue this month (successful charges)
     revenue_mtd = 0.0
-    for charge in stripe.Charge.list(
-        created={"gte": month_start_ts}, limit=100
-    ).auto_paging_iter():
-        if charge.status == "succeeded":
-            revenue_mtd += (charge.amount or 0) / 100
+    try:
+        for charge in _safe_iter_pages(composio, "STRIPE_LIST_CHARGES",
+                                       {"created[gte]": month_start_ts, "limit": 100}):
+            if charge.get("status") == "succeeded":
+                revenue_mtd += (charge.get("amount") or 0) / 100
+    except Exception:
+        pass
 
     # Canceled this month
     canceled = 0
-    for sub in stripe.Subscription.list(
-        status="canceled", limit=100
-    ).auto_paging_iter():
-        if sub.canceled_at and sub.canceled_at >= month_start_ts:
-            canceled += 1
+    try:
+        for sub in _safe_iter_pages(composio, "STRIPE_LIST_SUBSCRIPTIONS",
+                                    {"status": "canceled", "limit": 100}):
+            canceled_at = sub.get("canceled_at")
+            if canceled_at and canceled_at >= month_start_ts:
+                canceled += 1
+    except Exception:
+        pass
 
     churn_rate = (canceled / active_subs * 100) if active_subs > 0 else 0.0
 
-    return {
+    data = {
         "account": account_name,
         "currency": currency,
         "mrr": round(mrr, 2),
@@ -99,42 +150,10 @@ def _collect_account(api_key, account_name):
         "churn_rate": round(churn_rate, 2),
     }
 
-
-def collect():
-    """Collect Stripe data from all configured accounts."""
-    # Find all STRIPE_API_KEY_* variables in .env
-    accounts = {}
-    for key, value in os.environ.items():
-        if key.startswith("STRIPE_API_KEY_") and value.strip():
-            name = key.replace("STRIPE_API_KEY_", "").lower()
-            accounts[name] = value.strip()
-
-    if not accounts:
-        return {
-            "source": "stripe", "status": "skipped",
-            "reason": "No STRIPE_API_KEY_* found in .env — "
-                      "add STRIPE_API_KEY_MAIN=sk_live_... "
-                      "(get yours at dashboard.stripe.com/apikeys)"
-        }
-
-    results = {}
-    errors = []
-    for name, api_key in accounts.items():
-        try:
-            results[name] = _collect_account(api_key, name)
-        except Exception as e:
-            errors.append(f"{name}: {e}")
-
-    if not results:
-        return {
-            "source": "stripe", "status": "error",
-            "reason": "; ".join(errors)
-        }
-
     return {
         "source": "stripe",
         "status": "success",
-        "data": {"accounts": results, "errors": errors}
+        "data": {"accounts": {account_name: data}, "errors": []}
     }
 
 
@@ -162,7 +181,6 @@ def write(conn, result, date):
 
     collected_at = datetime.now(timezone.utc).isoformat()
     records = 0
-
     for name, data in result["data"]["accounts"].items():
         conn.execute(
             "INSERT OR REPLACE INTO stripe_daily "
@@ -174,7 +192,6 @@ def write(conn, result, date):
              data["canceled"], data["churn_rate"], collected_at)
         )
         records += 1
-
     conn.commit()
     return records
 

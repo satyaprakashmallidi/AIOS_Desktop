@@ -104,16 +104,20 @@ Service slug → env var: `service.toUpperCase().replace(/-/g, "_")` → `COMPOS
 
 ### Currently wired connectors
 
-| Service | Auth config | Slug | Status |
-|---------|-------------|------|--------|
-| Gmail | `ac_y-OIEuSxFKkE` | `gmail` | Live |
-| Google Calendar | `ac_cpWhovJpJ3kR` | `google-calendar` | Live |
-| Slack | `ac_jFwxYiIjQlUQ` | `slack` | Live |
-| ClickUp | `ac_Aje5GIG8qKi6` | `clickup` | Live |
-| Notion | `ac_EwoOuiTf19rs` | `notion` | Live |
-| GitHub | `ac_JEd7dBt0V4CU` | `github` | Live |
+| Service | Auth config | Slug | Status | Used by |
+|---------|-------------|------|--------|---------|
+| Gmail | `ac_y-OIEuSxFKkE` | `gmail` | Live | (no module yet) |
+| Google Calendar | `ac_cpWhovJpJ3kR` | `google-calendar` | Live | (no module yet) |
+| Slack | `ac_jFwxYiIjQlUQ` | `slack` | Live | IntelOS |
+| ClickUp | `ac_Aje5GIG8qKi6` | `clickup` | Live | (no module yet) |
+| Notion | `ac_EwoOuiTf19rs` | `notion` | Live | (no module yet) |
+| GitHub | `ac_JEd7dBt0V4CU` | `github` | Live | InfraOS |
+| Stripe | `ac_lreLxEiFkTlp` | `stripe` | Live (v0.1.9+) | DataOS |
+| YouTube | `ac_DRbRugQFigNA` | `youtube` | Live (v0.1.9+) | DataOS |
+| Google Analytics | `ac_WOs6TpNhcvC-` | `google-analytics` | Live (v0.1.9+) | DataOS |
+| Google Sheets | `ac_289PHe7QdUXw` | `google-sheets` | Live (v0.1.9+) | DataOS |
 
-All six live ones are tested end-to-end on `mspreddy7896@gmail.com` (Notion was authorized as `mspreddy789@gmail.com` separately).
+All 10 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
 
 ### Composio tool-router etiquette
 

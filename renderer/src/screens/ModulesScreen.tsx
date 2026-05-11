@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Boxes,
@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Loader2,
   Lock,
+  Plug,
   RefreshCw,
   Sparkles,
   Zap
@@ -17,6 +18,25 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "../lib/api";
 import type { ConnectionStatus, FilePreview, ModuleInfo } from "../types";
+
+// Pretty display name for each connector slug. Short variants for the inline
+// pills in the Modules screen (long names like "Google Analytics" overflow
+// when DataOS lists 4 of them in one row). Keep in sync with
+// ConnectorsScreen.tsx CONNECTOR_CATALOG.
+const CONNECTOR_LABEL: Record<string, string> = {
+  gmail: "Gmail",
+  "google-calendar": "Calendar",
+  slack: "Slack",
+  clickup: "ClickUp",
+  notion: "Notion",
+  github: "GitHub",
+  stripe: "Stripe",
+  youtube: "YouTube",
+  "google-analytics": "Analytics",
+  "google-sheets": "Sheets"
+};
+
+type ConnectorStatusMap = Record<string, { connected: boolean; label: string | null }>;
 
 const NAME_MAP: Record<string, string> = {
   "context-os": "ContextOS",
@@ -47,6 +67,16 @@ export function ModulesScreen({
     () => new Set(modules.filter((m) => m.installed).map((m) => m.id)),
     [modules]
   );
+
+  // Connector status fetched from the sidecar — drives the "Required Connectors"
+  // chips below each module's row. Refreshes whenever the Modules screen
+  // re-mounts so newly-connected services show up without an app reload.
+  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatusMap>({});
+  useEffect(() => {
+    invoke<{ connectors: ConnectorStatusMap }>("list_connector_status")
+      .then((res) => { if (res?.connectors) setConnectorStatus(res.connectors); })
+      .catch(() => undefined);
+  }, [modules]);
 
   const installedCount = modules.filter((m) => m.installed).length;
   const totalCount = modules.length;
@@ -114,6 +144,7 @@ export function ModulesScreen({
               key={module.id}
               module={module}
               installedIds={installedIds}
+              connectorStatus={connectorStatus}
               onAskClaude={onAskClaude}
               onNavigate={onNavigate}
             />
@@ -149,11 +180,13 @@ export function ModulesScreen({
 function ModuleRow({
   module,
   installedIds,
+  connectorStatus,
   onAskClaude,
   onNavigate
 }: {
   module: ModuleInfo;
   installedIds: Set<string>;
+  connectorStatus: ConnectorStatusMap;
   onAskClaude: (prompt: string) => void;
   onNavigate: (screen: string) => void;
 }) {
@@ -163,10 +196,15 @@ function ModuleRow({
 
   const requires = module.requires ?? [];
   const missingDeps = requires.filter((r) => !installedIds.has(r));
+  const requiredConnectors = module.requiredConnectors ?? [];
+  const missingConnectors = requiredConnectors.filter(
+    (c) => !connectorStatus[c]?.connected
+  );
   const sourceMissing = !module.sourceExists;
   // Once a module is installed, it can always be reinstalled — dependency check only blocks fresh installs.
   const blockedByDeps = missingDeps.length > 0 && !module.installed;
-  const blocked = sourceMissing || blockedByDeps;
+  const blockedByConnectors = missingConnectors.length > 0 && !module.installed;
+  const blocked = sourceMissing || blockedByDeps || blockedByConnectors;
 
   const status: "builtin" | "installed" | "ready" | "locked" | "missing" = module.builtIn
     ? "builtin"
@@ -174,7 +212,7 @@ function ModuleRow({
       ? "missing"
       : module.installed
         ? "installed"
-        : blockedByDeps
+        : blockedByDeps || blockedByConnectors
           ? "locked"
           : "ready";
 
@@ -219,17 +257,25 @@ function ModuleRow({
             {requires.length > 0 ? (
               <span className="modules-meta-item">
                 <span className="modules-meta-label">Needs</span>
-                {requires.map((r, i) => (
+                {requires.map((r) => (
                   <span key={r} className={`modules-meta-dep ${installedIds.has(r) ? "ok" : "missing"}`}>
-                    {prettyName(r)}{i < requires.length - 1 ? "," : ""}
+                    {prettyName(r)}
                   </span>
                 ))}
               </span>
             ) : null}
-            {module.connections && module.connections.length > 0 ? (
+            {requiredConnectors.length > 0 ? (
               <span className="modules-meta-item">
-                <span className="modules-meta-label">Connects</span>
-                {module.connections.join(" · ")}
+                <span className="modules-meta-label"><Plug size={10} /> Connectors</span>
+                {requiredConnectors.map((c) => (
+                  <span
+                    key={c}
+                    className={`modules-meta-dep ${connectorStatus[c]?.connected ? "ok" : "missing"}`}
+                    title={connectorStatus[c]?.connected ? `Connected as ${connectorStatus[c]?.label ?? "unknown"}` : "Open Connectors to set this up"}
+                  >
+                    {CONNECTOR_LABEL[c] ?? c}
+                  </span>
+                ))}
               </span>
             ) : null}
           </div>
@@ -249,6 +295,23 @@ function ModuleRow({
           >
             <ExternalLink size={13} />
             <span>{module.builtInButtonLabel || "Open"}</span>
+          </button>
+        ) : blockedByConnectors ? (
+          // Missing connector(s): button routes to Connectors page instead of
+          // starting install, so users can configure auth first. Claude's
+          // /install slash command also enforces this server-side.
+          <button
+            type="button"
+            className="modules-install-btn"
+            onClick={() => onNavigate("connectors")}
+            title={`Configure ${missingConnectors.map((c) => CONNECTOR_LABEL[c] ?? c).join(", ")} on the Connectors page first`}
+          >
+            <Plug size={13} />
+            <span>
+              Connect {missingConnectors.length === 1
+                ? CONNECTOR_LABEL[missingConnectors[0]] ?? missingConnectors[0]
+                : `${missingConnectors.length} services`}
+            </span>
           </button>
         ) : (
           <button

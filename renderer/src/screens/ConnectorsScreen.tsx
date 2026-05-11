@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BarChart3,
   Calendar,
   Check,
   CheckSquare,
+  CreditCard,
   ExternalLink,
   FileText,
   Github,
@@ -11,7 +13,9 @@ import {
   MessageSquare,
   Plug,
   Plus,
-  X
+  Sheet,
+  X,
+  Youtube
 } from "lucide-react";
 import { relay, RELAY_AVAILABLE, RelayError, type RelayConnection } from "../lib/aios-relay";
 import { invoke, newId } from "../lib/api";
@@ -63,6 +67,32 @@ const CONNECTOR_CATALOG: Connector[] = [
     label: "GitHub",
     description: "Browse repos, read issues, open PRs.",
     Icon: Github
+  },
+  // DataOS connectors. These are required by the DataOS module so it can
+  // pull live business metrics without asking the user for raw API keys.
+  {
+    service: "stripe",
+    label: "Stripe",
+    description: "Payments, subscriptions, customers, charges, MRR.",
+    Icon: CreditCard
+  },
+  {
+    service: "youtube",
+    label: "YouTube",
+    description: "Channel stats, video performance, subscriber growth.",
+    Icon: Youtube
+  },
+  {
+    service: "google-analytics",
+    label: "Google Analytics",
+    description: "Site traffic, conversion, audience metrics from GA4.",
+    Icon: BarChart3
+  },
+  {
+    service: "google-sheets",
+    label: "Google Sheets",
+    description: "Read structured data from sheets you own.",
+    Icon: Sheet
   }
 ];
 
@@ -121,10 +151,14 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
       const prompts: Record<string, string> = {
         gmail: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GMAIL_FETCH_EMAILS" and arguments {"query": "in:sent", "max_results": 1}. Read the "From" header of the returned message — that address is the account owner. Reply with ONLY the bare email, nothing else. If the result has no messages, reply: UNKNOWN.`,
         "google-calendar": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLECALENDAR_LIST_CALENDARS" and arguments {}. Find the calendar where "primary" is true — its "id" is the user's email. Reply with ONLY the bare email, nothing else. If no primary calendar, reply: UNKNOWN.`,
-        slack: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_AUTH_TEST" and arguments {}. Read the response — it contains the authenticated user. If "user" is an email, reply with that email. Otherwise reply with "@" + the "user" field. ONLY the bare email or @handle, nothing else. If unsure, reply: UNKNOWN.`,
-        clickup: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CLICKUP_GET_AUTHORIZED_USER" and arguments {}. Read the "email" field of the returned user. Reply with ONLY the bare email, nothing else. If no email, reply: UNKNOWN.`,
+        slack: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_LIST_ALL_SLACK_TEAM_CHANNELS_WITH_VARIOUS_FILTERS" and arguments {"types": "public_channel", "limit": 1}. From the response, read team_id. Then call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL with tool_slug "SLACK_RETRIEVE_TEAM_PROFILE_DETAILS" and arguments {"team": team_id_from_step_1}. Reply with the team's "name" field — that's the workspace name. ONLY the workspace name, nothing else. If unsure, reply: UNKNOWN.`,
+        clickup: `Reply with the single word: UNKNOWN`,
         notion: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "NOTION_GET_ABOUT_ME" and arguments {}. Find the user's email (often at bot.owner.user.person.email) or workspace name. Reply with ONLY the bare email or workspace name, nothing else. If unsure, reply: UNKNOWN.`,
-        github: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GITHUB_GET_THE_AUTHENTICATED_USER" and arguments {}. Read the "email" field. If null, use "@" + the "login" field. Reply with ONLY the bare email or @login, nothing else. If unsure, reply: UNKNOWN.`
+        github: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GITHUB_GET_THE_AUTHENTICATED_USER" and arguments {}. Read the "email" field. If null, use "@" + the "login" field. Reply with ONLY the bare email or @login, nothing else. If unsure, reply: UNKNOWN.`,
+        stripe: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "STRIPE_RETRIEVE_BALANCE" and arguments {}. Read available[0].currency (uppercased). Reply with "Stripe (CURRENCY)" — e.g. "Stripe (USD)". ONLY that, nothing else. If unsure, reply: UNKNOWN.`,
+        youtube: `Reply with the single word: UNKNOWN`,
+        "google-analytics": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLE_ANALYTICS_LIST_ACCOUNTS" and arguments {}. Find the first account's "displayName". Reply with ONLY that name, nothing else. If no accounts, reply: UNKNOWN.`,
+        "google-sheets": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {

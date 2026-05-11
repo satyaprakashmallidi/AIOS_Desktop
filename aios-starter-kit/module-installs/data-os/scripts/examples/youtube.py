@@ -1,128 +1,161 @@
 """
-DataOS — YouTube Data API Collector (Example)
+DataOS — YouTube Data Collector (Example)
 
-Collects channel statistics and recent video performance from YouTube.
-Copy this to scripts/collect_youtube.py and customize for your channel.
+Collects channel statistics and recent video performance from YouTube via the
+AIOS YouTube connector (Composio). OAuth handled by the Connectors page.
 
-Requires:
-    YOUTUBE_API_KEY      — Get at console.cloud.google.com/apis/credentials
-    YOUTUBE_CHANNEL_ID   — Find at youtube.com/account_advanced
+**Required env var:** `YOUTUBE_CHANNEL_ID` — Composio's YouTube toolkit
+doesn't have a "list my channels" tool, so we can't auto-discover the
+channel. Find your channel ID at https://www.youtube.com/account_advanced
+and add `YOUTUBE_CHANNEL_ID=UCxxxxxxxxxx` to your workspace `.env`.
+
+If YouTube isn't connected OR the channel ID is missing, this collector
+prints a clear message and skips — DataOS continues with other sources.
+
+Copy this to scripts/collect_youtube.py to activate.
 
 Tables created: youtube_daily, youtube_videos
-Extra pip: google-api-python-client google-auth
 """
 
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+# Find composio_client.py shipped at <workspace>/scripts/
+_HERE = Path(__file__).resolve()
+for _ancestor in _HERE.parents:
+    if (_ancestor / "scripts" / "composio_client.py").exists():
+        sys.path.insert(0, str(_ancestor / "scripts"))
+        break
 
-try:
-    from googleapiclient.discovery import build
-except ImportError:
-    raise ImportError(
-        "Missing 'google-api-python-client' — run: pip install google-api-python-client google-auth"
-    )
+from composio_client import Composio, ConnectorNotConfiguredError  # noqa: E402
+
+
+def _unwrap(data):
+    """Composio responses may be wrapped in {data: ...} — normalise."""
+    if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
+        return data["data"]
+    return data
 
 
 def collect():
-    """Collect YouTube channel and video data."""
-    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-    channel_id = os.getenv("YOUTUBE_CHANNEL_ID", "").strip()
-
-    if not api_key:
-        return {
-            "source": "youtube", "status": "skipped",
-            "reason": "Missing YOUTUBE_API_KEY — add it to .env "
-                      "(get yours at console.cloud.google.com/apis/credentials)"
-        }
+    """Collect YouTube channel and video data via the AIOS YouTube connector."""
+    channel_id = (os.environ.get("YOUTUBE_CHANNEL_ID") or "").strip()
     if not channel_id:
         return {
             "source": "youtube", "status": "skipped",
-            "reason": "Missing YOUTUBE_CHANNEL_ID — find it at youtube.com/account_advanced"
+            "reason": "Missing YOUTUBE_CHANNEL_ID — set it in .env. "
+                      "Find your channel ID at youtube.com/account_advanced."
         }
 
     try:
-        youtube = build("youtube", "v3", developerKey=api_key)
-
-        # Channel statistics
-        channel_resp = youtube.channels().list(
-            part="statistics,snippet", id=channel_id
-        ).execute()
-
-        if not channel_resp.get("items"):
-            return {
-                "source": "youtube", "status": "error",
-                "reason": f"Channel {channel_id} not found"
-            }
-
-        stats = channel_resp["items"][0]["statistics"]
-        snippet = channel_resp["items"][0]["snippet"]
-
-        channel_data = {
-            "channel_name": snippet.get("title", ""),
-            "subscribers": int(stats.get("subscriberCount", 0)),
-            "total_views": int(stats.get("viewCount", 0)),
-            "total_videos": int(stats.get("videoCount", 0)),
-        }
-
-        # Recent videos (last 30 days)
-        thirty_days_ago = (
-            datetime.now(timezone.utc) - timedelta(days=30)
-        ).isoformat()
-
-        search_resp = youtube.search().list(
-            part="id", channelId=channel_id, type="video",
-            publishedAfter=thirty_days_ago, order="date", maxResults=50
-        ).execute()
-
-        video_ids = [
-            item["id"]["videoId"]
-            for item in search_resp.get("items", [])
-            if "videoId" in item.get("id", {})
-        ]
-
-        videos = []
-        total_views_30d = 0
-
-        # Fetch video details in batches of 50
-        for i in range(0, len(video_ids), 50):
-            batch = video_ids[i:i + 50]
-            vid_resp = youtube.videos().list(
-                part="statistics,snippet,contentDetails",
-                id=",".join(batch)
-            ).execute()
-
-            for item in vid_resp.get("items", []):
-                vid_stats = item.get("statistics", {})
-                views = int(vid_stats.get("viewCount", 0))
-                total_views_30d += views
-                videos.append({
-                    "video_id": item["id"],
-                    "title": item["snippet"]["title"],
-                    "published": item["snippet"]["publishedAt"][:10],
-                    "views": views,
-                    "likes": int(vid_stats.get("likeCount", 0)),
-                    "comments": int(vid_stats.get("commentCount", 0)),
-                    "duration": item.get("contentDetails", {}).get("duration", ""),
-                })
-
+        composio = Composio()
+    except Exception as exc:
         return {
-            "source": "youtube",
-            "status": "success",
-            "data": {
-                "channel": channel_data,
-                "videos_30d": videos,
-                "total_views_30d": total_views_30d,
-                "videos_published_30d": len(videos),
-            }
+            "source": "youtube", "status": "skipped",
+            "reason": f"Could not initialize AIOS Composio client: {exc}"
         }
 
-    except Exception as e:
-        return {"source": "youtube", "status": "error", "reason": str(e)}
+    # Channel statistics — Composio's slug for this is YOUTUBE_GET_CHANNEL_STATISTICS.
+    try:
+        stats_resp = composio.execute(
+            tool_slug="YOUTUBE_GET_CHANNEL_STATISTICS",
+            args={"id": channel_id},
+            service="youtube",
+        ) or {}
+    except ConnectorNotConfiguredError:
+        return {
+            "source": "youtube", "status": "skipped",
+            "reason": "YouTube is not connected. Open AIOS Desktop → Connectors → YouTube."
+        }
+    except Exception as exc:
+        return {"source": "youtube", "status": "error", "reason": str(exc)}
+
+    stats_resp = _unwrap(stats_resp)
+    items = stats_resp.get("items") or []
+    if not items:
+        return {"source": "youtube", "status": "error",
+                "reason": f"Channel {channel_id} not found or no access"}
+
+    primary = items[0]
+    stats = primary.get("statistics") or {}
+    snippet = primary.get("snippet") or {}
+
+    channel_data = {
+        "channel_id": channel_id,
+        "channel_name": snippet.get("title", ""),
+        "subscribers": int(stats.get("subscriberCount", 0) or 0),
+        "total_views": int(stats.get("viewCount", 0) or 0),
+        "total_videos": int(stats.get("videoCount", 0) or 0),
+    }
+
+    # Recent videos: YOUTUBE_LIST_CHANNEL_VIDEOS returns recent uploads.
+    videos: list[dict] = []
+    total_views_30d = 0
+    try:
+        videos_resp = composio.execute(
+            tool_slug="YOUTUBE_LIST_CHANNEL_VIDEOS",
+            args={"channelId": channel_id, "maxResults": 50},
+            service="youtube",
+        ) or {}
+        videos_resp = _unwrap(videos_resp)
+        thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30))
+        for item in (videos_resp.get("items") or []):
+            snip = item.get("snippet") or {}
+            published_str = snip.get("publishedAt", "")
+            # Only keep last 30 days
+            try:
+                published_at = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
+                if published_at < thirty_days_ago:
+                    continue
+            except Exception:
+                pass
+
+            # Snippet only has basic info; fetch full details for view counts.
+            video_id = ((item.get("id") or {}).get("videoId")
+                        if isinstance(item.get("id"), dict)
+                        else item.get("id"))
+            if not video_id:
+                continue
+            try:
+                detail = composio.execute(
+                    tool_slug="YOUTUBE_VIDEO_DETAILS",
+                    args={"id": video_id, "part": "statistics,contentDetails,snippet"},
+                    service="youtube",
+                ) or {}
+                detail = _unwrap(detail)
+                dst = ((detail.get("items") or [{}])[0]).get("statistics") or {}
+                dsnip = ((detail.get("items") or [{}])[0]).get("snippet") or {}
+                dcd = ((detail.get("items") or [{}])[0]).get("contentDetails") or {}
+            except Exception:
+                dst, dsnip, dcd = {}, snip, {}
+
+            views = int(dst.get("viewCount", 0) or 0)
+            total_views_30d += views
+            videos.append({
+                "video_id": video_id,
+                "title": dsnip.get("title", "") or snip.get("title", ""),
+                "published": (dsnip.get("publishedAt") or published_str)[:10],
+                "views": views,
+                "likes": int(dst.get("likeCount", 0) or 0),
+                "comments": int(dst.get("commentCount", 0) or 0),
+                "duration": dcd.get("duration", ""),
+            })
+    except Exception:
+        pass
+
+    return {
+        "source": "youtube",
+        "status": "success",
+        "data": {
+            "channel": channel_data,
+            "videos_30d": videos,
+            "total_views_30d": total_views_30d,
+            "videos_published_30d": len(videos),
+        }
+    }
 
 
 def write(conn, result, date):
@@ -160,7 +193,6 @@ def write(conn, result, date):
     collected_at = datetime.now(timezone.utc).isoformat()
     records = 0
 
-    # Daily channel snapshot
     conn.execute(
         "INSERT OR REPLACE INTO youtube_daily "
         "(date, subscribers, total_views, total_videos, views_30d, "
@@ -170,8 +202,6 @@ def write(conn, result, date):
          data["videos_published_30d"], collected_at)
     )
     records += 1
-
-    # Video records
     for video in data.get("videos_30d", []):
         conn.execute(
             "INSERT OR REPLACE INTO youtube_videos "
@@ -182,7 +212,6 @@ def write(conn, result, date):
              video["duration"], date)
         )
         records += 1
-
     conn.commit()
     return records
 

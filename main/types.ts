@@ -58,7 +58,8 @@ export type AiosCommand =
   | "create_import_folder"
   | "delete_import_folder"
   | "update_claude_mcp"
-  | "rotate_device_user_id";
+  | "rotate_device_user_id"
+  | "list_connector_status";
 
 export interface HostRequest {
   id: string;

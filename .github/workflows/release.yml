@@ -24,14 +24,14 @@ jobs:
             platform: win
             arch: x64
             pyinstallerArch: x64
+          # One universal2 Mac build covers both Apple Silicon and Intel Macs
+          # in a single .dmg. Replaces the previous arm64+x64 matrix split
+          # because GitHub's macos-13 (Intel) runners have brutal queue times
+          # that left every release with a phantom job stuck in queue.
           - os: macos-latest
             platform: mac
-            arch: arm64
-            pyinstallerArch: arm64
-          - os: macos-13
-            platform: mac
-            arch: x64
-            pyinstallerArch: x86_64
+            arch: universal
+            pyinstallerArch: universal2
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -67,25 +67,17 @@ jobs:
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
         run: npm run release -- --win
 
-      - name: Build + publish (macOS arm64)
-        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+      - name: Build + publish (macOS universal)
+        if: matrix.platform == 'mac'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Mac builds are unsigned for now. When you have an Apple
-          # Developer ID add CSC_LINK + CSC_KEY_PASSWORD secrets.
+          # Developer ID add CSC_LINK + CSC_KEY_PASSWORD secrets and the
+          # in-app "Check for updates" will switch from manual-download
+          # to ShipIt in-place auto-update on Mac too.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
-        run: npm run release -- --mac --arm64
-
-      - name: Build + publish (macOS x64)
-        if: matrix.platform == 'mac' && matrix.arch == 'x64'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Build Intel artifacts on an Intel runner so native modules such as
-          # keytar are compiled for the same architecture as the app bundle.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
-        run: npm run release -- --mac --x64
+        run: npm run release -- --mac --universal
 
       - name: Upload installer artifacts (debugging)
         if: always()

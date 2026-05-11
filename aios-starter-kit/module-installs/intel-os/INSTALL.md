@@ -18,6 +18,23 @@ setup_time: 20-30 minutes
 
 ---
 
+## Required Connectors
+
+- **Slack** — Set up on the Connectors page before installing.
+
+The user must connect Slack via the AIOS Connectors page first. The `/install` command will refuse to proceed if it's missing. Do **NOT** ask the user to create a Slack app at api.slack.com, generate `SLACK_TOKEN_*` values, or paste them into `.env` — that path is deprecated. The IntelOS Slack collector uses Composio's Slack tools via the AIOS relay with the user's OAuth-authorized connection from the Connectors page.
+
+### Optional API keys (services NOT in the connector catalog)
+
+These are still needed for meeting-recorder integrations (no Composio connector available):
+
+- **Fireflies.ai** — `FIREFLIES_API_KEY` in `.env` if the user uses Fireflies for meeting recordings.
+- **Fathom** — `FATHOM_API_KEY` in `.env` if the user uses Fathom instead.
+
+If the user uses neither (only Slack data), skip the meeting-recorder setup entirely.
+
+---
+
 ## FOR CLAUDE
 
 You are helping a user install IntelOS — the intelligence collection layer for their AIOS. This module collects meeting recordings and Slack messages into a searchable database. Follow these rules:

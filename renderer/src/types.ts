@@ -58,7 +58,8 @@ export type AiosCommand =
   | "create_import_folder"
   | "delete_import_folder"
   | "update_claude_mcp"
-  | "rotate_device_user_id";
+  | "rotate_device_user_id"
+  | "list_connector_status";
 
 export interface DailyBrief {
   id: number;
@@ -91,9 +92,9 @@ export interface AiosApi {
   openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
   openOauthWindow: (url: string) => Promise<{ ok: boolean; completed?: boolean; error?: string }>;
   getVersion: () => Promise<string>;
-  checkForUpdates: () => Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean }>;
+  checkForUpdates: () => Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean; manualDownloadUrl?: string }>;
   installUpdate: () => Promise<{ ok: boolean; reason?: string; error?: string }>;
-  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string }) => void) => () => void;
+  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string; manualDownloadUrl?: string }) => void) => () => void;
   window: {
     minimize: () => void;
     maximize: () => void;
@@ -155,6 +156,10 @@ export interface ModuleInfo {
   requires?: string[];
   artifacts?: string[];
   connections?: string[];
+  // Connectors-page service slugs this module needs configured before install.
+  // E.g. ["github"] or ["stripe", "youtube", "google-analytics", "google-sheets"].
+  // The /install command refuses to proceed if any are missing.
+  requiredConnectors?: string[];
   builtIn?: boolean;
   builtInRoute?: string | null;
   builtInButtonLabel?: string | null;

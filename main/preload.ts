@@ -61,7 +61,8 @@ const allowedCommands = new Set<AiosCommand>([
   "create_import_folder",
   "delete_import_folder",
   "update_claude_mcp",
-  "rotate_device_user_id"
+  "rotate_device_user_id",
+  "list_connector_status"
 ]);
 
 contextBridge.exposeInMainWorld("aios", {
@@ -81,12 +82,12 @@ contextBridge.exposeInMainWorld("aios", {
   openOauthWindow: (url: string): Promise<{ ok: boolean; completed?: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-oauth-window", url),
   getVersion: (): Promise<string> => ipcRenderer.invoke("aios:get-version"),
-  checkForUpdates: (): Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean }> =>
+  checkForUpdates: (): Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean; manualDownloadUrl?: string }> =>
     ipcRenderer.invoke("aios:check-for-updates"),
   installUpdate: (): Promise<{ ok: boolean; reason?: string; error?: string }> =>
     ipcRenderer.invoke("aios:install-update"),
-  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: { state: string; version?: string; percent?: number; message?: string }) => callback(payload);
+  onUpdateState: (callback: (event: { state: string; version?: string; percent?: number; message?: string; manualDownloadUrl?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { state: string; version?: string; percent?: number; message?: string; manualDownloadUrl?: string }) => callback(payload);
     ipcRenderer.on("aios:update-state", listener);
     return () => ipcRenderer.removeListener("aios:update-state", listener);
   },

@@ -304,6 +304,100 @@ async function handleMcpConfig(deviceUserId: string): Promise<Response> {
   }
 }
 
+// ─── POST /execute-tool ────────────────────────────────────────────────────
+//
+// Direct tool execution path — used by module scripts (IntelOS Slack
+// collector, DataOS Stripe/YouTube/GA/Sheets collectors, etc.) to call a
+// Composio tool with the user's OAuth-authorized connection WITHOUT going
+// through Claude / MCP. Lets scheduled scripts run independently of the app.
+//
+// Body: { tool_slug: string, service?: string, args?: object }
+// Returns: { ok: true, data: <tool response> } or { error }
+//
+// The service field is optional — when present, we use it to look up the
+// user's connected_account for that service and pass `connectedAccountId`
+// to Composio's tool execute. When absent, Composio infers from the tool
+// slug (e.g. SLACK_* → user's Slack connection).
+async function handleExecuteTool(req: Request, deviceUserId: string): Promise<Response> {
+  const user = await findUser(deviceUserId);
+  if (!user) return errorResponse("Device user not registered", 404, "NOT_REGISTERED");
+
+  const body = await req.json().catch(() => ({}));
+  const toolSlug = typeof body.tool_slug === "string" ? body.tool_slug : "";
+  const service = typeof body.service === "string" ? body.service : null;
+  const args = body.args && typeof body.args === "object" ? body.args : {};
+
+  if (!toolSlug) {
+    return errorResponse("Missing tool_slug in request body", 400, "BAD_REQUEST");
+  }
+
+  // Service guard — if the caller specifies a service, refuse if that service
+  // isn't connected for this user. Surface a clear error so scripts know to
+  // tell the user "open the Connectors page".
+  let connectedAccountId: string | null = null;
+  if (service) {
+    const { data: conn, error: connErr } = await supabase
+      .from("device_connections")
+      .select("composio_connection_id, status")
+      .eq("device_user_id", deviceUserId)
+      .eq("service", service)
+      .maybeSingle();
+    if (connErr) return errorResponse(connErr.message, 500, "DB_ERROR");
+    if (!conn || conn.status !== "connected") {
+      return errorResponse(
+        `Service "${service}" is not connected. Open the Connectors page in AIOS Desktop.`,
+        409,
+        "NOT_CONNECTED"
+      );
+    }
+    connectedAccountId = conn.composio_connection_id;
+  }
+
+  // Use the Composio SDK — same path as /mcp-config — so we don't have to
+  // hand-roll the REST shape (Composio v3 hasn't documented it publicly).
+  try {
+    const composioModule = await import("npm:@composio/core");
+    const ComposioCtor: any = composioModule.Composio ?? composioModule.default ?? composioModule;
+    const composio = new ComposioCtor({ apiKey: COMPOSIO_API_KEY });
+
+    // The SDK exposes execute under different names depending on the version
+    // we get from npm. Try in priority order.
+    const executor: any =
+      composio?.tools?.execute ??
+      composio?.actions?.execute ??
+      composio?.execute;
+    if (typeof executor !== "function") {
+      return errorResponse(
+        "Composio SDK does not expose a tool execute method we recognise.",
+        502,
+        "SDK_SHAPE_UNKNOWN"
+      );
+    }
+
+    // @composio/core v3 signature:
+    //   composio.tools.execute(toolSlug, { userId, arguments, connectedAccountId })
+    // toolSlug must be a positional first argument; older versions of this
+    // relay passed everything in a single options object, which made the SDK
+    // see toolSlug as undefined and reject with "parameter should be a object,
+    // but you provided a undefined".
+    const callOpts = {
+      userId: deviceUserId,
+      arguments: args,
+      ...(connectedAccountId ? { connectedAccountId } : {}),
+    };
+    const result = await executor.call(composio, toolSlug, callOpts);
+
+    return jsonResponse({ ok: true, data: result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResponse(
+      `Composio tool execute failed: ${message.slice(0, 800)}`,
+      502,
+      "COMPOSIO_ERROR"
+    );
+  }
+}
+
 // ─── Router ────────────────────────────────────────────────────────────────
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -341,6 +435,9 @@ serve(async (req: Request) => {
     }
     if (req.method === "GET" && path === "/mcp-config") {
       return await handleMcpConfig(deviceUserId);
+    }
+    if (req.method === "POST" && path === "/execute-tool") {
+      return await handleExecuteTool(req, deviceUserId);
     }
 
     return errorResponse(`No route for ${req.method} ${path}`, 404, "NOT_FOUND");

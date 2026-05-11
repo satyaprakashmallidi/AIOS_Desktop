@@ -49,6 +49,39 @@ import type { OnboardingState, Screen } from "./ui";
 import { relay, RELAY_AVAILABLE } from "./lib/aios-relay";
 import "./styles.css";
 
+// Reconcile a freshly-fetched session list (from SQLite) with what's already
+// in memory. Critical race condition we're solving:
+//
+//   1. User sends a chat message → CommandScreen optimistically appends a
+//      user-message + empty assistant placeholder to the in-memory session.
+//   2. Claude streams its reply over ~10-25s. During this window, in-memory
+//      state grows (deltas accumulate on the placeholder).
+//   3. The 60-second `refreshWorkspace` polling timer fires.
+//   4. It calls `get_sessions` from SQLite — which doesn't have the in-flight
+//      messages yet (they get saved only on Claude completion).
+//   5. Without a merge, `setSessions(freshFromDb)` overwrites the in-memory
+//      session and BOTH the user's message and Claude's streaming response
+//      disappear. Subsequent stream deltas reference an `assistantId` that
+//      no longer exists in state → silently dropped.
+//
+// The fix: for each session present in BOTH lists, keep whichever has MORE
+// messages. In-memory > DB means a chat is in-flight; preserve it.
+// In-memory == DB or in-memory < DB means DB is the source of truth; use it.
+function mergeSessions(current: ChatSession[], fresh: ChatSession[]): ChatSession[] {
+  const freshById = new Map(fresh.map((s) => [s.id, s]));
+  const merged = current.map((c) => {
+    const f = freshById.get(c.id);
+    if (!f) return c;
+    return c.messages.length > f.messages.length ? c : f;
+  });
+  // Add any sessions that exist in DB but not in memory yet (e.g. auto-task
+  // created one in the background).
+  for (const f of fresh) {
+    if (!merged.some((s) => s.id === f.id)) merged.push(f);
+  }
+  return merged;
+}
+
 // Per-service identify prompts used by the App-level background connector
 // identifier. Kept at module scope so the effect can call it without
 // re-creating the map every render.
@@ -64,13 +97,33 @@ function identifyPromptFor(service: string): string | null {
     case "google-calendar":
       return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLECALENDAR_LIST_CALENDARS" and arguments {}. Find the calendar where "primary" is true — its "id" is the user's email. Reply with ONLY the bare email, nothing else. If no primary calendar, reply: UNKNOWN.`;
     case "slack":
-      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_AUTH_TEST" and arguments {}. Read the response — it contains the authenticated user. If "user" is an email, reply with that email. Otherwise reply with "@" + the "user" field. ONLY the bare email or @handle, nothing else. If unsure, reply: UNKNOWN.`;
+      // No SLACK_AUTH_TEST in Composio's catalog. Use the user-info-by-id flow
+      // indirectly: fetch a sent message and look at its 'user' field. Less
+      // direct but reliable.
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_LIST_ALL_SLACK_TEAM_CHANNELS_WITH_VARIOUS_FILTERS" and arguments {"types": "public_channel", "limit": 1}. From the response, read team_id. Then call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL with tool_slug "SLACK_RETRIEVE_TEAM_PROFILE_DETAILS" and arguments {"team": team_id_from_step_1}. Reply with the team's "name" field — that's the workspace name. ONLY the workspace name, nothing else. If unsure, reply: UNKNOWN.`;
     case "clickup":
-      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CLICKUP_GET_AUTHORIZED_USER" and arguments {}. Read the "email" field of the returned user. Reply with ONLY the bare email, nothing else. If no email, reply: UNKNOWN.`;
+      // ClickUp toolkit has 0 tools in Composio's catalog. Identify isn't
+      // possible — just confirm the connection works by listing-ish nothing.
+      // Returning UNKNOWN means the card shows "Connected" without a label.
+      return `Reply with the single word: UNKNOWN`;
     case "notion":
       return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "NOTION_GET_ABOUT_ME" and arguments {}. Find the user's email (often at bot.owner.user.person.email) or workspace name. Reply with ONLY the bare email or workspace name, nothing else. If unsure, reply: UNKNOWN.`;
     case "github":
       return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GITHUB_GET_THE_AUTHENTICATED_USER" and arguments {}. Read the "email" field. If null, use "@" + the "login" field. Reply with ONLY the bare email or @login, nothing else. If unsure, reply: UNKNOWN.`;
+    case "stripe":
+      // No STRIPE_GET_ACCOUNT in Composio's catalog. Best we can do is grab
+      // the account currency from the balance and use that as the label.
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "STRIPE_RETRIEVE_BALANCE" and arguments {}. Read available[0].currency (uppercased). Reply with "Stripe (CURRENCY)" — e.g. "Stripe (USD)". ONLY that, nothing else. If unsure, reply: UNKNOWN.`;
+    case "youtube":
+      // No LIST_MY_CHANNELS in Composio's catalog. Can't auto-discover —
+      // reply UNKNOWN so the card shows "Connected" without a label.
+      return `Reply with the single word: UNKNOWN`;
+    case "google-analytics":
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLE_ANALYTICS_LIST_ACCOUNTS" and arguments {}. Find the first account's "displayName". Reply with ONLY that name, nothing else. If no accounts, reply: UNKNOWN.`;
+    case "google-sheets":
+      // No GOOGLE_SHEETS_GET_USER_INFO in Composio's catalog. List user's
+      // sheets and use the first sheet's owner email as the label.
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`;
     default:
       return null;
   }
@@ -117,7 +170,8 @@ function App() {
     startTransition(() => {
       setWorkspace(workspaceInfo);
       setOnboarding(onboardingState);
-      setSessions(nextSessions);
+      // Merge — preserves any in-flight chat (see mergeSessions doc above).
+      setSessions((current) => mergeSessions(current, nextSessions));
       setActiveSessionId((current) => current ?? nextSessions[0]?.id ?? null);
     });
     return { workspace: workspaceInfo, sessions: nextSessions };
@@ -163,7 +217,10 @@ function App() {
       setOutputs(outputSummary.entries);
       setPlans(planSummary.entries);
       setShares(shareSummary.entries);
-      setSessions(nextSessions);
+      // Merge — preserves any in-flight chat (see mergeSessions doc above).
+      // Without this, the 60s polling overwrites the user's just-sent message
+      // and Claude's mid-stream response with a stale snapshot from SQLite.
+      setSessions((current) => mergeSessions(current, nextSessions));
       setActiveSessionId((current) => current ?? nextSessions[0]?.id ?? null);
     });
   }
@@ -315,7 +372,11 @@ function App() {
       try {
         // 1. Hydrate any already-stored labels so we don't re-run identify.
         const stored = new Set<string>();
-        const services = ["gmail", "google-calendar", "slack", "clickup", "notion", "github"];
+        const services = [
+          "gmail", "google-calendar", "slack", "clickup", "notion", "github",
+          // DataOS connectors
+          "stripe", "youtube", "google-analytics", "google-sheets"
+        ];
         for (const service of services) {
           if (cancelled) return;
           try {
