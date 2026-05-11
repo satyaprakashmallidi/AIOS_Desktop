@@ -76,6 +76,16 @@ const starterPrompts = [
   { label: "Create a plan from my workspace", icon: Bot, prompt: "Create a practical plan from my current AIOS workspace context." }
 ];
 
+// Model picker options. "default" omits --model from the spawn so Claude CLI
+// uses whatever the user has configured. The other three pass the short alias
+// that Claude Code CLI accepts.
+const CHAT_MODELS = [
+  { id: "default", label: "Default",     description: "Use your Claude CLI default" },
+  { id: "haiku",   label: "Haiku 4.5",   description: "Fastest · best for simple tasks" },
+  { id: "sonnet",  label: "Sonnet 4.6",  description: "Balanced · everyday default" },
+  { id: "opus",    label: "Opus 4.7",    description: "Smartest · slowest, most capable" }
+] as const;
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -197,6 +207,10 @@ export function CommandScreen({
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string; size: number }>>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("default");
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const modelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const installedCount = modules.filter((module) => module.installed).length;
   const contextCount = context.files.filter((file) => file.exists).length;
   const realMessages = activeSession?.messages ?? [];
@@ -214,6 +228,36 @@ export function CommandScreen({
     document.addEventListener("aios:set-prompt", onSetPrompt as EventListener);
     return () => document.removeEventListener("aios:set-prompt", onSetPrompt as EventListener);
   }, []);
+
+  // Load persisted model choice on mount.
+  useEffect(() => {
+    invoke<{ key: string; value: string | null }>("get_setting", { key: "chat_model" })
+      .then((r) => {
+        if (r?.value && CHAT_MODELS.some((m) => m.id === r.value)) {
+          setSelectedModel(r.value);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // Click-away to close the model dropdown.
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (modelButtonRef.current?.contains(target)) return;
+      if (modelMenuRef.current?.contains(target)) return;
+      setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [modelMenuOpen]);
+
+  async function pickModel(id: string) {
+    setSelectedModel(id);
+    setModelMenuOpen(false);
+    await invoke("set_setting", { key: "chat_model", value: id }).catch(() => undefined);
+  }
 
   useEffect(() => {
     setShowFullHistory(false);
@@ -598,6 +642,9 @@ export function CommandScreen({
       const claudeSessionId = activeSession.claudeSessionId ?? undefined;
       const baseArgs: Record<string, unknown> = { claudePath: claude.path, streamId };
       if (claudeSessionId) baseArgs.sessionId = claudeSessionId;
+      // Pass the user-picked model through as --model <alias>. "default" means
+      // omit the flag so Claude CLI uses whatever's configured globally.
+      if (selectedModel && selectedModel !== "default") baseArgs.model = selectedModel;
       const taskArgs = command === "run_prime"
         ? baseArgs
         : { ...baseArgs, prompt: finalText };
@@ -841,6 +888,40 @@ export function CommandScreen({
                 {uploadingAttachment ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
                 {uploadingAttachment ? "Uploading…" : "Sources"}
               </button>
+              <div className="aios-model-picker">
+                <button
+                  ref={modelButtonRef}
+                  type="button"
+                  className="aios-model-pill"
+                  onClick={() => setModelMenuOpen((open) => !open)}
+                  disabled={busy}
+                  aria-haspopup="menu"
+                  aria-expanded={modelMenuOpen}
+                  title="Pick the Claude model for this chat"
+                >
+                  <span>{CHAT_MODELS.find((m) => m.id === selectedModel)?.label ?? "Default"}</span>
+                  <ChevronDown size={12} />
+                </button>
+                {modelMenuOpen ? (
+                  <div ref={modelMenuRef} className="aios-model-menu" role="menu">
+                    {CHAT_MODELS.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        role="menuitem"
+                        className={`aios-model-option ${selectedModel === m.id ? "is-active" : ""}`}
+                        onClick={() => pickModel(m.id)}
+                      >
+                        <span className="aios-model-option-text">
+                          <strong>{m.label}</strong>
+                          <span>{m.description}</span>
+                        </span>
+                        {selectedModel === m.id ? <Check size={12} /> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : busy ? (activity ? friendlyActivityLabel(activity) : "Claude is thinking…") : "")}</span>
               <div className="aios-composer-right">
                 <button

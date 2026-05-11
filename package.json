@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -142,7 +142,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AIOS Desktop"
+      "shortcutName": "AIOS Desktop",
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
     },
     "publish": {
       "provider": "github",

@@ -52,57 +52,25 @@ import "./styles.css";
 // Per-service identify prompts used by the App-level background connector
 // identifier. Kept at module scope so the effect can call it without
 // re-creating the map every render.
+//
+// SPEED OPTIMIZATION (v0.1.8): each prompt pre-specifies the exact Composio
+// tool slug so Claude skips the COMPOSIO_SEARCH_TOOLS roundtrip. Combined
+// with the `model: "haiku"` override in the run_task call, identify drops
+// from ~10s to ~3-4s per service.
 function identifyPromptFor(service: string): string | null {
   switch (service) {
     case "gmail":
-      return `Identify the OAuth-authorized Gmail account by following these EXACT steps:
-
-1. Use a Composio Gmail tool with query "in:sent" and max_results 1 to fetch one sent message.
-2. Read the "From:" header. The address there is the account owner.
-3. If "in:sent" returns no messages, use query "newer_than:30d" with max_results 1 and read the "Delivered-To:" header.
-4. Reply with ONLY the bare email address — no quotes, no preamble, no markdown.
-
-If you cannot determine the address with certainty, reply with the single word: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GMAIL_FETCH_EMAILS" and arguments {"query": "in:sent", "max_results": 1}. Read the "From" header of the returned message — that address is the account owner. Reply with ONLY the bare email, nothing else. If the result has no messages, reply: UNKNOWN.`;
     case "google-calendar":
-      return `Identify the OAuth-authorized Google Calendar account.
-
-1. Use a Composio Google Calendar tool to list the user's calendars.
-2. Find the calendar where "primary" is true. Its "id" is the user's email.
-3. Reply with ONLY that bare email — no quotes, no preamble.
-
-If you cannot determine the address with certainty, reply: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLECALENDAR_LIST_CALENDARS" and arguments {}. Find the calendar where "primary" is true — its "id" is the user's email. Reply with ONLY the bare email, nothing else. If no primary calendar, reply: UNKNOWN.`;
     case "slack":
-      return `Identify the OAuth-authorized Slack account.
-
-1. Use a Composio Slack tool to fetch the authenticated user's profile.
-2. Find the email or @handle.
-3. Reply with ONLY the email (or @handle if no email exposed) — no quotes, no preamble.
-
-If you cannot determine an identifier with certainty, reply: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_AUTH_TEST" and arguments {}. Read the response — it contains the authenticated user. If "user" is an email, reply with that email. Otherwise reply with "@" + the "user" field. ONLY the bare email or @handle, nothing else. If unsure, reply: UNKNOWN.`;
     case "clickup":
-      return `Identify the OAuth-authorized ClickUp account.
-
-1. Use a Composio ClickUp tool to fetch the authenticated user.
-2. Find the email.
-3. Reply with ONLY the bare email — no quotes, no preamble.
-
-If you cannot determine the email, reply: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CLICKUP_GET_AUTHORIZED_USER" and arguments {}. Read the "email" field of the returned user. Reply with ONLY the bare email, nothing else. If no email, reply: UNKNOWN.`;
     case "notion":
-      return `Identify the OAuth-authorized Notion account.
-
-1. Use a Composio Notion tool to fetch the authenticated user/bot.
-2. Find the email of the user (the bot's "owner" object usually has it), or workspace name.
-3. Reply with ONLY the bare email or workspace name — no quotes, no preamble.
-
-If you cannot determine an identifier, reply: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "NOTION_GET_ABOUT_ME" and arguments {}. Find the user's email (often at bot.owner.user.person.email) or workspace name. Reply with ONLY the bare email or workspace name, nothing else. If unsure, reply: UNKNOWN.`;
     case "github":
-      return `Identify the OAuth-authorized GitHub account.
-
-1. Use a Composio GitHub tool to fetch the authenticated user.
-2. Find the email if available, otherwise the @login handle.
-3. Reply with ONLY the bare email or @login — no quotes, no preamble.
-
-If you cannot determine an identifier, reply: UNKNOWN`;
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GITHUB_GET_THE_AUTHENTICATED_USER" and arguments {}. Read the "email" field. If null, use "@" + the "login" field. Reply with ONLY the bare email or @login, nothing else. If unsure, reply: UNKNOWN.`;
     default:
       return null;
   }
@@ -374,7 +342,10 @@ function App() {
               const res = await invoke<{ response: string }>("run_task", {
                 prompt,
                 claudePath,
-                streamId: `bg-identify-${c.service}-${Date.now()}`
+                streamId: `bg-identify-${c.service}-${Date.now()}`,
+                // Use Haiku for identify — it's a one-tool-call extraction
+                // task that doesn't need Sonnet/Opus reasoning. ~3x faster.
+                model: "haiku"
               });
               const raw = (res?.response || "").trim();
               const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);

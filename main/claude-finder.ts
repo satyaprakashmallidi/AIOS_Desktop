@@ -76,7 +76,12 @@ async function shellCandidates(platform: NodeJS.Platform): Promise<string[]> {
   if (platform === "win32") {
     return commandCandidates("cmd.exe", ["/d", "/s", "/c", "where claude"]);
   }
-  return commandCandidates("/bin/zsh", ["-lc", "command -v claude || which claude"]);
+  // Honour the user's actual login shell (zsh / bash / fish / etc.). Falls
+  // back to zsh (macOS default since Catalina). The -ilc combo sources both
+  // login files (~/.bash_profile, ~/.zprofile) AND interactive files
+  // (~/.bashrc, ~/.zshrc) so PATH additions defined in either are picked up.
+  const userShell = process.env.SHELL || "/bin/zsh";
+  return commandCandidates(userShell, ["-ilc", "command -v claude || which claude"]);
 }
 
 function unique(items: Array<string | null | undefined>): string[] {
@@ -101,13 +106,42 @@ export async function findClaude(savedPath?: string | null, platform: NodeJS.Pla
   } else {
     pathCandidates.push(...(await commandCandidates("which", ["claude"])));
     pathCandidates.push(
-      path.join(home, ".npm-global", "bin", "claude"),
-      path.join(home, ".nvm", "versions", "node", "current", "bin", "claude"),
-      path.join(home, ".volta", "bin", "claude"),
+      // Standard system + Homebrew locations
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
-      "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude"
+      // npm with custom prefix
+      path.join(home, ".npm-global", "bin", "claude"),
+      // npm globals at default prefix (Homebrew node, system node, etc.)
+      "/opt/homebrew/lib/node_modules/.bin/claude",
+      "/usr/local/lib/node_modules/.bin/claude",
+      "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude",
+      "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude",
+      // Node version managers
+      path.join(home, ".volta", "bin", "claude"),
+      path.join(home, ".fnm", "aliases", "default", "bin", "claude"),
+      path.join(home, ".mise", "shims", "claude"),
+      path.join(home, ".asdf", "shims", "claude"),
+      // Bun + user-local
+      path.join(home, ".bun", "bin", "claude"),
+      path.join(home, ".local", "bin", "claude")
     );
+    // nvm doesn't reliably create a `current` symlink — scan every installed
+    // node version so we find claude regardless of which version is active.
+    try {
+      const nvmVersionsDir = path.join(home, ".nvm", "versions", "node");
+      if (fs.existsSync(nvmVersionsDir)) {
+        for (const v of fs.readdirSync(nvmVersionsDir)) {
+          pathCandidates.push(path.join(nvmVersionsDir, v, "bin", "claude"));
+        }
+      }
+    } catch { /* nvm not installed; ignore */ }
+    // Best-effort: ask npm where its global bin is, in case the user has a
+    // custom prefix we don't hardcode. Silently skipped if npm isn't on PATH
+    // or doesn't respond — npm reliability on Mac is variable.
+    const npmPrefix = await commandCandidates("npm", ["config", "get", "prefix"]);
+    for (const p of npmPrefix) {
+      if (p && p !== "undefined") pathCandidates.push(path.join(p, "bin", "claude"));
+    }
     pathCandidates.push(...(await shellCandidates(platform)));
   }
 

@@ -4,6 +4,8 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ClipboardCopy,
+  ExternalLink,
   Loader2,
   Search,
   ShieldCheck,
@@ -55,6 +57,10 @@ export function OnboardingScreen({
   const [manualPath, setManualPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
+  const [copiedHint, setCopiedHint] = useState(false);
+  // Platform-aware "where is claude" command shown in the help card.
+  const isMacOrLinux = !/^Win/i.test(navigator.platform);
+  const whereCmd = isMacOrLinux ? "which claude" : "where claude";
 
   const question = onboardingQuestions[step];
   const completed = Boolean(state?.completedAt) || step >= onboardingQuestions.length;
@@ -244,6 +250,52 @@ export function OnboardingScreen({
             </div>
 
             {setupMessage ? <p className={`onboarding-v2-msg ${/fail|not|invalid/i.test(setupMessage) ? "is-warn" : "is-ok"}`}>{setupMessage}</p> : null}
+
+            {!claudeReady ? (
+              <div className="onboarding-v2-help">
+                <div className="onboarding-v2-help-row">
+                  <div className="onboarding-v2-help-text">
+                    <strong>Don't have Claude Code yet?</strong>
+                    <span>It's a free CLI from Anthropic — install once, AIOS finds it next launch.</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="onboarding-v2-link"
+                    onClick={() => { void window.aios?.openExternal?.("https://docs.anthropic.com/en/docs/claude-code/setup"); }}
+                  >
+                    Install Claude Code
+                    <ExternalLink size={11} />
+                  </button>
+                </div>
+                <div className="hairline" />
+                <div className="onboarding-v2-help-row">
+                  <div className="onboarding-v2-help-text">
+                    <strong>Already installed but we can't find it?</strong>
+                    <span>Open Terminal, run this, copy the output, paste it into Manual Path above:</span>
+                  </div>
+                </div>
+                <div className="onboarding-v2-copy-row">
+                  <code>{whereCmd}</code>
+                  <button
+                    type="button"
+                    className="onboarding-v2-copy-btn"
+                    title="Copy command"
+                    onClick={() => {
+                      navigator.clipboard
+                        .writeText(whereCmd)
+                        .then(() => {
+                          setCopiedHint(true);
+                          window.setTimeout(() => setCopiedHint(false), 1200);
+                        })
+                        .catch(() => undefined);
+                    }}
+                  >
+                    {copiedHint ? <Check size={11} /> : <ClipboardCopy size={11} />}
+                    {copiedHint ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="onboarding-v2-foot">
               <button className="btn-pill-ghost" onClick={skipProfile} disabled={saving}>

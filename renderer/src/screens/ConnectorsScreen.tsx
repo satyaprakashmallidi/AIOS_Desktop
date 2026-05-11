@@ -105,9 +105,13 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
   const identifyAttemptedRef = useRef<Set<string>>(new Set());
 
-  // Ask Claude (which has Gmail tools wired via MCP) to identify the connected
-  // account's email. We can't get this from Composio's REST API — every field
-  // is redacted — but Claude can read one email's Delivered-To header trivially.
+  // Ask Claude to identify the connected account's email. Composio's REST API
+  // redacts every identity field, but Claude (via the Composio MCP tool router)
+  // can call a service-specific tool and extract the email from the result.
+  //
+  // SPEED: prompts pre-specify the Composio tool slug so Claude skips the
+  // COMPOSIO_SEARCH_TOOLS roundtrip. Combined with model: "haiku" override,
+  // identify went from ~10s to ~3-4s per service.
   async function identifyAccount(service: string) {
     if (!claude?.path || !claude.runtimeOk) return;
     if (identifyAttemptedRef.current.has(service)) return;
@@ -115,57 +119,20 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
     setIdentifying((s) => new Set(s).add(service));
     try {
       const prompts: Record<string, string> = {
-        gmail: `Identify the OAuth-authorized Gmail account by following these EXACT steps:
-
-1. Use a Composio Gmail tool (search_threads or fetch_emails) with query "in:sent" and max_results 1.
-2. Read the "From:" header of that sent message. The address there is the account owner.
-3. If "in:sent" returns no messages, instead use query "newer_than:30d" with max_results 1 and read the "Delivered-To:" header.
-4. Reply with ONLY the bare email address from that header — no quotes, no preamble, no markdown, no other text.
-
-Important: do NOT use the "To:" header — it's misleading because Gmail accounts can receive forwarded mail addressed to other emails.
-
-If you cannot determine the address with certainty, reply with the single word: UNKNOWN`,
-        "google-calendar": `Identify the OAuth-authorized Google Calendar account by following these EXACT steps:
-
-1. Use a Composio Google Calendar tool to list the user's calendars (e.g. GOOGLECALENDAR_LIST_CALENDARS).
-2. Find the calendar where "primary" is true. Its "id" field is the user's email address.
-3. Reply with ONLY that bare email address — no quotes, no preamble, no markdown, no other text.
-
-If you cannot determine the address with certainty, reply with the single word: UNKNOWN`,
-        slack: `Identify the OAuth-authorized Slack account by following these EXACT steps:
-
-1. Use a Composio Slack tool to fetch the authenticated user's profile (e.g. SLACK_USERS_INFO on the current user, or SLACK_AUTH_TEST).
-2. Find the email or user handle of the authorized user.
-3. Reply with ONLY that bare email address (or @handle if no email is exposed) — no quotes, no preamble, no markdown, no other text.
-
-If you cannot determine an identifier with certainty, reply with the single word: UNKNOWN`,
-        clickup: `Identify the OAuth-authorized ClickUp account by following these EXACT steps:
-
-1. Use a Composio ClickUp tool to fetch the authenticated user (e.g. CLICKUP_GET_AUTHORIZED_USER or any tool that returns the current user's profile).
-2. Find the email of the authorized user.
-3. Reply with ONLY that bare email address — no quotes, no preamble, no markdown, no other text.
-
-If you cannot determine the email with certainty, reply with the single word: UNKNOWN`,
-        notion: `Identify the OAuth-authorized Notion account by following these EXACT steps:
-
-1. Use a Composio Notion tool to fetch the authenticated user (e.g. NOTION_GET_USER, NOTION_LIST_USERS, or any tool that returns the bot/user info — the bot's "owner" object usually contains the user).
-2. Find the email of the authorized user, or their workspace name if no email is exposed.
-3. Reply with ONLY that bare email address (or workspace name) — no quotes, no preamble, no markdown, no other text.
-
-If you cannot determine an identifier with certainty, reply with the single word: UNKNOWN`,
-        github: `Identify the OAuth-authorized GitHub account by following these EXACT steps:
-
-1. Use a Composio GitHub tool to fetch the authenticated user (e.g. GITHUB_GET_THE_AUTHENTICATED_USER, or any tool returning the current user's profile — the response contains "login" and "email").
-2. Find the email if available, otherwise the @login handle.
-3. Reply with ONLY that bare email (or @login) — no quotes, no preamble, no markdown, no other text.
-
-If you cannot determine an identifier with certainty, reply with the single word: UNKNOWN`
+        gmail: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GMAIL_FETCH_EMAILS" and arguments {"query": "in:sent", "max_results": 1}. Read the "From" header of the returned message — that address is the account owner. Reply with ONLY the bare email, nothing else. If the result has no messages, reply: UNKNOWN.`,
+        "google-calendar": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLECALENDAR_LIST_CALENDARS" and arguments {}. Find the calendar where "primary" is true — its "id" is the user's email. Reply with ONLY the bare email, nothing else. If no primary calendar, reply: UNKNOWN.`,
+        slack: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SLACK_AUTH_TEST" and arguments {}. Read the response — it contains the authenticated user. If "user" is an email, reply with that email. Otherwise reply with "@" + the "user" field. ONLY the bare email or @handle, nothing else. If unsure, reply: UNKNOWN.`,
+        clickup: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CLICKUP_GET_AUTHORIZED_USER" and arguments {}. Read the "email" field of the returned user. Reply with ONLY the bare email, nothing else. If no email, reply: UNKNOWN.`,
+        notion: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "NOTION_GET_ABOUT_ME" and arguments {}. Find the user's email (often at bot.owner.user.person.email) or workspace name. Reply with ONLY the bare email or workspace name, nothing else. If unsure, reply: UNKNOWN.`,
+        github: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GITHUB_GET_THE_AUTHENTICATED_USER" and arguments {}. Read the "email" field. If null, use "@" + the "login" field. Reply with ONLY the bare email or @login, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {
         prompt,
         claudePath: claude.path,
         streamId: newId("identify"),
+        // Haiku for identify — one-tool-call extraction, ~3x faster than Sonnet/Opus.
+        model: "haiku",
       });
       const raw = (res?.response || "").trim();
       const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
@@ -542,10 +509,14 @@ function ConnectorCard({
             <span className="connector-dot" /> Coming soon
           </span>
         ) : isConnected ? (
+          // Always show Check + Connected immediately. Account-email lookup
+          // runs silently in the background; the label fades in when ready.
+          // Showing a spinner here made users feel a connection wasn't complete
+          // for ~10s after OAuth, even though it actually was.
           <span className="connector-status-pill is-connected">
-            {isIdentifying && !accountLabel ? <Loader2 size={11} className="spin" /> : <Check size={11} />}
+            <Check size={11} />
             <span className="connector-status-label">
-              {accountLabel || (isIdentifying ? "Identifying account…" : "Connected")}
+              {accountLabel || "Connected"}
             </span>
           </span>
         ) : isExpired ? (

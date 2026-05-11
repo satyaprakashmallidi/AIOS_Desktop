@@ -340,6 +340,7 @@ def run_claude(
     request_id: str | None = None,
     stream_id: str | None = None,
     session_id: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     path = claude_path or get_setting("claude_path")
     if not path:
@@ -347,6 +348,11 @@ def run_claude(
 
     cwd = str(workspace_root())
     resume = _resume_flags(session_id)
+    # Optional --model flag. We pass "haiku" for short, structured tasks like
+    # connector-account identify — Haiku is ~3-4x faster than Sonnet/Opus for
+    # the same tool-call result, dropping identify from ~10s to ~3-4s.
+    # Falsy / unset = use the user's default model.
+    model_flags = ["--model", model] if model else []
     # Force Claude to only use MCP servers AIOS hands it, ignoring claude.ai's
     # first-party connectors. Without this, a user whose Anthropic account has
     # Gmail linked to a different address gets cross-wired data when they ask
@@ -355,8 +361,8 @@ def run_claude(
     mcp_isolation = _mcp_isolation_flags()
     composio_hint = ["--append-system-prompt", _COMPOSIO_SYSTEM_PROMPT] if mcp_isolation else []
     attempts = [
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *model_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *model_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
     ]
     if stream_id:
         stream_command = [
@@ -365,6 +371,7 @@ def run_claude(
             *resume,
             *mcp_isolation,
             *composio_hint,
+            *model_flags,
             "--verbose",
             "--output-format",
             "stream-json",
@@ -680,6 +687,7 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
         request_id=str(args.get("_requestId") or "") or None,
         stream_id=str(args.get("streamId") or "") or None,
         session_id=str(args.get("sessionId") or "") or None,
+        model=str(args.get("model") or "") or None,
     )
 
 
