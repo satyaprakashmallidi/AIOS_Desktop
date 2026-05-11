@@ -204,17 +204,20 @@ function ModuleRow({
   // Once a module is installed, it can always be reinstalled — dependency check only blocks fresh installs.
   const blockedByDeps = missingDeps.length > 0 && !module.installed;
   const blockedByConnectors = missingConnectors.length > 0 && !module.installed;
-  const blocked = sourceMissing || blockedByDeps || blockedByConnectors;
+  // Connectors no longer block installation — the user can add them manually later.
+  const blocked = sourceMissing || blockedByDeps;
 
-  const status: "builtin" | "installed" | "ready" | "locked" | "missing" = module.builtIn
+  const status: "builtin" | "installed" | "ready" | "locked" | "needs" | "missing" = module.builtIn
     ? "builtin"
     : sourceMissing
       ? "missing"
       : module.installed
         ? "installed"
-        : blockedByDeps || blockedByConnectors
+        : blockedByDeps
           ? "locked"
-          : "ready";
+          : blockedByConnectors
+            ? "needs"
+            : "ready";
 
   async function toggleExpanded() {
     const next = !expanded;
@@ -272,6 +275,11 @@ function ModuleRow({
                     key={c}
                     className={`modules-meta-dep ${connectorStatus[c]?.connected ? "ok" : "missing"}`}
                     title={connectorStatus[c]?.connected ? `Connected as ${connectorStatus[c]?.label ?? "unknown"}` : "Open Connectors to set this up"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNavigate("connectors");
+                    }}
+                    style={{ cursor: "pointer" }}
                   >
                     {CONNECTOR_LABEL[c] ?? c}
                   </span>
@@ -295,23 +303,6 @@ function ModuleRow({
           >
             <ExternalLink size={13} />
             <span>{module.builtInButtonLabel || "Open"}</span>
-          </button>
-        ) : blockedByConnectors ? (
-          // Missing connector(s): button routes to Connectors page instead of
-          // starting install, so users can configure auth first. Claude's
-          // /install slash command also enforces this server-side.
-          <button
-            type="button"
-            className="modules-install-btn"
-            onClick={() => onNavigate("connectors")}
-            title={`Configure ${missingConnectors.map((c) => CONNECTOR_LABEL[c] ?? c).join(", ")} on the Connectors page first`}
-          >
-            <Plug size={13} />
-            <span>
-              Connect {missingConnectors.length === 1
-                ? CONNECTOR_LABEL[missingConnectors[0]] ?? missingConnectors[0]
-                : `${missingConnectors.length} services`}
-            </span>
           </button>
         ) : (
           <button
@@ -375,7 +366,7 @@ function StatusChip({
   status,
   missingDeps
 }: {
-  status: "builtin" | "installed" | "ready" | "locked" | "missing";
+  status: "builtin" | "installed" | "ready" | "locked" | "missing" | "needs";
   missingDeps: string[];
 }) {
   if (status === "builtin") {
@@ -403,6 +394,9 @@ function StatusChip({
         Needs {missingDeps.map(prettyName).join(", ")}
       </span>
     );
+  }
+  if (status === "needs") {
+    return <span className="modules-status is-locked">Needs</span>;
   }
   return <span className="modules-status is-ready">Ready to install</span>;
 }

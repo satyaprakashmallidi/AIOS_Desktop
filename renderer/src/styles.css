@@ -289,6 +289,11 @@ code, pre { font-family: var(--font-mono); }
   border-radius: 0;
   overflow: hidden;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+  transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 80px minmax(0, 1fr);
 }
 
 .app-shell.setup-required {
@@ -306,14 +311,149 @@ code, pre { font-family: var(--font-mono); }
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow: hidden;
+  overflow: visible; /* Prevent clipping of window controls */
+  transition: transform 0.3s ease, opacity 0.3s ease, width 0.3s ease;
+}
+
+.sidebar-collapsed .app-sidebar {
+  width: 80px;
+  align-items: center;
+  padding: 14px 0 12px;
+}
+
+.sidebar-collapsed .sidebar-nav span,
+.sidebar-collapsed .nav-item span,
+.sidebar-collapsed .sidebar-quick-action span,
+.sidebar-collapsed .aios-recent-group,
+.sidebar-collapsed .sidebar-footer span,
+.sidebar-collapsed .brand-copy,
+.sidebar-collapsed .aios-recent-head,
+.sidebar-collapsed .aios-recent-list,
+.sidebar-collapsed .aios-sidebar-settings span {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.sidebar-collapsed .sidebar-quick-action {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin: 0 auto 16px;
+}
+
+.sidebar-collapsed .sidebar-nav {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-collapsed .nav-item {
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.sidebar-collapsed .sidebar-footer {
+  justify-content: center;
+  padding: 0;
+}
+
+body.is-mac .app-sidebar {
+  padding-top: 64px; /* Increased to 64px to be absolutely clear */
+  position: relative;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 10px;
   padding: 8px 10px 18px;
+  position: relative;
+  z-index: 10;
+}
+
+.sidebar-collapsed .sidebar-brand {
+  flex-direction: column;
+  padding: 16px 0;
+  min-height: 64px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.sidebar-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: #91847d;
+  background: rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+  z-index: 20;
+}
+
+.sidebar-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #2a2826;
+}
+
+.sidebar-collapsed .sidebar-toggle-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  opacity: 0;
+  pointer-events: none;
+  background: var(--paper);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-collapsed .sidebar-brand:hover .sidebar-toggle-btn {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.sidebar-collapsed .sidebar-brand:hover > svg {
+  opacity: 0 !important;
+}
+
+/* Ensure the + button is perfectly middle */
+.sidebar-collapsed .sidebar-quick-action {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin: 0 auto 24px;
+  position: relative;
+}
+
+body.is-mac .sidebar-brand {
+  padding-top: 0;
 }
 
 
@@ -413,6 +553,8 @@ code, pre { font-family: var(--font-mono); }
   border-bottom: 1px solid var(--border);
   background: var(--paper);
   -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
 }
 .topbar-status {
   display: flex;
@@ -2246,9 +2388,9 @@ button:active:not(:disabled) { transform: scale(0.98); }
 }
 
 .aios-chat-panel {
-  width: min(860px, 100%);
+  width: 100%;
   height: 100%;
-  margin: 0 auto;
+  padding: 0 32px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 14px;
@@ -2303,11 +2445,10 @@ button:active:not(:disabled) { transform: scale(0.98); }
   gap: 22px;
   /* Big right padding so the scrollbar lives in a gutter, not flush against the message card */
   padding: 14px 18px 18px 4px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(13, 13, 13, 0.16) transparent;
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-.aios-chat-thread::-webkit-scrollbar { width: 8px; }
+.aios-chat-thread::-webkit-scrollbar { display: none; }
 .aios-chat-thread::-webkit-scrollbar-track { background: transparent; }
 .aios-chat-thread::-webkit-scrollbar-thumb {
   background: transparent;
@@ -2424,7 +2565,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .aios-message.user {
   align-self: flex-end;
   width: fit-content;
-  max-width: min(620px, 86%);
+  max-width: 90%;
   padding: 11px 16px;
   border-radius: 20px 20px 6px 20px;
   background: var(--surface-soft);
@@ -4977,6 +5118,11 @@ aside.aios-sb-v2 .sidebar-brand {
   border: 0 !important;
   min-height: 0 !important;
 }
+
+/* Mac-specific fix for window controls overlap */
+body.is-mac aside.aios-sb-v2 .sidebar-brand {
+  padding-top: 38px !important;
+}
 aside.aios-sb-v2 .brand-copy {
   display: flex !important;
   flex-direction: column !important;
@@ -6090,18 +6236,50 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   display: flex !important;
   flex-direction: column !important;
   gap: 1px !important;
-  overflow: hidden !important;
+  overflow-y: auto !important;
   min-height: 0 !important;
   padding: 0 !important;
   flex: 1 1 auto !important;
 }
-.app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-list::-webkit-scrollbar { display: none !important; }
+/* .app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-list::-webkit-scrollbar { display: none !important; } */
+.app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-wrapper {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+}
+.app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-more {
+  position: absolute !important;
+  right: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 22px !important;
+  height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 5px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--gray-400) !important;
+  opacity: 0 !important;
+  cursor: pointer !important;
+  transition: all 120ms ease !important;
+  z-index: 10 !important;
+}
+.app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-wrapper:hover .aios-recent-more {
+  opacity: 1 !important;
+}
+.app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-more:hover {
+  background: rgba(13, 13, 13, 0.08) !important;
+  color: var(--ink) !important;
+}
 .app-shell aside.aios-sb-v2.aios-sb-v2 .aios-recent-item {
   display: block !important;
   width: 100% !important;
   height: 30px !important;
   min-height: 30px !important;
-  padding: 0 12px !important;
+  padding: 0 32px 0 12px !important;
   margin: 0 !important;
   border: 0 !important;
   border-radius: 7px !important;
@@ -6368,9 +6546,9 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   flex: none;
 }
 .connector-card.is-connected .connector-icon {
-  background: var(--sage);
-  border-color: var(--sage);
-  color: var(--paper);
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+  color: var(--ink);
 }
 .connector-card-title { min-width: 0; display: grid; gap: 4px; }
 .connector-card-title strong {
@@ -6404,9 +6582,9 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   border: 1px solid var(--border);
 }
 .connector-status-pill.is-connected {
-  background: var(--sage-soft);
-  border-color: var(--sage-line);
-  color: var(--sage);
+  background: var(--surface-deep);
+  border-color: var(--border-strong);
+  color: var(--ink);
   text-transform: none;
   letter-spacing: 0;
   font-family: var(--font-body);
@@ -6929,3 +7107,102 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .button.danger-text { color: var(--danger); }
 .button.danger-text:hover:not(:disabled) { background: rgba(220, 38, 38, 0.08); }
 
+
+/* ─── Kanban Tasks Dashboard ──────────────────────────────────────────────── */
+
+.tasks-screen {
+  background: var(--paper);
+}
+
+.tasks-hero {
+  border-bottom: 1px solid var(--border);
+}
+
+.tasks-hero h1 em {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--sage);
+}
+
+.kanban-scroller {
+  background: var(--paper);
+}
+
+.kanban-column {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.column-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.kanban-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.kanban-card:hover {
+  border-color: var(--sage-line);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.status-badge {
+  font-family: var(--font-mono);
+  border-radius: var(--radius-sm);
+}
+
+.detail-modal-overlay {
+  background: rgba(13, 13, 13, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+}
+
+.detail-modal-card {
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  animation: modalEnter var(--duration-slow) var(--ease-out);
+}
+
+@keyframes modalEnter {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.detail-modal-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-modal-icon {
+  background: var(--surface-soft);
+  color: var(--sage);
+  border-radius: var(--radius-md);
+}
+
+.detail-modal-body {
+  font-family: var(--font-body);
+}
+
+.detail-modal-footer {
+  background: var(--surface-soft);
+  border-top: 1px solid var(--border);
+}
+
+/* Flex Utilities for Kanban (if not globally available) */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+.animate-spin { animation: spin 1s linear infinite; }

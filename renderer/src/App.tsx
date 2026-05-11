@@ -10,12 +10,16 @@ import {
   MessageSquare,
   Minus,
   Plug,
+  MoreHorizontal,
   Plus,
   Settings,
   Sparkles,
   Square,
   Sun,
-  X
+  Trash2,
+  X,
+  PanelLeft,
+  LayoutGrid
 } from "lucide-react";
 import { invoke } from "./lib/api";
 import { buildConnections, buildContextSections } from "./lib/workspace-view";
@@ -33,6 +37,7 @@ import { PlansScreen } from "./screens/PlansScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { BriefsScreen } from "./screens/BriefsScreen";
 import { ConnectorsScreen } from "./screens/ConnectorsScreen";
+import { TasksScreen } from "./screens/TasksScreen";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
 import type {
   ChatSession,
@@ -155,6 +160,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   // Fast cold-start path. Loads only the 3 IPC calls needed for first paint:
@@ -241,11 +247,28 @@ function App() {
       window.setTimeout(() => {
         document.dispatchEvent(new CustomEvent("aios:set-prompt", { detail: prompt }));
       }, 60);
-    } catch {
-      setScreen("command");
-      window.setTimeout(() => {
-        document.dispatchEvent(new CustomEvent("aios:set-prompt", { detail: prompt }));
-      }, 60);
+    } catch (err) {
+      console.error("Failed to create thread:", err);
+    }
+  }
+
+  async function deleteThread(id: string) {
+    if (!window.confirm("Are you sure you want to delete this chat?")) return;
+    try {
+      await invoke("delete_thread", { id });
+      setSessions((current) => {
+        const next = current.filter((s) => s.id !== id);
+        if (activeSessionId === id) {
+          if (next.length > 0) {
+            setActiveSessionId(next[0].id);
+          } else {
+            setActiveSessionId(null);
+          }
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed to delete thread:", err);
     }
   }
 
@@ -447,8 +470,18 @@ function App() {
     };
     sync();
     document.addEventListener("visibilitychange", sync);
-    return () => document.removeEventListener("visibilitychange", sync);
-  }, []);
+
+    const isMac = workspace?.platform === "darwin" || (typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh"));
+    if (isMac) {
+      document.body.classList.add("is-mac");
+    } else {
+      document.body.classList.remove("is-mac");
+    }
+
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [workspace?.platform]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -498,6 +531,7 @@ function App() {
     imports: "Imports",
     outputs: "Outputs",
     plans: "Plans",
+    tasks: "Tasks",
     "auto-tasks": "Auto Tasks",
     modules: "Modules",
     connectors: "Connectors",
@@ -530,15 +564,25 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${setupRequired ? "setup-required" : ""}`} data-screen={screen}>
+    <div className={`app-shell ${setupRequired ? "setup-required" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} data-screen={screen}>
       {!setupRequired ? (
       <aside className="app-sidebar aios-sb-v2">
         <div className="sidebar-brand">
           <BrandMark size={32} variant="filled" />
-          <div className="brand-copy">
-            <strong>AIOS</strong>
-            <span>{workspaceReady ? "Local workspace" : "Setup required"}</span>
-          </div>
+          {!sidebarCollapsed && (
+            <div className="brand-copy">
+              <strong>AIOS</strong>
+              <span>{workspaceReady ? "Local workspace" : "Setup required"}</span>
+            </div>
+          )}
+          <button
+            className="sidebar-toggle-btn"
+            type="button"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <PanelLeft size={16} />
+          </button>
         </div>
 
         <button
@@ -573,6 +617,7 @@ function App() {
           <NavItem icon={<Boxes />} label="Modules" active={screen === "modules"} onClick={() => setScreen("modules")} />
           <NavItem icon={<Plug />} label="Connectors" active={screen === "connectors"} onClick={() => setScreen("connectors")} />
           <NavItem icon={<ClipboardList />} label="Plans" active={screen === "plans"} onClick={() => setScreen("plans")} />
+          <NavItem icon={<LayoutGrid />} label="Tasks" active={screen === "tasks"} onClick={() => setScreen("tasks")} />
           <NavItem icon={<FolderOpen />} label="Outputs" active={screen === "outputs"} onClick={() => setScreen("outputs")} />
           <NavItem icon={<Sun />} label="Brief" active={screen === "briefs"} onClick={() => setScreen("briefs")} />
         </nav>
@@ -594,17 +639,28 @@ function App() {
               recentSessions.map((session) => {
                 const label = displayTitle(session);
                 return (
-                  <button
-                    key={session.id}
-                    className={`aios-recent-item ${activeSessionId === session.id ? "active" : ""}`}
-                    onClick={() => {
-                      setActiveSessionId(session.id);
-                      setScreen("command");
-                    }}
-                    title={label}
-                  >
-                    {label}
-                  </button>
+                  <div key={session.id} className="aios-recent-wrapper">
+                    <button
+                      className={`aios-recent-item ${activeSessionId === session.id ? "active" : ""}`}
+                      onClick={() => {
+                        setActiveSessionId(session.id);
+                        setScreen("command");
+                      }}
+                      title={label}
+                    >
+                      {label}
+                    </button>
+                    <button
+                      className="aios-recent-more"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteThread(session.id);
+                      }}
+                      title="Delete chat"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </div>
                 );
               })
             )}
@@ -710,6 +766,12 @@ function App() {
             onAskClaude={openInNewChat}
             onRefresh={refreshWorkspace}
           />
+          </div>
+        ) : null}
+
+        {screen === "tasks" && !setupRequired ? (
+          <div className="screen-enter">
+          <TasksScreen plans={plans} />
           </div>
         ) : null}
 
