@@ -46,8 +46,9 @@ def collect():
     if not channel_id:
         return {
             "source": "youtube", "status": "skipped",
-            "reason": "Missing YOUTUBE_CHANNEL_ID — set it in .env. "
-                      "Find your channel ID at youtube.com/account_advanced."
+            "reason": "YouTube is connected — just need your channel ID once. "
+                      "Add YOUTUBE_CHANNEL_ID=UCxxxx to .env "
+                      "(find it at youtube.com/account_advanced)."
         }
 
     try:

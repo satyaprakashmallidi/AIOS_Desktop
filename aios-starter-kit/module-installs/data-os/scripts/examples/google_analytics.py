@@ -71,15 +71,11 @@ def collect():
         accounts = accounts["data"]
     account_count = len(accounts.get("accounts") or accounts.get("accountSummaries") or [])
 
-    # We CAN see the user is connected, but Composio's GA toolkit (4 tools as
-    # of v0.1.9) doesn't expose any report-running endpoint. Return skipped
-    # so DataOS continues; flag the situation for the user.
     return {
         "source": "google_analytics", "status": "skipped",
-        "reason": f"GA is connected ({account_count} accounts visible) but "
-                  "report queries aren't available via the connector yet. "
-                  "Add a custom collector with the GA Data API SDK if you "
-                  "need daily traffic numbers."
+        "reason": f"Google Analytics is connected ({account_count} accounts visible) — "
+                  "pulling traffic numbers isn't supported through AIOS yet. "
+                  "It'll auto-enable when support ships. No action needed."
     }
 
 
