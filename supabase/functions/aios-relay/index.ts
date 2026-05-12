@@ -215,10 +215,14 @@ async function handleInitiate(
   const initData = await initRes.json();
   const composioConnectionId =
     initData.id ?? initData.connectedAccountId ?? initData.connection_id;
-  const redirectUrl =
-    initData.redirect_url ?? initData.redirectUrl ?? initData.authUrl;
+  const redirectUrl: string | null =
+    initData.redirect_url ?? initData.redirectUrl ?? initData.authUrl ?? null;
+  // API_KEY auth (Telegram, etc.) completes synchronously — Composio returns
+  // status: "ACTIVE" with redirect_url: null. OAuth toolkits return "INITIATED"
+  // with a redirect_url that the user must visit to authorize.
+  const isActive = String(initData.status ?? "").toUpperCase() === "ACTIVE";
 
-  if (!composioConnectionId || !redirectUrl) {
+  if (!composioConnectionId || (!redirectUrl && !isActive)) {
     return errorResponse(
       `Composio response missing connection id or redirect URL. Raw: ${JSON.stringify(initData).slice(0, 500)}`,
       502,
@@ -233,13 +237,18 @@ async function handleInitiate(
         device_user_id: deviceUserId,
         service,
         composio_connection_id: composioConnectionId,
-        status: "pending",
+        status: isActive ? "connected" : "pending",
+        connected_at: isActive ? new Date().toISOString() : null,
       },
       { onConflict: "device_user_id,service" }
     );
   if (error) return errorResponse(error.message, 500, "DB_ERROR");
 
-  return jsonResponse({ redirectUrl, connectionId: composioConnectionId });
+  return jsonResponse({
+    redirectUrl,
+    connectionId: composioConnectionId,
+    status: isActive ? "connected" : "pending",
+  });
 }
 
 // /probe was deprecated and removed — the renderer now identifies connected

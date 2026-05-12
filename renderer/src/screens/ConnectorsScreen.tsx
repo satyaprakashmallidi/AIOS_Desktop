@@ -16,7 +16,9 @@ import {
   MessageSquare,
   Plug,
   Plus,
+  Send,
   Sheet,
+  Twitter,
   X,
   Youtube
 } from "lucide-react";
@@ -127,6 +129,20 @@ const CONNECTOR_CATALOG: Connector[] = [
     description: "Send WhatsApp Business messages, manage templates, read profile.",
     Icon: MessageCircle,
     logoUrl: "https://api.iconify.design/logos:whatsapp-icon.svg"
+  },
+  {
+    service: "twitter",
+    label: "X",
+    description: "Read your timeline, post tweets, search, manage DMs.",
+    Icon: Twitter,
+    logoUrl: "https://api.iconify.design/simple-icons:x.svg"
+  },
+  {
+    service: "telegram",
+    label: "Telegram",
+    description: "Send and read bot messages, manage chats, broadcast updates.",
+    Icon: Send,
+    logoUrl: "https://api.iconify.design/logos:telegram.svg"
   }
 ];
 
@@ -141,6 +157,8 @@ interface FieldRequirement {
   description: string;    // shown directly under the input
   helpText: string;       // longer "where do I find this?" hint at the bottom
   helpLink?: string;
+  helpLinkLabel?: string; // optional override for the link's link text
+  secret?: boolean;       // true → render as <input type="password">
 }
 
 const CONNECTOR_FIELD_REQUIREMENTS: Record<string, { authScheme: string; fields: FieldRequirement[] }> = {
@@ -156,6 +174,25 @@ const CONNECTOR_FIELD_REQUIREMENTS: Record<string, { authScheme: string; fields:
           "Open Meta Business Manager → Business settings → Accounts → WhatsApp accounts. Pick your account; the WABA ID is shown at the top. " +
           "If you don't have one yet, you'll need to apply through Meta Business Suite — WhatsApp connector only supports approved WhatsApp Business accounts (not personal WhatsApp).",
         helpLink: "https://business.facebook.com/settings/whatsapp-business-accounts",
+        helpLinkLabel: "Open Meta Business",
+      },
+    ],
+  },
+  telegram: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Bot Token",
+        placeholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+        description: "Telegram bot token issued by @BotFather when you create the bot.",
+        helpText:
+          "Open Telegram → search for @BotFather → send /newbot → follow the prompts to name your bot. " +
+          "BotFather replies with the token in the format 'NUMBERS:LETTERS_NUMBERS' — paste exactly that here. " +
+          "If you already have a bot, send /token to BotFather to retrieve it.",
+        helpLink: "https://t.me/BotFather",
+        helpLinkLabel: "Open BotFather in Telegram",
+        secret: true,
       },
     ],
   },
@@ -226,7 +263,9 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         "google-sheets": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`,
         outlook: `Reply with the single word: UNKNOWN`,
         linkedin: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`,
-        whatsapp: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "WHATSAPP_GET_PHONE_NUMBERS" and arguments {}. From the first phone number in the response, read its "verified_name" field (the WhatsApp Business display name). Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`
+        whatsapp: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "WHATSAPP_GET_PHONE_NUMBERS" and arguments {}. From the first phone number in the response, read its "verified_name" field (the WhatsApp Business display name). Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
+        twitter: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TWITTER_USER_LOOKUP_ME" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
+        telegram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TELEGRAM_GET_ME" and arguments {}. Read the bot's "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {
@@ -435,6 +474,7 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
     clearStalled(service);
     try {
       const { redirectUrl, connectionId } = await relay.initiate(deviceUserId, service);
+      if (!redirectUrl) throw new Error("Relay did not return an OAuth redirect URL.");
       const open = await window.aios.openExternal(redirectUrl);
       if (!open.ok) throw new Error(open.error || "Failed to open external browser");
       await refresh();
@@ -454,10 +494,17 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
     setBusyService(service);
     setError(null);
     try {
-      const { redirectUrl, connectionId } = await relay.initiate(deviceUserId, service, {
+      const { redirectUrl, connectionId, status } = await relay.initiate(deviceUserId, service, {
         authScheme: requirements.authScheme,
         val: values,
       });
+      // API_KEY auth (e.g. Telegram bot token) is accepted synchronously by
+      // Composio — relay returns status: "connected" and no redirectUrl. Skip
+      // the browser and just refresh to pick up the now-connected row.
+      if (status === "connected" || !redirectUrl) {
+        await refresh();
+        return;
+      }
       const open = await window.aios.openExternal(redirectUrl);
       if (!open.ok) throw new Error(open.error || "Failed to open external browser");
       await refresh();
@@ -660,7 +707,7 @@ function ConnectorCredsModal({
             <label key={f.key} className="connector-creds-field">
               <span className="connector-creds-label">{f.label}</span>
               <input
-                type="text"
+                type={f.secret ? "password" : "text"}
                 className="connector-creds-input"
                 placeholder={f.placeholder}
                 value={values[f.key] ?? ""}
@@ -688,7 +735,7 @@ function ConnectorCredsModal({
                       void window.aios.openExternal(f.helpLink!);
                     }}
                   >
-                    Open Meta Business
+                    {f.helpLinkLabel ?? "Open link"}
                   </a>
                 </>
               )}

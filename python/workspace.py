@@ -294,6 +294,43 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL,
             updated_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            default_prompt TEXT NOT NULL,
+            custom_prompt TEXT,
+            parent_id TEXT,
+            is_builtin INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            message TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 3,
+            status TEXT NOT NULL DEFAULT 'pending',
+            result_json TEXT,
+            narrative_json TEXT DEFAULT '[]',
+            claude_session_id TEXT,
+            blocked_reason TEXT,
+            needs_connector TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            parent_task_id TEXT,
+            synthesis_pass INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_status_priority
+            ON tasks(status, priority DESC, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tasks_agent
+            ON tasks(agent_id, status);
         """
     )
     conn.execute("INSERT OR IGNORE INTO onboarding (id, current_step, answers) VALUES (1, 0, '{}')")
@@ -301,6 +338,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "claude_session_id" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT")
+    # Migrations for the tasks table (added v0.1.16 → extended for CEO synthesis)
+    task_cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if task_cols and "parent_task_id" not in task_cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
+    if task_cols and "synthesis_pass" not in task_cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN synthesis_pass INTEGER DEFAULT 0")
     conn.commit()
 
 
@@ -1282,6 +1325,10 @@ KNOWN_CONNECTORS = [
     "linkedin",
     # Messaging (v0.1.15+)
     "whatsapp",
+    # Social (v0.1.16+)
+    "twitter",
+    # Messaging via API key (v0.1.16+)
+    "telegram",
 ]
 
 

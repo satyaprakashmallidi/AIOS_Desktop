@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   Box,
   Check,
+  ChevronRight,
   ClipboardCopy,
   Cpu,
   ExternalLink,
@@ -11,7 +12,8 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Terminal,
-  Trash2
+  Trash2,
+  Users
 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { PanelHeader, StatusBadge } from "../components/ui";
@@ -24,13 +26,15 @@ export function SettingsScreen({
   workspace,
   onClaudeChanged,
   connections,
-  onOnboardingReset
+  onOnboardingReset,
+  onOpenAgents
 }: {
   claude: ClaudeStatus | null;
   workspace: WorkspaceInfo | null;
   onClaudeChanged: () => Promise<ClaudeStatus>;
   connections: ConnectionStatus[];
   onOnboardingReset?: () => Promise<void> | void;
+  onOpenAgents?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("general");
 
@@ -45,7 +49,7 @@ export function SettingsScreen({
         </aside>
 
         <div className="settings-content">
-          {activeTab === "general" ? <GeneralPanel workspace={workspace} onOnboardingReset={onOnboardingReset} /> : null}
+          {activeTab === "general" ? <GeneralPanel workspace={workspace} onOnboardingReset={onOnboardingReset} onOpenAgents={onOpenAgents} /> : null}
           {activeTab === "claude" ? <ClaudePanel claude={claude} workspace={workspace} onClaudeChanged={onClaudeChanged} connections={connections} /> : null}
           {activeTab === "appearance" ? <AppearancePanel /> : null}
           {activeTab === "about" ? <AboutPanel /> : null}
@@ -146,10 +150,12 @@ function CopyableCode({ value }: { value: string }) {
 
 function GeneralPanel({
   workspace,
-  onOnboardingReset
+  onOnboardingReset,
+  onOpenAgents
 }: {
   workspace: WorkspaceInfo | null;
   onOnboardingReset?: () => Promise<void> | void;
+  onOpenAgents?: () => void;
 }) {
   const [savedHint, setSavedHint] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -258,6 +264,20 @@ function GeneralPanel({
 
   return (
     <>
+      <SettingsSection eyebrow="Team" title="Agents" detail="Your CEO and department specialists. Edit prompts, customize behavior, or add new agents.">
+        <SettingsRow
+          title="Manage agents"
+          description="View the agent roster, edit any system prompt, reset to defaults."
+          control={
+            <button type="button" className="button button-primary compact" onClick={onOpenAgents}>
+              <Users size={14} />
+              Open agents
+              <ChevronRight size={14} />
+            </button>
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection eyebrow="Workspace" title="General" detail="Paths and default behavior for your AIOS workspace.">
         <SettingsRow
           title="Workspace folder"

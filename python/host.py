@@ -107,6 +107,16 @@ class HostError(Exception):
 
 import threading
 
+import agents as agents_mod
+import tasks_store
+
+# Seed the 9 built-in agents (CEO + 8 departments) into SQLite on every boot.
+# Idempotent — existing custom_prompt edits are preserved.
+try:
+    agents_mod.ensure_builtin_agents()
+except Exception as _seed_err:
+    print(f"[host] agents seed failed: {_seed_err}", file=sys.stderr, flush=True)
+
 # Shared lock for all stdout writes. With concurrent request handlers, we
 # need to make sure two threads don't interleave their JSON-RPC responses
 # into the stdout pipe — that would corrupt the framing the Electron host
@@ -119,6 +129,13 @@ def emit_event(message_id: str | None, event: str, data: dict[str, Any]) -> None
         return
     with _STDOUT_LOCK:
         print(json.dumps({"id": message_id, "event": event, "data": data}), flush=True)
+
+
+def broadcast_event(event: str, data: dict[str, Any]) -> None:
+    """Push an unsolicited event to the renderer (no associated request id).
+    Used by the tasks runner to notify the UI of task status changes."""
+    with _STDOUT_LOCK:
+        print(json.dumps({"id": "", "event": event, "data": data}), flush=True)
 
 
 def text_from_stream_message(payload: dict[str, Any]) -> str:
@@ -806,6 +823,36 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "generate_daily_brief": generate_daily_brief,
         "list_daily_briefs": lambda a: list_daily_briefs(int(a.get("limit") or 60)),
         "mark_brief_seen": lambda a: mark_brief_seen(require_str(a, "localDate")),
+        # Agents — 9 built-in personas (CEO + 8 departments) plus custom agents
+        # the CEO can spawn at runtime via [SPAWN_AGENT: ...].
+        "list_agents": lambda _a: agents_mod.list_agents(),
+        "get_agent": lambda a: agents_mod.get_agent(require_str(a, "id")),
+        "update_agent_prompt": lambda a: agents_mod.update_agent_prompt(
+            require_str(a, "id"), require_str(a, "prompt")
+        ),
+        "reset_agent_prompt": lambda a: agents_mod.reset_agent_prompt(require_str(a, "id")),
+        "delete_agent": lambda a: agents_mod.delete_agent(require_str(a, "id")),
+        # Tasks — local Kanban store. The runner that spawns Claude per task
+        # lands in Phase 2 (v0.1.17). For now the queue accepts work and
+        # persists it; status stays at "pending" until the runner exists.
+        "list_tasks": lambda a: tasks_store.list_tasks(
+            status_filter=a.get("status") if isinstance(a.get("status"), str) else None,
+            agent_id=a.get("agentId") if isinstance(a.get("agentId"), str) else None,
+            limit=int(a.get("limit") or 500),
+        ),
+        "get_task": lambda a: tasks_store.get_task(require_str(a, "id")) or {},
+        "create_task": lambda a: tasks_store.create_task(
+            name=str(a.get("name") or "").strip() or "",
+            message=require_str(a, "message"),
+            agent_id=require_str(a, "agentId"),
+            priority=int(a.get("priority") or 3),
+        ),
+        "task_action": lambda a: tasks_store.task_action(
+            require_str(a, "id"),
+            require_str(a, "action"),
+            note=a.get("note") if isinstance(a.get("note"), str) else None,
+        ),
+        "cancel_task": lambda a: tasks_store.cancel_task(require_str(a, "id")),
     }
     handler = handlers.get(cmd)
     if not handler:
@@ -845,6 +892,14 @@ def _handle_request(line: str) -> None:
 def main() -> None:
     # Initialize the database early so startup failures are visible.
     get_workspace_info()
+    # Start the background task runner now that all host helpers are defined.
+    # Deferred to here (rather than module load) so the from-host lazy imports
+    # in tasks_runner._run_one_task can resolve cleanly.
+    try:
+        import tasks_runner
+        tasks_runner.start_runner(broadcast_event)
+    except Exception as runner_err:
+        print(f"[host] tasks_runner failed to start: {runner_err}", file=sys.stderr, flush=True)
     for line in sys.stdin:
         threading.Thread(target=_handle_request, args=(line,), daemon=True).start()
 

@@ -80,7 +80,7 @@ export const relay = {
     service: string,
     extraFields?: { authScheme: string; val: Record<string, string> }
   ) {
-    return call<{ redirectUrl: string; connectionId: string }>(
+    return call<{ redirectUrl: string | null; connectionId: string; status?: "connected" | "pending" }>(
       `/connections/${encodeURIComponent(service)}/initiate`,
       deviceUserId,
       {
