@@ -7317,3 +7317,135 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .gap-3 { gap: 12px; }
 .gap-4 { gap: 16px; }
 .animate-spin { animation: spin 1s linear infinite; }
+
+/* ─── Connector credentials modal (v0.1.15+) ─────────────────────────────── */
+/* Used when a connector needs user-provided fields BEFORE OAuth can start
+   (e.g. WhatsApp's WABA ID). Service-agnostic — driven by CONNECTOR_FIELD_REQUIREMENTS. */
+.connector-creds-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 13, 13, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 24px;
+}
+.connector-creds-card {
+  background: var(--surface, #ffffff);
+  color: var(--text, #1a1a1a);
+  border-radius: 18px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  animation: modalEnter 220ms cubic-bezier(.22,.61,.36,1);
+  border: 1px solid var(--border, rgba(0,0,0,0.08));
+}
+.connector-creds-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 22px 14px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.connector-creds-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.connector-creds-head h2 em {
+  font-family: var(--font-serif, "Instrument Serif", Georgia, serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--sage, #3d5a4a);
+}
+.connector-creds-close {
+  background: transparent;
+  border: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-soft, #6b6b6b);
+  cursor: pointer;
+  transition: background 120ms;
+}
+.connector-creds-close:hover { background: var(--surface-soft, rgba(0,0,0,0.04)); }
+
+.connector-creds-body {
+  padding: 18px 22px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.connector-creds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connector-creds-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text, #1a1a1a);
+  text-transform: uppercase;
+}
+.connector-creds-input {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(0,0,0,0.12));
+  background: var(--surface-soft, #fafaf7);
+  color: var(--text, #1a1a1a);
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.connector-creds-input:focus {
+  border-color: var(--sage, #3d5a4a);
+  box-shadow: 0 0 0 3px rgba(61, 90, 74, 0.15);
+}
+.connector-creds-help {
+  font-size: 12.5px;
+  color: var(--text-soft, #6b6b6b);
+  line-height: 1.5;
+}
+.connector-creds-note {
+  margin: 14px 22px 4px;
+  padding: 14px 16px;
+  background: var(--surface-soft, #f6f4ee);
+  border: 1px solid var(--border, rgba(0,0,0,0.06));
+  border-radius: 12px;
+}
+.connector-creds-note-title {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sage, #3d5a4a);
+}
+.connector-creds-note-body {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-soft, #555);
+  line-height: 1.55;
+}
+.connector-creds-note-body a {
+  color: var(--sage, #3d5a4a);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.connector-creds-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 22px 22px;
+}

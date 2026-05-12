@@ -118,8 +118,9 @@ Service slug → env var: `service.toUpperCase().replace(/-/g, "_")` → `COMPOS
 | Google Sheets | `ac_289PHe7QdUXw` | `google-sheets` | Live (v0.1.9+) | DataOS |
 | Outlook | `ac_3ImWpplXGnoc` | `outlook` | Live (v0.1.11+) | (no module yet) |
 | LinkedIn | `ac_RbmbGiYtSqX1` | `linkedin` | Live (v0.1.11+) | (no module yet) |
+| WhatsApp | `ac_OOszVgWp2Xix` | `whatsapp` | Live (v0.1.15+) | (no module yet) |
 
-All 12 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
+All 13 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
 
 **Twitter (deferred):** Composio doesn't have managed credentials for Twitter — connecting it requires you to register a Twitter Developer app (client_id + client_secret) and use `"type": "use_custom_auth"` instead of `"use_composio_managed_auth"`. Skipped in v0.1.11; revisit when there's a clear user need.
 

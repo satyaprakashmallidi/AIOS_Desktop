@@ -1280,6 +1280,8 @@ KNOWN_CONNECTORS = [
     # Communication / social connectors (v0.1.11+)
     "outlook",
     "linkedin",
+    # Messaging (v0.1.15+)
+    "whatsapp",
 ]
 
 

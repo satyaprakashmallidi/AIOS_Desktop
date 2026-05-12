@@ -75,11 +75,18 @@ export const relay = {
     );
   },
 
-  async initiate(deviceUserId: string, service: string) {
+  async initiate(
+    deviceUserId: string,
+    service: string,
+    extraFields?: { authScheme: string; val: Record<string, string> }
+  ) {
     return call<{ redirectUrl: string; connectionId: string }>(
       `/connections/${encodeURIComponent(service)}/initiate`,
       deviceUserId,
-      { method: "POST" }
+      {
+        method: "POST",
+        body: extraFields ? JSON.stringify(extraFields) : undefined,
+      }
     );
   },
 

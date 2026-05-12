@@ -12,6 +12,7 @@ import {
   Linkedin,
   Loader2,
   Mail,
+  MessageCircle,
   MessageSquare,
   Plug,
   Plus,
@@ -119,8 +120,46 @@ const CONNECTOR_CATALOG: Connector[] = [
     description: "Read your profile, post updates, browse connections.",
     Icon: Linkedin,
     logoUrl: "https://api.iconify.design/logos:linkedin-icon.svg"
+  },
+  {
+    service: "whatsapp",
+    label: "WhatsApp",
+    description: "Send WhatsApp Business messages, manage templates, read profile.",
+    Icon: MessageCircle,
+    logoUrl: "https://api.iconify.design/logos:whatsapp-icon.svg"
   }
 ];
+
+// Connectors that require extra user-provided fields BEFORE OAuth can start.
+// Composio surfaces these via auth_config.expected_input_fields. The renderer
+// pops a small modal asking for the values and forwards them to the relay as
+// `{ authScheme, val: { ...fields } }` on /initiate.
+interface FieldRequirement {
+  key: string;            // exact key Composio expects under state.val (e.g. "generic_id")
+  label: string;          // human label shown in the modal
+  placeholder: string;
+  description: string;    // shown directly under the input
+  helpText: string;       // longer "where do I find this?" hint at the bottom
+  helpLink?: string;
+}
+
+const CONNECTOR_FIELD_REQUIREMENTS: Record<string, { authScheme: string; fields: FieldRequirement[] }> = {
+  whatsapp: {
+    authScheme: "OAUTH2",
+    fields: [
+      {
+        key: "generic_id",
+        label: "WhatsApp Business Account ID",
+        placeholder: "e.g. 102553451781234",
+        description: "Numeric WhatsApp Business Account (WABA) ID issued by Meta when your WhatsApp Business API was approved.",
+        helpText:
+          "Open Meta Business Manager → Business settings → Accounts → WhatsApp accounts. Pick your account; the WABA ID is shown at the top. " +
+          "If you don't have one yet, you'll need to apply through Meta Business Suite — WhatsApp connector only supports approved WhatsApp Business accounts (not personal WhatsApp).",
+        helpLink: "https://business.facebook.com/settings/whatsapp-business-accounts",
+      },
+    ],
+  },
+};
 
 interface ConnectorView extends Connector {
   status: ConnectorStatus;
@@ -186,7 +225,8 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         "google-analytics": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLE_ANALYTICS_LIST_ACCOUNTS" and arguments {}. Find the first account's "displayName". Reply with ONLY that name, nothing else. If no accounts, reply: UNKNOWN.`,
         "google-sheets": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLESHEETS_SEARCH_SPREADSHEETS" and arguments {"query": "", "page_size": 1}. Find the owner's emailAddress in the first result's "owners[0].emailAddress" field. Reply with ONLY that bare email, nothing else. If unsure, reply: UNKNOWN.`,
         outlook: `Reply with the single word: UNKNOWN`,
-        linkedin: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`
+        linkedin: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`,
+        whatsapp: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "WHATSAPP_GET_PHONE_NUMBERS" and arguments {}. From the first phone number in the response, read its "verified_name" field (the WhatsApp Business display name). Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {
@@ -251,6 +291,7 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   const [stalledServices, setStalledServices] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [credsModalService, setCredsModalService] = useState<string | null>(null);
   // Each entry tracks an active poll so cancel can abort + clean up the right row.
   const activePollsRef = useRef<Map<string, { aborted: boolean; connectionId: string }>>(new Map());
 
@@ -381,11 +422,42 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   }
 
   async function connect(service: string) {
+    // Services that need user-provided fields (e.g. WhatsApp WABA ID) get a
+    // credentials modal first; the actual initiate happens in submitCreds().
+    if (CONNECTOR_FIELD_REQUIREMENTS[service]) {
+      setError(null);
+      clearStalled(service);
+      setCredsModalService(service);
+      return;
+    }
     setBusyService(service);
     setError(null);
     clearStalled(service);
     try {
       const { redirectUrl, connectionId } = await relay.initiate(deviceUserId, service);
+      const open = await window.aios.openExternal(redirectUrl);
+      if (!open.ok) throw new Error(open.error || "Failed to open external browser");
+      await refresh();
+      pollForConnect(service, connectionId);
+    } catch (err) {
+      const msg = err instanceof RelayError ? err.message : err instanceof Error ? err.message : String(err);
+      setError(msg);
+    } finally {
+      setBusyService(null);
+    }
+  }
+
+  async function submitCreds(service: string, values: Record<string, string>) {
+    const requirements = CONNECTOR_FIELD_REQUIREMENTS[service];
+    if (!requirements) return;
+    setCredsModalService(null);
+    setBusyService(service);
+    setError(null);
+    try {
+      const { redirectUrl, connectionId } = await relay.initiate(deviceUserId, service, {
+        authScheme: requirements.authScheme,
+        val: values,
+      });
       const open = await window.aios.openExternal(redirectUrl);
       if (!open.ok) throw new Error(open.error || "Failed to open external browser");
       await refresh();
@@ -537,7 +609,102 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
             ))}
           </div>
       </div>
+      {credsModalService && CONNECTOR_FIELD_REQUIREMENTS[credsModalService] && (
+        <ConnectorCredsModal
+          service={credsModalService}
+          label={CONNECTOR_CATALOG.find((c) => c.service === credsModalService)?.label || credsModalService}
+          requirements={CONNECTOR_FIELD_REQUIREMENTS[credsModalService]}
+          onCancel={() => setCredsModalService(null)}
+          onSubmit={(values) => submitCreds(credsModalService, values)}
+        />
+      )}
     </section>
+  );
+}
+
+function ConnectorCredsModal({
+  service,
+  label,
+  requirements,
+  onCancel,
+  onSubmit,
+}: {
+  service: string;
+  label: string;
+  requirements: { authScheme: string; fields: FieldRequirement[] };
+  onCancel: () => void;
+  onSubmit: (values: Record<string, string>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const allFilled = requirements.fields.every((f) => (values[f.key] ?? "").trim().length > 0);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!allFilled) return;
+    const trimmed: Record<string, string> = {};
+    for (const f of requirements.fields) trimmed[f.key] = (values[f.key] ?? "").trim();
+    onSubmit(trimmed);
+  }
+
+  return (
+    <div className="connector-creds-overlay" role="dialog" aria-modal="true" aria-labelledby={`creds-${service}-title`}>
+      <form className="connector-creds-card" onSubmit={handleSubmit}>
+        <header className="connector-creds-head">
+          <h2 id={`creds-${service}-title`}>Connect <em>{label}</em></h2>
+          <button type="button" className="connector-creds-close" onClick={onCancel} aria-label="Close">
+            <X size={16} />
+          </button>
+        </header>
+        <div className="connector-creds-body">
+          {requirements.fields.map((f) => (
+            <label key={f.key} className="connector-creds-field">
+              <span className="connector-creds-label">{f.label}</span>
+              <input
+                type="text"
+                className="connector-creds-input"
+                placeholder={f.placeholder}
+                value={values[f.key] ?? ""}
+                onChange={(e) => setValues((cur) => ({ ...cur, [f.key]: e.target.value }))}
+                autoFocus
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <span className="connector-creds-help">{f.description}</span>
+            </label>
+          ))}
+        </div>
+        <div className="connector-creds-note">
+          <p className="connector-creds-note-title">Where to find this</p>
+          {requirements.fields.map((f) => (
+            <p key={`note-${f.key}`} className="connector-creds-note-body">
+              {f.helpText}
+              {f.helpLink && (
+                <>
+                  {" "}
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void window.aios.openExternal(f.helpLink!);
+                    }}
+                  >
+                    Open Meta Business
+                  </a>
+                </>
+              )}
+            </p>
+          ))}
+        </div>
+        <footer className="connector-creds-foot">
+          <button type="button" className="connector-btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="connector-btn is-primary" disabled={!allFilled}>
+            <ExternalLink size={13} /> Continue to {label}
+          </button>
+        </footer>
+      </form>
+    </div>
   );
 }
 
