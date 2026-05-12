@@ -97,8 +97,15 @@ function createWindow(): void {
     }
   });
 
-  mainWindow.on("maximize", () => mainWindow?.webContents.send("window:maximized-changed", true));
-  mainWindow.on("unmaximize", () => mainWindow?.webContents.send("window:maximized-changed", false));
+  mainWindow.on("maximize", () => {
+    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("window:maximized-changed", true);
+  });
+  mainWindow.on("unmaximize", () => {
+    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("window:maximized-changed", false);
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
 function registerIpcHandlers(): void {
@@ -199,7 +206,7 @@ function registerIpcHandlers(): void {
 
   // Global shortcut for preferences
   globalShortcut.register("Command+,", () => {
-    mainWindow?.webContents.send("shortcut:preferences");
+    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("shortcut:preferences");
   });
 }
 
@@ -282,7 +289,9 @@ app.whenReady().then(() => {
   initLogger(workspaceRoot);
   host = new PythonHost(workspaceRoot, starterKitRoot);
   host.onEvent((event) => {
-    mainWindow?.webContents.send("aios:host-event", event);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("aios:host-event", event);
+    }
   });
   let hostStarted = false;
   try {
@@ -319,7 +328,9 @@ app.whenReady().then(() => {
   createWindow();
 
   const broadcast = (state: string, payload?: Record<string, unknown>) => {
-    mainWindow?.webContents.send("aios:update-state", { state, ...payload });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("aios:update-state", { state, ...payload });
+    }
   };
 
   // electron-updater's in-place auto-update requires the .app bundle to be
