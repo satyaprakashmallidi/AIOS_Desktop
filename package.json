@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -110,6 +110,7 @@
       "icon": "build/icon.png",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "x64ArchFiles": "Contents/Resources/{aios-host,aios-starter-kit}/**/*",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
