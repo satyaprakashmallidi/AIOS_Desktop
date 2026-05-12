@@ -194,7 +194,6 @@ export function CommandScreen({
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [showFullHistory, setShowFullHistory] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -216,8 +215,7 @@ export function CommandScreen({
   const realMessages = activeSession?.messages ?? [];
   const hasRealMessages = realMessages.length > 0;
   const visibleMessages = hasRealMessages ? realMessages : [];
-  const hiddenMessageCount = Math.max(0, visibleMessages.length - 6);
-  const renderedMessages = showFullHistory ? visibleMessages : visibleMessages.slice(-6);
+  const renderedMessages = visibleMessages;
 
   useEffect(() => {
     const onSetPrompt = (event: Event) => {
@@ -259,14 +257,12 @@ export function CommandScreen({
     await invoke("set_setting", { key: "chat_model", value: id }).catch(() => undefined);
   }
 
-  useEffect(() => {
-    setShowFullHistory(false);
-  }, [activeSession?.id]);
+  // No-op (previously used for showFullHistory)
 
   useEffect(() => {
     const thread = threadRef.current;
     if (thread) thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
-  }, [activeSession?.messages, busy, showFullHistory]);
+  }, [activeSession?.messages, busy]);
 
   useEffect(() => {
     if (!window.aios?.onHostEvent) return () => undefined;
@@ -732,17 +728,8 @@ export function CommandScreen({
               </div>
             ) : null}
 
-            {hiddenMessageCount > 0 && !showFullHistory ? (
-              <button className="aios-history-toggle" onClick={() => setShowFullHistory(true)}>
-                Show {hiddenMessageCount} earlier message{hiddenMessageCount === 1 ? "" : "s"}
-              </button>
-            ) : null}
-
-            {renderedMessages.map((message, index) => {
-              const isRecent = index >= renderedMessages.length - 2;
-              const shouldClamp = message.role === "assistant" && !showFullHistory && !isRecent && message.content.length > 500;
-              return (
-              <article className={`aios-message ${message.role} ${shouldClamp ? "message-clamped" : ""}`} key={message.id}>
+            {renderedMessages.map((message) => (
+              <article className={`aios-message ${message.role}`} key={message.id}>
                 <div className="aios-message-meta">
                   <div className="aios-message-role">
                     {message.role === "assistant" ? (
@@ -781,7 +768,7 @@ export function CommandScreen({
                 </div>
                 {message.role === "assistant" && message.content.trim() ? <MessageActions content={message.content} /> : null}
               </article>
-            );})}
+            ))}
             {busy && !realMessages.some((message) => message.id === activeStreamRef.current?.assistantId) ? (
               <article className="aios-message assistant pending-assistant">
                 <div className="aios-message-meta">

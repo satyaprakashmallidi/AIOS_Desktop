@@ -482,12 +482,12 @@ function AppearancePanel() {
 
   const options: Array<{ value: string; label: string; description: string; soon?: boolean }> = [
     { value: "light", label: "Light", description: "Default light theme tuned for daytime work." },
-    { value: "auto", label: "Auto", description: "Match the system theme.", soon: true },
-    { value: "dark", label: "Dark", description: "High-contrast dark theme.", soon: true }
+    { value: "auto", label: "Auto", description: "Match the system theme." },
+    { value: "dark", label: "Dark", description: "High-contrast dark theme." }
   ];
 
   return (
-    <SettingsSection eyebrow="Appearance" title="Theme" detail="Pick how AIOS looks. Light is the only theme wired today; the others are coming." bare>
+    <SettingsSection eyebrow="Appearance" title="Theme" detail="Pick how AIOS looks. Switch between light, dark, or follow your system preference." bare>
       <div className="theme-grid">
         {options.map((option) => (
           <button

@@ -30,6 +30,7 @@ interface Connector {
   label: string;
   description: string;
   Icon: React.ComponentType<{ size?: number }>;
+  logoUrl?: string;
   comingSoon?: boolean;
 }
 
@@ -38,76 +39,86 @@ const CONNECTOR_CATALOG: Connector[] = [
     service: "gmail",
     label: "Gmail",
     description: "Read your inbox, draft replies, find threads, send mail.",
-    Icon: Mail
+    Icon: Mail,
+    logoUrl: "https://api.iconify.design/logos:google-gmail.svg"
   },
   {
     service: "google-calendar",
     label: "Google Calendar",
     description: "See your schedule, find free slots, create events.",
-    Icon: Calendar
+    Icon: Calendar,
+    logoUrl: "https://api.iconify.design/logos:google-calendar.svg"
   },
   {
     service: "slack",
     label: "Slack",
     description: "Read channels, post messages, search conversations.",
-    Icon: MessageSquare
+    Icon: MessageSquare,
+    logoUrl: "https://api.iconify.design/logos:slack-icon.svg"
   },
   {
     service: "clickup",
     label: "ClickUp",
     description: "Create tasks, update statuses, query lists.",
-    Icon: CheckSquare
+    Icon: CheckSquare,
+    logoUrl: "https://svgl.app/library/clickup.svg"
   },
   {
     service: "notion",
     label: "Notion",
     description: "Read pages, search databases, append blocks.",
-    Icon: FileText
+    Icon: FileText,
+    logoUrl: "https://api.iconify.design/logos:notion.svg"
   },
   {
     service: "github",
     label: "GitHub",
     description: "Browse repos, read issues, open PRs.",
-    Icon: Github
+    Icon: Github,
+    logoUrl: "https://api.iconify.design/logos:github-icon.svg"
   },
-  // DataOS connectors. These are required by the DataOS module so it can
-  // pull live business metrics without asking the user for raw API keys.
   {
     service: "stripe",
     label: "Stripe",
     description: "Payments, subscriptions, customers, charges, MRR.",
-    Icon: CreditCard
+    Icon: CreditCard,
+    logoUrl: "https://api.iconify.design/logos:stripe.svg"
   },
   {
     service: "youtube",
     label: "YouTube",
     description: "Channel stats, video performance, subscriber growth.",
-    Icon: Youtube
+    Icon: Youtube,
+    logoUrl: "https://api.iconify.design/logos:youtube-icon.svg"
   },
   {
     service: "google-analytics",
     label: "Google Analytics",
     description: "Site traffic, conversion, audience metrics from GA4.",
-    Icon: BarChart3
+    Icon: BarChart3,
+    logoUrl: "https://api.iconify.design/logos:google-analytics.svg"
   },
   {
     service: "google-sheets",
     label: "Google Sheets",
     description: "Read structured data from sheets you own.",
-    Icon: Sheet
+    Icon: Sheet,
+    logoUrl: "https://upload.wikimedia.org/wikipedia/commons/a/ae/Google_Sheets_2020_Logo.svg"
   },
   // Communication / social connectors (v0.1.11+)
   {
     service: "outlook",
     label: "Outlook",
     description: "Read mail, draft replies, search threads, manage your inbox.",
-    Icon: Inbox
+    Icon: Inbox,
+    logoUrl: "https://api.iconify.design/logos:microsoft-icon.svg"
   },
   {
     service: "linkedin",
     label: "LinkedIn",
     description: "Read your profile, post updates, browse connections.",
-    Icon: Linkedin
+    Icon: Linkedin,
+    logoUrl: "https://api.iconify.design/logos:linkedin-icon.svg"
   }
 ];
 
@@ -565,7 +576,23 @@ function ConnectorCard({
     >
       <div className="connector-card-head">
         <div className="connector-icon" aria-hidden="true">
-          <Icon size={18} />
+          {connector.logoUrl ? (
+            <img 
+              src={connector.logoUrl} 
+              alt="" 
+              style={{ 
+                width: 18, 
+                height: 18, 
+                objectFit: "contain", 
+                filter: "none",
+                opacity: 1,
+                transition: "all 0.3s ease"
+              }} 
+              className="connector-logo-img"
+            />
+          ) : (
+            <Icon size={18} />
+          )}
         </div>
         <div className="connector-card-title">
           <strong>{label}</strong>

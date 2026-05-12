@@ -50,7 +50,7 @@ function createWindow(): void {
     frame: !isMac ? false : undefined,
     backgroundColor: "#fafaf7",
     titleBarStyle: isMac ? "hiddenInset" : "hidden",
-    trafficLightPosition: isMac ? { x: 14, y: 14 } : undefined,
+    trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     icon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -58,116 +58,6 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: true
     }
-  });
-
-  // Window control IPC handlers
-  ipcMain.on("window:minimize", () => mainWindow?.minimize());
-  ipcMain.on("window:maximize", () => {
-    if (mainWindow?.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow?.maximize();
-    }
-  });
-  ipcMain.on("window:close", () => mainWindow?.close());
-
-  // Open URL in the OS default browser (used for help/docs links).
-  ipcMain.handle("aios:open-external", async (_event, url: string) => {
-    if (typeof url !== "string") return { ok: false, error: "URL must be a string" };
-    if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Only http/https URLs are allowed" };
-    try {
-      await shell.openExternal(url);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
-
-  // Embedded OAuth window with an isolated, freshly-cleared session.
-  // Used by Connectors so the OAuth flow never inherits whatever Google
-  // account is signed into the user's default browser.
-  ipcMain.handle("aios:open-oauth-window", async (_event, url: string) => {
-    if (typeof url !== "string") return { ok: false, error: "URL must be a string" };
-    if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Only http/https URLs are allowed" };
-
-    const partition = `oauth-${Date.now()}`;
-    const oauthSession = session.fromPartition(partition);
-    try {
-      await oauthSession.clearStorageData();
-    } catch { /* fresh partition is already empty */ }
-
-    // Force Google's OAuth flow to show the account picker every time, even
-    // if the system has a cached Google identity. Without this, Chromium's
-    // built-in credential / autofill integration can silently auto-authorize
-    // the wrong account (we hit this bug with `tradephani@gmail.com` getting
-    // picked despite the fresh-cookie partition).
-    oauthSession.webRequest.onBeforeRequest(
-      { urls: ["https://accounts.google.com/o/oauth2/*"] },
-      (details, callback) => {
-        try {
-          const url = new URL(details.url);
-          if (
-            (url.pathname.startsWith("/o/oauth2/v2/auth") || url.pathname.startsWith("/o/oauth2/auth")) &&
-            !url.searchParams.has("prompt")
-          ) {
-            url.searchParams.set("prompt", "select_account");
-            callback({ redirectURL: url.toString() });
-            return;
-          }
-        } catch { /* fall through */ }
-        callback({});
-      }
-    );
-
-    return await new Promise<{ ok: boolean; completed?: boolean; error?: string }>((resolve) => {
-      const win = new BrowserWindow({
-        width: 540,
-        height: 720,
-        title: "Connect account",
-        parent: mainWindow ?? undefined,
-        modal: false,
-        autoHideMenuBar: true,
-        backgroundColor: "#fafaf7",
-        webPreferences: {
-          session: oauthSession,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          // No password manager / autofill in this isolated session.
-          enableWebSQL: false,
-        },
-      });
-
-      let resolved = false;
-      const safeResolve = (payload: { ok: boolean; completed?: boolean; error?: string }) => {
-        if (resolved) return;
-        resolved = true;
-        resolve(payload);
-      };
-
-      // No auto-close. Composio's OAuth flow has several intermediate
-      // redirects; matching on URL substrings reliably misfires (we used to
-      // close the window mid-OAuth before the user could even sign in).
-      // The user closes manually once they see Composio's success page;
-      // the relay polling in ConnectorsScreen detects completion on its own.
-
-      win.on("closed", () => {
-        safeResolve({ ok: true, completed: false });
-      });
-
-      win.loadURL(url).catch((err: unknown) => {
-        safeResolve({
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        try { win.close(); } catch { /* noop */ }
-      });
-    });
-  });
-
-  // Global shortcut for preferences
-  globalShortcut.register("Command+,", () => {
-    mainWindow?.webContents.send("shortcut:preferences");
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -209,6 +99,108 @@ function createWindow(): void {
 
   mainWindow.on("maximize", () => mainWindow?.webContents.send("window:maximized-changed", true));
   mainWindow.on("unmaximize", () => mainWindow?.webContents.send("window:maximized-changed", false));
+}
+
+function registerIpcHandlers(): void {
+  // Window control IPC handlers
+  ipcMain.on("window:minimize", () => mainWindow?.minimize());
+  ipcMain.on("window:maximize", () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow?.maximize();
+    }
+  });
+  ipcMain.on("window:close", () => mainWindow?.close());
+
+  // Open URL in the OS default browser (used for help/docs links).
+  if (ipcMain.handle) {
+    ipcMain.removeHandler("aios:open-external");
+    ipcMain.handle("aios:open-external", async (_event, url: string) => {
+      if (typeof url !== "string") return { ok: false, error: "URL must be a string" };
+      if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Only http/https URLs are allowed" };
+      try {
+        await shell.openExternal(url);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    ipcMain.removeHandler("aios:open-oauth-window");
+    ipcMain.handle("aios:open-oauth-window", async (_event, url: string) => {
+      if (typeof url !== "string") return { ok: false, error: "URL must be a string" };
+      if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Only http/https URLs are allowed" };
+
+      const partition = `oauth-${Date.now()}`;
+      const oauthSession = session.fromPartition(partition);
+      try {
+        await oauthSession.clearStorageData();
+      } catch { /* fresh partition is already empty */ }
+
+      // Force Google's OAuth flow to show the account picker every time
+      oauthSession.webRequest.onBeforeRequest(
+        { urls: ["https://accounts.google.com/o/oauth2/*"] },
+        (details, callback) => {
+          try {
+            const url = new URL(details.url);
+            if (
+              (url.pathname.startsWith("/o/oauth2/v2/auth") || url.pathname.startsWith("/o/oauth2/auth")) &&
+              !url.searchParams.has("prompt")
+            ) {
+              url.searchParams.set("prompt", "select_account");
+              callback({ redirectURL: url.toString() });
+              return;
+            }
+          } catch { /* fall through */ }
+          callback({});
+        }
+      );
+
+      return await new Promise<{ ok: boolean; completed?: boolean; error?: string }>((resolve) => {
+        const win = new BrowserWindow({
+          width: 540,
+          height: 720,
+          title: "Connect account",
+          parent: mainWindow ?? undefined,
+          modal: false,
+          autoHideMenuBar: true,
+          backgroundColor: "#fafaf7",
+          webPreferences: {
+            session: oauthSession,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            enableWebSQL: false,
+          },
+        });
+
+        let resolved = false;
+        const safeResolve = (payload: { ok: boolean; completed?: boolean; error?: string }) => {
+          if (resolved) return;
+          resolved = true;
+          resolve(payload);
+        };
+
+        win.on("closed", () => {
+          safeResolve({ ok: true, completed: false });
+        });
+
+        win.loadURL(url).catch((err: unknown) => {
+          safeResolve({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          try { win.close(); } catch { /* noop */ }
+        });
+      });
+    });
+  }
+
+  // Global shortcut for preferences
+  globalShortcut.register("Command+,", () => {
+    mainWindow?.webContents.send("shortcut:preferences");
+  });
 }
 
 async function getSavedClaudePath(): Promise<string | null> {
@@ -323,6 +315,7 @@ app.whenReady().then(() => {
     }
   });
 
+  registerIpcHandlers();
   createWindow();
 
   const broadcast = (state: string, payload?: Record<string, unknown>) => {
