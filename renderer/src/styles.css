@@ -8007,8 +8007,41 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .agents-loading .spin { animation: spin 1s linear infinite; }
 
 .agents-hero {
-  padding: 26px 28px 18px;
+  padding: 18px 32px 22px;
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0));
+}
+.agents-hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 18px;
+}
+.agents-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+}
+.agents-back-button:hover:not(:disabled) {
+  background: var(--surface-soft);
+  border-color: rgba(61, 90, 74, 0.36);
+  transform: translateY(-1px);
+}
+.agents-back-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .agents-hero-text { display: flex; flex-direction: column; gap: 6px; max-width: 720px; }
 .agents-hero h1 {
@@ -8034,10 +8067,10 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .agents-body {
   flex: 1;
   overflow: auto;
-  padding: 32px 28px 60px;
+  padding: 34px 32px 60px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
 }
 
@@ -8051,7 +8084,7 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   padding: 16px 18px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 8px;
   cursor: pointer;
   position: relative;
   font: inherit;
@@ -8088,6 +8121,7 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   font-size: 12px;
   color: var(--gray-500);
   line-height: 1.4;
+  white-space: normal;
 }
 .agents-card-badge {
   position: absolute;
@@ -8120,6 +8154,8 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   flex-direction: column;
   align-items: center;
   width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
 }
 
 .org-node {
@@ -8130,16 +8166,16 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 }
 
 .org-node .agents-card {
-  /* Override the grid-item width: tree cards size to content with a floor. */
-  min-width: 200px;
-  max-width: 260px;
-  width: max-content;
+  min-width: 0;
+  width: 100%;
 }
 
 .org-node.is-root .agents-card {
-  /* CEO card a touch larger and centered. */
-  min-width: 240px;
-  max-width: 300px;
+  width: min(360px, calc(100vw - 420px));
+  min-width: 260px;
+  background:
+    linear-gradient(135deg, rgba(61, 90, 74, 0.08), rgba(255,255,255,0) 58%),
+    var(--surface);
 }
 
 /* Vertical stem from the bottom of THIS card down to the junction. */
@@ -8163,11 +8199,13 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 
 /* Row of children below the junction. Each child draws its own top half-bus. */
 .org-children {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: stretch;
   justify-content: center;
-  gap: 0;  /* gap controlled by subtree padding below */
+  gap: 18px;
+  width: 100%;
+  margin-top: 18px;
   position: relative;
 }
 
@@ -8175,7 +8213,7 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 18px;  /* horizontal breathing room between siblings */
+  padding: 0;
   position: relative;
 }
 
@@ -8183,13 +8221,7 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
    When all siblings sit edge-to-edge with their padding, the segments
    visually connect into one continuous bus. */
 .org-subtree::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--border);
+  display: none;
 }
 
 /* First sibling: trim the bus so it starts at THIS subtree's center. */
@@ -8209,9 +8241,23 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 
 /* Short vertical stem from the bus down to the child card. */
 .org-stem-up {
-  width: 1px;
-  height: 26px;
-  background: var(--border);
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .agents-hero {
+    padding: 16px 20px 20px;
+  }
+  .agents-body {
+    padding: 24px 20px 44px;
+  }
+  .org-node.is-root .agents-card {
+    width: 100%;
+    min-width: 0;
+  }
+  .org-children {
+    grid-template-columns: 1fr;
+  }
 }
 
 .agents-empty {

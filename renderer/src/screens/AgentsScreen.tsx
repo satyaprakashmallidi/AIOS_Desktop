@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   BarChart3,
   Briefcase,
   Building2,
@@ -38,7 +39,7 @@ function iconFor(agent: AgentInfo): AgentIcon {
   return ICONS[agent.id] || Briefcase;
 }
 
-export function AgentsScreen() {
+export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => void }) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -105,6 +106,17 @@ export function AgentsScreen() {
   return (
     <section className="agents-screen">
       <header className="agents-hero">
+        <div className="agents-hero-top">
+          <button
+            type="button"
+            className="agents-back-button"
+            onClick={onBackToSettings}
+            disabled={!onBackToSettings}
+          >
+            <ArrowLeft size={14} />
+            Back to settings
+          </button>
+        </div>
         <div className="agents-hero-text">
           <p className="layer-badge">
             <span className="layer-dot" aria-hidden="true" />
