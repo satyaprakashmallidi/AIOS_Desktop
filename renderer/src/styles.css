@@ -338,7 +338,7 @@ i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 code, pre { font-family: var(--font-mono); }
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { display: none; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
@@ -1887,11 +1887,15 @@ button:active:not(:disabled) { transform: scale(0.98); }
 @media (max-width: 1080px) {
   .context-layout, .two-column-layout, .setup-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 1180px) {
-  .app-shell { grid-template-columns: 60px minmax(0, 1fr); }
-  .brand-copy, .sidebar-footer, .sidebar-section-label, .sidebar-group, .nav-item span { display: none; }
-  .sidebar-brand { align-items: center; padding-inline: 0; }
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
+  .brand-copy, .sidebar-footer, .sidebar-section-label, .sidebar-group, .nav-item span,
+  aside.aios-sb-v2 .brand-copy, 
+  aside.aios-sb-v2 .aios-recent-group,
+  aside.aios-sb-v2 .nav-item span { display: none !important; }
+  .sidebar-brand { align-items: center; padding-inline: 0; justify-content: center; }
   .nav-item { justify-content: center; padding: 0; }
+  aside.aios-sb-v2 { align-items: center !important; padding-inline: 0 !important; }
 }
 @media (max-width: 860px) {
   .workspace-screen { padding: var(--space-4); }
@@ -7429,6 +7433,13 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   padding: 26px 28px 18px;
   border-bottom: 1px solid var(--border);
 }
+.tasks-v2-hero-content {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  flex-wrap: wrap;
+}
 .tasks-v2-hero-text { display: flex; flex-direction: column; gap: 6px; }
 .tasks-v2-hero h1 {
   margin: 0;
@@ -7436,6 +7447,13 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   font-weight: 500;
   letter-spacing: -0.015em;
   color: var(--ink);
+}
+.tasks-v2-subtitle {
+  font-size: 13.5px;
+  color: var(--gray-500);
+  margin-top: 6px;
+  max-width: 400px;
+  line-height: 1.45;
 }
 .tasks-v2-hero h1 em {
   font-family: var(--font-display, "Instrument Serif", Georgia, serif);
@@ -7447,10 +7465,9 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .tasks-v2-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 16px 28px 8px;
   flex-wrap: wrap;
+  padding-bottom: 6px;
 }
 .tasks-v2-toolbar-left {
   display: flex;
@@ -7510,7 +7527,7 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .tasks-v2-body {
   flex: 1;
   overflow: hidden;
-  padding: 0 28px 24px;
+  padding: 24px 28px;
   min-height: 0;
 }
 

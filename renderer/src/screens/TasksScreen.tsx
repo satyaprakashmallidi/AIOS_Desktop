@@ -198,40 +198,40 @@ export function TasksScreen() {
   return (
     <section className="tasks-v2-screen">
       <header className="tasks-v2-hero">
-        <div className="tasks-v2-hero-text">
-          <p className="layer-badge">
-            <span className="layer-dot" aria-hidden="true" />
-            Layer · Tasks
-          </p>
-          <h1>Your <em>tasks</em></h1>
-        </div>
-      </header>
+        <div className="tasks-v2-hero-content">
+          <div className="tasks-v2-hero-text">
+            <p className="layer-badge">
+              <span className="layer-dot" aria-hidden="true" />
+              Layer · Tasks
+            </p>
+            <h1>Your <em>tasks</em></h1>
+            <p className="tasks-v2-subtitle">Manage your team's workload and track mission progress.</p>
+          </div>
 
-      <div className="tasks-v2-toolbar">
-        <div className="tasks-v2-toolbar-left">
-          <div className="tasks-v2-search">
-            <Search size={13} aria-hidden="true" />
-            <input
-              type="text"
-              placeholder="Search tasks…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              spellCheck={false}
-            />
+          <div className="tasks-v2-toolbar">
+            <div className="tasks-v2-toolbar-left">
+              <div className="tasks-v2-search">
+                <Search size={13} aria-hidden="true" />
+                <input
+                  type="text"
+                  placeholder="Search tasks…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+              <button
+                type="button"
+                className="tasks-v2-create"
+                onClick={() => setCreateOpen(true)}
+                disabled={saving}
+              >
+                <Plus size={13} /> New mission
+              </button>
+            </div>
           </div>
         </div>
-
-        <div className="tasks-v2-toolbar-right">
-          <button
-            type="button"
-            className="tasks-v2-create"
-            onClick={() => setCreateOpen(true)}
-            disabled={saving}
-          >
-            <Plus size={13} /> New mission
-          </button>
-        </div>
-      </div>
+      </header>
 
       <div className="tasks-v2-body">
         <KanbanView tasks={filteredTasks} agents={agents} onOpen={openDetails} />
