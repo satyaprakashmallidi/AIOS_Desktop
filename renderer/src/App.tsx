@@ -38,6 +38,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { BriefsScreen } from "./screens/BriefsScreen";
 import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
+import { AgentsScreen } from "./screens/AgentsScreen";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
 import type {
   ChatSession,
@@ -136,6 +137,12 @@ function identifyPromptFor(service: string): string | null {
       return `Reply with the single word: UNKNOWN`;
     case "linkedin":
       return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`;
+    case "whatsapp":
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "WHATSAPP_GET_PHONE_NUMBERS" and arguments {}. From the first phone number in the response, read its "verified_name" field (the WhatsApp Business display name). Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`;
+    case "twitter":
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TWITTER_USER_LOOKUP_ME" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`;
+    case "telegram":
+      return `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TELEGRAM_GET_ME" and arguments {}. Read the bot's "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`;
     default:
       return null;
   }
@@ -553,6 +560,7 @@ function App() {
     outputs: "Outputs",
     plans: "Plans",
     tasks: "Tasks",
+    agents: "Agents",
     "auto-tasks": "Auto Tasks",
     modules: "Modules",
     connectors: "Connectors",
@@ -792,7 +800,13 @@ function App() {
 
         {screen === "tasks" && !setupRequired ? (
           <div className="screen-enter">
-          <TasksScreen plans={plans} />
+          <TasksScreen />
+          </div>
+        ) : null}
+
+        {screen === "agents" && !setupRequired ? (
+          <div className="screen-enter">
+          <AgentsScreen />
           </div>
         ) : null}
 
@@ -860,6 +874,7 @@ function App() {
             workspace={workspace}
             onClaudeChanged={detectClaude}
             connections={connections}
+            onOpenAgents={() => setScreen("agents")}
             onOnboardingReset={async () => {
               await refreshWorkspace();
               setScreen("command");

@@ -206,9 +206,12 @@ function registerIpcHandlers(): void {
 
   // Global shortcut for preferences
   globalShortcut.register("Command+,", () => {
-    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("shortcut:preferences");
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("shortcut:preferences");
+    }
   });
 }
+
 
 async function getSavedClaudePath(): Promise<string | null> {
   const response = await host?.invoke<{ value: string | null }>("get_setting", { key: "claude_path" });

@@ -59,7 +59,17 @@ export type AiosCommand =
   | "delete_import_folder"
   | "update_claude_mcp"
   | "rotate_device_user_id"
-  | "list_connector_status";
+  | "list_connector_status"
+  | "list_agents"
+  | "get_agent"
+  | "update_agent_prompt"
+  | "reset_agent_prompt"
+  | "delete_agent"
+  | "list_tasks"
+  | "get_task"
+  | "create_task"
+  | "task_action"
+  | "cancel_task";
 
 export interface HostRequest {
   id: string;

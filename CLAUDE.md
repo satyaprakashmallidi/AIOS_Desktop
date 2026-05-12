@@ -118,10 +118,13 @@ Service slug → env var: `service.toUpperCase().replace(/-/g, "_")` → `COMPOS
 | Google Sheets | `ac_289PHe7QdUXw` | `google-sheets` | Live (v0.1.9+) | DataOS |
 | Outlook | `ac_3ImWpplXGnoc` | `outlook` | Live (v0.1.11+) | (no module yet) |
 | LinkedIn | `ac_RbmbGiYtSqX1` | `linkedin` | Live (v0.1.11+) | (no module yet) |
+| WhatsApp | `ac_OOszVgWp2Xix` | `whatsapp` | Live (v0.1.15+) | (no module yet) |
+| X (Twitter) | `ac_bOjT46HAfYwP` | `twitter` | Live (v0.1.16+) | (no module yet) |
+| Telegram | `ac_W1_RWREtn21R` | `telegram` | Live (v0.1.16+) | (no module yet — Daily Brief still uses TELEGRAM_BOT_TOKEN env var) |
 
-All 12 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
+All 15 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. **Auth flow split:** OAuth toolkits open the system browser for authorization; **API-key toolkits (Telegram)** prompt for the key in a modal and complete synchronously — no browser. See `CONNECTOR_FIELD_REQUIREMENTS` in `ConnectorsScreen.tsx`. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
 
-**Twitter (deferred):** Composio doesn't have managed credentials for Twitter — connecting it requires you to register a Twitter Developer app (client_id + client_secret) and use `"type": "use_custom_auth"` instead of `"use_composio_managed_auth"`. Skipped in v0.1.11; revisit when there's a clear user need.
+**X (Twitter) note:** Composio doesn't provide managed credentials for X — the auth_config was created with `"type": "use_custom_auth"` using the project owner's X Developer App (OAuth 2.0). All users authorize through that single app. X's free tier severely limits read APIs; for full timeline / search / DM access you need X Basic tier ($200/mo).
 
 ### Composio tool-router etiquette
 

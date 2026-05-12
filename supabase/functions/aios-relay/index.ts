@@ -170,7 +170,11 @@ async function handleListConnections(deviceUserId: string): Promise<Response> {
 // Composio v3: each integration (Gmail, Slack, etc.) is set up once in the
 // Composio dashboard as an "Auth Config" with an ID like `ac_xxxxx`. We map
 // service slug → auth_config_id via env vars: COMPOSIO_AUTH_GMAIL=ac_xxx etc.
-async function handleInitiate(deviceUserId: string, service: string): Promise<Response> {
+async function handleInitiate(
+  deviceUserId: string,
+  service: string,
+  extraFields?: { authScheme?: string; val?: Record<string, string> }
+): Promise<Response> {
   const user = await findUser(deviceUserId);
   if (!user) return errorResponse("Device user not registered", 404, "NOT_REGISTERED");
 
@@ -185,14 +189,21 @@ async function handleInitiate(deviceUserId: string, service: string): Promise<Re
     );
   }
 
-  // Composio v3 connected accounts API. Nested body shape:
-  //   { auth_config: { id: "ac_..." }, connection: { user_id: "..." } }
-  // Returns: { id, redirect_url, ... } on success.
+  // Composio v3 connected accounts API.
+  // For services with expected_input_fields (e.g. WhatsApp's WABA ID), the
+  // user-provided values go under connection.state.val and the auth scheme
+  // (e.g. "OAUTH2") goes under connection.state.authScheme. Discovered
+  // empirically — see CLAUDE.md "Composio quirks".
+  const connection: Record<string, unknown> = { user_id: deviceUserId };
+  if (extraFields?.authScheme && extraFields.val && Object.keys(extraFields.val).length > 0) {
+    connection.state = { authScheme: extraFields.authScheme, val: extraFields.val };
+  }
+
   const initRes = await composioFetch("/connected_accounts", {
     method: "POST",
     body: JSON.stringify({
       auth_config: { id: authConfigId },
-      connection: { user_id: deviceUserId },
+      connection,
     }),
   });
 
@@ -204,10 +215,14 @@ async function handleInitiate(deviceUserId: string, service: string): Promise<Re
   const initData = await initRes.json();
   const composioConnectionId =
     initData.id ?? initData.connectedAccountId ?? initData.connection_id;
-  const redirectUrl =
-    initData.redirect_url ?? initData.redirectUrl ?? initData.authUrl;
+  const redirectUrl: string | null =
+    initData.redirect_url ?? initData.redirectUrl ?? initData.authUrl ?? null;
+  // API_KEY auth (Telegram, etc.) completes synchronously — Composio returns
+  // status: "ACTIVE" with redirect_url: null. OAuth toolkits return "INITIATED"
+  // with a redirect_url that the user must visit to authorize.
+  const isActive = String(initData.status ?? "").toUpperCase() === "ACTIVE";
 
-  if (!composioConnectionId || !redirectUrl) {
+  if (!composioConnectionId || (!redirectUrl && !isActive)) {
     return errorResponse(
       `Composio response missing connection id or redirect URL. Raw: ${JSON.stringify(initData).slice(0, 500)}`,
       502,
@@ -222,13 +237,18 @@ async function handleInitiate(deviceUserId: string, service: string): Promise<Re
         device_user_id: deviceUserId,
         service,
         composio_connection_id: composioConnectionId,
-        status: "pending",
+        status: isActive ? "connected" : "pending",
+        connected_at: isActive ? new Date().toISOString() : null,
       },
       { onConflict: "device_user_id,service" }
     );
   if (error) return errorResponse(error.message, 500, "DB_ERROR");
 
-  return jsonResponse({ redirectUrl, connectionId: composioConnectionId });
+  return jsonResponse({
+    redirectUrl,
+    connectionId: composioConnectionId,
+    status: isActive ? "connected" : "pending",
+  });
 }
 
 // /probe was deprecated and removed — the renderer now identifies connected
@@ -427,7 +447,17 @@ serve(async (req: Request) => {
     }
     if (req.method === "POST" && path.startsWith("/connections/") && path.endsWith("/initiate")) {
       const service = path.split("/")[2];
-      return await handleInitiate(deviceUserId, service);
+      let extraFields: { authScheme?: string; val?: Record<string, string> } | undefined;
+      try {
+        const text = await req.text();
+        if (text && text.trim().length > 0) {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object") {
+            extraFields = parsed as { authScheme?: string; val?: Record<string, string> };
+          }
+        }
+      } catch { /* no body → standard OAuth flow with no extra fields */ }
+      return await handleInitiate(deviceUserId, service, extraFields);
     }
     if (req.method === "DELETE" && path.startsWith("/connections/")) {
       const connectionId = path.split("/")[2];

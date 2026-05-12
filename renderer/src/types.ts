@@ -59,7 +59,59 @@ export type AiosCommand =
   | "delete_import_folder"
   | "update_claude_mcp"
   | "rotate_device_user_id"
-  | "list_connector_status";
+  | "list_connector_status"
+  | "list_agents"
+  | "get_agent"
+  | "update_agent_prompt"
+  | "reset_agent_prompt"
+  | "delete_agent"
+  | "list_tasks"
+  | "get_task"
+  | "create_task"
+  | "task_action"
+  | "cancel_task";
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  role: string;
+  default_prompt: string;
+  custom_prompt: string | null;
+  effective_prompt: string;
+  parent_id: string | null;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskInfo {
+  id: string;
+  name: string;
+  message: string;
+  agent_id: string;
+  priority: number;
+  status:
+    | "pending"
+    | "in_progress"
+    | "awaiting_children"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "awaiting_connection"
+    | "awaiting_approval"
+    | "cancelled";
+  result: string | null;
+  narrative: Array<{ kind?: string; role?: string; text?: string; agentId?: string; ts?: string }>;
+  claude_session_id: string | null;
+  blocked_reason: string | null;
+  needs_connector: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  parent_task_id: string | null;
+  synthesis_pass: boolean;
+}
 
 export interface DailyBrief {
   id: number;
