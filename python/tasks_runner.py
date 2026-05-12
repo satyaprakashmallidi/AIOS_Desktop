@@ -31,6 +31,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 import agents as agents_mod
+from claude_runtime import (
+    COMPOSIO_SYSTEM_PROMPT,
+    execution_env,
+    mcp_isolation_flags,
+    text_from_stream_message,
+    tool_results_from_stream_message,
+    tool_uses_from_stream_message,
+)
 import tasks_store
 import workspace
 
@@ -40,12 +48,15 @@ _RUNNER_STARTED = False
 _SHUTDOWN = threading.Event()
 
 _DEFAULT_CONCURRENCY = 2
+_DEFAULT_TASK_TIMEOUT_SECONDS = 15 * 60
 
-# Sentinels emitted by agents to coordinate with the runner.
-_RE_BLOCKED = re.compile(r"\[BLOCKED:\s*(.+?)\]", re.IGNORECASE | re.DOTALL)
-_RE_NEEDS_CONNECTOR = re.compile(r"\[NEEDS_CONNECTOR:\s*([^\]\n]+)\]", re.IGNORECASE)
-_RE_SPAWN_AGENT = re.compile(r"\[SPAWN_AGENT:\s*(.+?)\]", re.IGNORECASE | re.DOTALL)
-_RE_ASSIGN_TASK = re.compile(r"\[ASSIGN_TASK:\s*(.+?)\]", re.IGNORECASE | re.DOTALL)
+# Sentinels emitted by agents to coordinate with the runner. These are line
+# anchored so bracketed text inside the payload, like [Subject/Project Name],
+# does not prematurely terminate parsing.
+_RE_BLOCKED = re.compile(r"^\[BLOCKED:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILINE)
+_RE_NEEDS_CONNECTOR = re.compile(r"^\[NEEDS_CONNECTOR:\s*([^\]\n]+)\]\s*$", re.IGNORECASE | re.MULTILINE)
+_RE_SPAWN_AGENT = re.compile(r"^\[SPAWN_AGENT:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILINE)
+_RE_ASSIGN_TASK = re.compile(r"^\[ASSIGN_TASK:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 _BroadcastFn = Callable[[str, dict[str, Any]], None]
@@ -92,6 +103,13 @@ def _resolve_concurrency(passed: int | None) -> int:
     if raw and raw.isdigit():
         return max(1, min(int(raw), 4))
     return _DEFAULT_CONCURRENCY
+
+
+def _resolve_task_timeout_seconds() -> int:
+    raw = workspace.get_setting("task_timeout_seconds")
+    if raw and raw.isdigit():
+        return max(60, min(int(raw), 6 * 60 * 60))
+    return _DEFAULT_TASK_TIMEOUT_SECONDS
 
 
 def _worker_loop(slot_id: int, broadcast: _BroadcastFn) -> None:
@@ -147,19 +165,6 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
         broadcast("task_update", {"taskId": task_id, "status": "failed"})
         return
 
-    # Lazy-import the host helpers we need. Doing this at module load creates
-    # a circular import (host.py imports tasks_runner). Inside the function
-    # body the import resolves cleanly because host has finished loading by
-    # the time a worker is processing a task.
-    from host import (
-        _COMPOSIO_SYSTEM_PROMPT,
-        _mcp_isolation_flags,
-        execution_env,
-        text_from_stream_message,
-        tool_results_from_stream_message,
-        tool_uses_from_stream_message,
-    )
-
     user_context = _read_user_context()
     department_catalog = _department_catalog() if agent_id == "ceo" else ""
 
@@ -177,9 +182,20 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
     task_message = task["message"]
     if is_synthesis_pass:
         task_message = _build_synthesis_message(task)
+    else:
+        operator_guidance = _operator_retry_guidance(task)
+        if operator_guidance:
+            task_message = (
+                f"{task_message}\n\n"
+                "LATEST OPERATOR GUIDANCE FROM RETRY\n"
+                f"{operator_guidance}\n\n"
+                "Use the operator guidance to continue the task. Do not ask for "
+                "the same missing detail again if the operator explicitly told "
+                "you to choose a sensible placeholder or mock value."
+            )
 
-    mcp_flags = _mcp_isolation_flags()
-    composio_hint = ["--append-system-prompt", _COMPOSIO_SYSTEM_PROMPT] if mcp_flags else []
+    mcp_flags = mcp_isolation_flags()
+    composio_hint = ["--append-system-prompt", COMPOSIO_SYSTEM_PROMPT] if mcp_flags else []
 
     command = [
         claude_path,
@@ -248,6 +264,44 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
         )
         broadcast("task_update", {"taskId": task_id, "status": "failed"})
         return
+
+    timeout_seconds = _resolve_task_timeout_seconds()
+    timed_out = threading.Event()
+
+    def _kill_on_timeout() -> None:
+        if proc.poll() is not None:
+            return
+        timed_out.set()
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    timeout_timer = threading.Timer(timeout_seconds, _kill_on_timeout)
+    timeout_timer.daemon = True
+    timeout_timer.start()
+
+    stderr_chunks: list[str] = []
+
+    def _drain_stderr() -> None:
+        if proc.stderr is None:
+            return
+        try:
+            for chunk in proc.stderr:
+                if not chunk:
+                    continue
+                stderr_chunks.append(chunk)
+                if sum(len(part) for part in stderr_chunks) > 20000:
+                    del stderr_chunks[:-20]
+        except Exception:
+            return
+
+    stderr_thread = threading.Thread(
+        target=_drain_stderr,
+        name=f"aios-task-stderr-{task_id[:8]}",
+        daemon=True,
+    )
+    stderr_thread.start()
 
     final_text = ""
     session_id: str | None = None
@@ -362,6 +416,7 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
                 if result_text:
                     final_text = result_text
     except Exception as err:
+        timeout_timer.cancel()
         try:
             proc.kill()
         except Exception:
@@ -376,9 +431,38 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
         return
 
     return_code = proc.wait()
-    stderr = proc.stderr.read().strip() if proc.stderr else ""
+    timeout_timer.cancel()
+    stderr_thread.join(timeout=1.0)
+    stderr = "".join(stderr_chunks).strip()
 
     final_text_clean = (final_text or "").strip()
+
+    if timed_out.is_set():
+        timeout_minutes = max(1, round(timeout_seconds / 60))
+        result_text = (
+            f"Task timed out after {timeout_minutes} minute(s) without finishing. "
+            "Open the task and retry with a smaller request or add guidance."
+        )
+        if stderr:
+            result_text = f"{result_text}\n\nClaude stderr:\n{stderr[:4000]}"
+        tasks_store.append_narrative_event(
+            task_id,
+            {
+                "kind": "tool_error",
+                "role": "system",
+                "agentId": agent["id"],
+                "text": result_text,
+            },
+        )
+        tasks_store.update_task_status(
+            task_id,
+            "failed",
+            result=result_text,
+            claude_session_id=session_id,
+        )
+        broadcast("task_update", {"taskId": task_id, "status": "failed"})
+        _maybe_trigger_parent(task_id, broadcast)
+        return
 
     # Record the agent's final response as a worker narrative entry so users
     # see something in the timeline even if the final answer is short.
@@ -569,13 +653,47 @@ def _build_synthesis_message(parent_task: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _operator_retry_guidance(task: dict[str, Any]) -> str:
+    """Return recent user guidance entered from the task action box.
+
+    The UI stores retry notes in narrative_json. Without feeding those notes
+    back into the next Claude run, retries see the exact same original prompt
+    and can block forever on a question the user already answered.
+    """
+    narrative = task.get("narrative")
+    if not isinstance(narrative, list):
+        return ""
+    notes: list[str] = []
+    for event in narrative:
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") != "operator":
+            continue
+        text = str(event.get("text") or "").strip()
+        if not text or text in {"(retry)", "(approved)", "(rejected)"}:
+            continue
+        notes.append(text)
+    if not notes:
+        return ""
+    return "\n".join(f"- {note}" for note in notes[-3:])
+
+
 def _read_user_context() -> str:
     """Read the user's profile from context/*.md and condense it for prompt
     injection. These files are written by complete_onboarding and edited
     on the Context page."""
     root = workspace.workspace_root()
     pieces: list[str] = []
-    for filename in ("business.md", "profile.md", "priorities.md", "vision.md", "current-data.md"):
+    for filename in (
+        "business-info.md",
+        "personal-info.md",
+        "strategy.md",
+        "current-data.md",
+        "business.md",
+        "profile.md",
+        "priorities.md",
+        "vision.md",
+    ):
         path = root / "context" / filename
         if not path.exists():
             continue

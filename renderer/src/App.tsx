@@ -806,7 +806,7 @@ function App() {
 
         {screen === "agents" && !setupRequired ? (
           <div className="screen-enter">
-          <AgentsScreen />
+          <AgentsScreen onBackToSettings={() => setScreen("settings")} />
           </div>
         ) : null}
 

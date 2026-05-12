@@ -50,6 +50,10 @@ a = Analysis(
     datas=sr_datas,
     hiddenimports=[
         'workspace',
+        'agents',
+        'tasks_store',
+        'tasks_runner',
+        'claude_runtime',
         'sqlite3',
         'json',
         'pathlib',

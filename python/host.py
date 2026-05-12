@@ -892,9 +892,7 @@ def _handle_request(line: str) -> None:
 def main() -> None:
     # Initialize the database early so startup failures are visible.
     get_workspace_info()
-    # Start the background task runner now that all host helpers are defined.
-    # Deferred to here (rather than module load) so the from-host lazy imports
-    # in tasks_runner._run_one_task can resolve cleanly.
+    # Start the background task runner after stdout locking/event helpers exist.
     try:
         import tasks_runner
         tasks_runner.start_runner(broadcast_event)

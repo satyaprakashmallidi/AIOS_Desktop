@@ -285,7 +285,8 @@ def delete_task(task_id: str) -> dict[str, Any]:
 def reset_orphan_tasks() -> int:
     """Boot-time recovery: tasks left at 'in_progress' with no activity for
     more than 60 seconds are presumed orphaned (their Claude subprocess
-    died with the previous sidecar). Flip these back to 'pending'.
+    died with the previous sidecar). Mark them failed/retryable instead of
+    auto-requeueing into another in-progress loop.
 
     Recently-active tasks (started within 60s) are left alone — if the
     sidecar restarts mid-task, we trust the running Claude to either finish
@@ -293,16 +294,20 @@ def reset_orphan_tasks() -> int:
     sidecar that bounces every 2s would yank legitimately-running tasks
     back to pending → infinite restart loop.
 
-    Returns the number of tasks reset."""
+    Returns the number of tasks recovered."""
     from datetime import datetime, timedelta, timezone
     now_dt = datetime.now(timezone.utc)
     cutoff = (now_dt - timedelta(seconds=60)).isoformat()
     now_iso = workspace.utc_now()
+    recovery_result = (
+        "This task was interrupted because the local task runner restarted. "
+        "Open the task and click retry to run it again."
+    )
     with closing(workspace.connect()) as conn:
         result = conn.execute(
-            "UPDATE tasks SET status = 'pending', updated_at = ?, started_at = NULL "
+            "UPDATE tasks SET status = 'failed', updated_at = ?, completed_at = ?, result_json = ? "
             "WHERE status = 'in_progress' AND (started_at IS NULL OR started_at < ?)",
-            (now_iso, cutoff),
+            (now_iso, now_iso, recovery_result, cutoff),
         )
         conn.commit()
         return result.rowcount or 0
