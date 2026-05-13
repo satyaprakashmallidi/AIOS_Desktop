@@ -522,10 +522,15 @@ function App() {
   useEffect(() => {
     if (!window.aios?.onHostEvent) return () => undefined;
     return window.aios.onHostEvent((event) => {
-      if (event.event === "auto_task_complete") {
-        refreshWorkspace().catch(() => undefined);
+      if (event.event === "auto_task_complete" || event.event === "session_updated") {
+        console.log(`[App] Session update event received: ${event.event}. Refreshing workspace...`);
+        refreshWorkspace().then(() => {
+          console.log("[App] Workspace refreshed. Session IDs:", sessions.map(s => s.id));
+        }).catch(() => undefined);
       }
     });
+
+
   }, []);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null;

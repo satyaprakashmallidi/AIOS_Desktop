@@ -7,6 +7,7 @@ import { initLogger, log } from "./logger";
 import { PythonHost } from "./python-host";
 import { AutoTaskScheduler } from "./scheduler";
 import { ensureRuntimeWorkspace, getSourceStarterKit } from "./workspace";
+import { startWhatsApp, stopWhatsApp, getWhatsAppStatus, autoStartWhatsApp } from "./whatsapp-scanner";
 
 let mainWindow: BrowserWindow | null = null;
 let host: PythonHost | null = null;
@@ -28,7 +29,10 @@ const mainHandledCommands = new Set<AiosCommand>([
   "set_claude_path",
   "test_claude_connection",
   "reveal_in_file_manager",
-  "run_auto_task_now"
+  "run_auto_task_now",
+  "whatsapp_status",
+  "whatsapp_start",
+  "whatsapp_stop"
 ]);
 
 function createWindow(): void {
@@ -276,6 +280,20 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     return { ok: true, taskId };
   }
 
+  if (cmd === "whatsapp_status") {
+    return getWhatsAppStatus();
+  }
+
+  if (cmd === "whatsapp_start") {
+    if (!mainWindow) throw new Error("No main window");
+    return await startWhatsApp(host, mainWindow);
+  }
+
+  if (cmd === "whatsapp_stop") {
+    if (!mainWindow) throw new Error("No main window");
+    return await stopWhatsApp(mainWindow);
+  }
+
   throw new Error(`Unhandled main command: ${cmd}`);
 }
 
@@ -329,6 +347,10 @@ app.whenReady().then(() => {
 
   registerIpcHandlers();
   createWindow();
+
+  if (host && mainWindow) {
+    autoStartWhatsApp(host, mainWindow);
+  }
 
   const broadcast = (state: string, payload?: Record<string, unknown>) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
