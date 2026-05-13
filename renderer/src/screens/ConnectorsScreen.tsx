@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   Calendar,
+  Camera,
   Check,
   CheckSquare,
   CreditCard,
   ExternalLink,
+  Facebook,
   FileText,
   Github,
   Inbox,
@@ -143,6 +145,20 @@ const CONNECTOR_CATALOG: Connector[] = [
     description: "Send and read bot messages, manage chats, broadcast updates.",
     Icon: Send,
     logoUrl: "https://api.iconify.design/logos:telegram.svg"
+  },
+  {
+    service: "facebook",
+    label: "Facebook",
+    description: "Manage Pages, read posts and insights, browse conversations.",
+    Icon: Facebook,
+    logoUrl: "https://api.iconify.design/logos:facebook.svg"
+  },
+  {
+    service: "instagram",
+    label: "Instagram",
+    description: "Read profile, browse media, surface insights for your account.",
+    Icon: Camera,
+    logoUrl: "https://api.iconify.design/logos:instagram-icon.svg"
   }
 ];
 
@@ -265,7 +281,9 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         linkedin: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "LINKEDIN_GET_MY_INFO" and arguments {}. Read the profile's name. Reply with ONLY the name, nothing else. If unsure, reply: UNKNOWN.`,
         whatsapp: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "WHATSAPP_GET_PHONE_NUMBERS" and arguments {}. From the first phone number in the response, read its "verified_name" field (the WhatsApp Business display name). Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
         twitter: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TWITTER_USER_LOOKUP_ME" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
-        telegram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TELEGRAM_GET_ME" and arguments {}. Read the bot's "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`
+        telegram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TELEGRAM_GET_ME" and arguments {}. Read the bot's "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
+        facebook: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "FACEBOOK_GET_USER_PAGES" and arguments {}. Read the first page's "name" field. Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
+        instagram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "INSTAGRAM_GET_USER_INFO" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {

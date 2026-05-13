@@ -249,6 +249,10 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  // When set, this assistant message is still streaming. App-level claude_stream
+  // listener fills in `content` by matching this id. Cleared when `done` fires.
+  // Without this, navigating away from chat mid-stream would lose the response.
+  streamId?: string | null;
 }
 
 export interface ChatSession {

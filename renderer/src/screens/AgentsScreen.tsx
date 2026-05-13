@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  BarChart3,
+  ArrowUpRight,
   Briefcase,
   Building2,
   Crown,
@@ -47,9 +47,6 @@ export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => vo
 
   useEffect(() => {
     void refresh();
-    // Listen for CEO-spawned custom agents (the runner broadcasts this when
-    // it processes a [SPAWN_AGENT:] sentinel). New agents show up instantly
-    // instead of waiting for a manual refresh / screen reopen.
     const unsub = window.aios?.onHostEvent?.((event: any) => {
       if (event?.event === "agents_changed") void refresh();
     });
@@ -70,23 +67,21 @@ export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => vo
   }
 
   const ceo = useMemo(() => agents.find((a) => a.id === "ceo") || null, [agents]);
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string, AgentInfo[]>();
-    for (const a of agents) {
-      if (!a.parent_id) continue;
-      const list = map.get(a.parent_id) || [];
-      list.push(a);
-      map.set(a.parent_id, list);
-    }
-    // Stable ordering: built-ins first (alpha), then custom (by created_at)
-    for (const list of map.values()) {
-      list.sort((a, b) => {
-        if (a.is_builtin !== b.is_builtin) return a.is_builtin ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-    }
-    return map;
-  }, [agents]);
+  const specialists = useMemo(
+    () =>
+      agents
+        .filter((a) => a.id !== "ceo" && a.is_builtin)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [agents]
+  );
+  const customAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => !a.is_builtin)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [agents]
+  );
+
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) || null,
     [agents, selectedId]
@@ -124,7 +119,7 @@ export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => vo
           </p>
           <h1>Your <em>team</em></h1>
           <p className="agents-hero-detail">
-            One CEO at the top with global context. Eight department specialists below — each focused on one job. Click any agent to read or rewrite its operating prompt.
+            A CEO orchestrator and {specialists.length} specialists. Each runs with its own operating prompt — click any tile to read or rewrite it.
           </p>
         </div>
       </header>
@@ -143,17 +138,57 @@ export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => vo
               Try again
             </button>
           </div>
-        ) : ceo ? (
-          <div className="org-tree">
-            <OrgNode
-              agent={ceo}
-              childrenByParent={childrenByParent}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              isRoot
-            />
-          </div>
-        ) : null}
+        ) : (
+          <>
+            {ceo && (
+              <section className="agents-section">
+                <p className="agents-section-label">Chief</p>
+                <FeatureCard agent={ceo} selected={selectedId === ceo.id} onSelect={setSelectedId} />
+              </section>
+            )}
+
+            {specialists.length > 0 && (
+              <section className="agents-section">
+                <div className="agents-section-head">
+                  <p className="agents-section-label">Specialists</p>
+                  <span className="agents-section-count">{specialists.length}</span>
+                </div>
+                <div className="agents-grid">
+                  {specialists.map((agent) => (
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      selected={selectedId === agent.id}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {customAgents.length > 0 && (
+              <section className="agents-section">
+                <div className="agents-section-head">
+                  <p className="agents-section-label">Custom</p>
+                  <span className="agents-section-count">{customAgents.length}</span>
+                </div>
+                <p className="agents-section-detail">
+                  Persistent specialists spawned by the CEO or added by you.
+                </p>
+                <div className="agents-grid">
+                  {customAgents.map((agent) => (
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      selected={selectedId === agent.id}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
       </div>
 
       {selectedAgent && (
@@ -173,63 +208,74 @@ export function AgentsScreen({ onBackToSettings }: { onBackToSettings?: () => vo
   );
 }
 
-function AgentTile({ agent }: { agent: AgentInfo }) {
+function FeatureCard({
+  agent,
+  selected,
+  onSelect
+}: {
+  agent: AgentInfo;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
   const Icon = iconFor(agent);
   const customised = !!agent.custom_prompt;
   return (
-    <>
-      <span className="agents-card-icon" aria-hidden="true"><Icon size={16} /></span>
-      <span className="agents-card-name">{agent.name}</span>
-      <span className="agents-card-role">{agent.role}</span>
-      {customised && <span className="agents-card-badge">edited</span>}
-    </>
+    <button
+      type="button"
+      className={`agents-feature ${selected ? "is-selected" : ""}`}
+      onClick={() => onSelect(agent.id)}
+    >
+      <span className="agents-feature-icon" aria-hidden="true">
+        <Icon size={18} />
+      </span>
+      <div className="agents-feature-body">
+        <p className="agents-feature-eyebrow">{agent.role}</p>
+        <h3 className="agents-feature-name">{agent.name}</h3>
+        <p className="agents-feature-desc">
+          Routes every task across the team, waits for each specialist to finish, then synthesizes a single coherent answer for you.
+        </p>
+      </div>
+      <div className="agents-feature-tail">
+        {customised && <span className="agents-feature-badge">Edited</span>}
+        <span className="agents-feature-cta">
+          Edit prompt
+          <ArrowUpRight size={13} />
+        </span>
+      </div>
+    </button>
   );
 }
 
-function OrgNode({
+function AgentCard({
   agent,
-  childrenByParent,
-  selectedId,
-  onSelect,
-  isRoot
+  selected,
+  onSelect
 }: {
   agent: AgentInfo;
-  childrenByParent: Map<string, AgentInfo[]>;
-  selectedId: string | null;
+  selected: boolean;
   onSelect: (id: string) => void;
-  isRoot?: boolean;
 }) {
-  const children = childrenByParent.get(agent.id) || [];
+  const Icon = iconFor(agent);
+  const customised = !!agent.custom_prompt && agent.is_builtin;
   return (
-    <div className={`org-node ${isRoot ? "is-root" : ""}`}>
-      <button
-        type="button"
-        className={`agents-card ${isRoot ? "agents-card-ceo" : ""} ${!agent.is_builtin ? "is-custom" : ""} ${selectedId === agent.id ? "is-selected" : ""}`}
-        onClick={() => onSelect(agent.id)}
-      >
-        <AgentTile agent={agent} />
-      </button>
-
-      {children.length > 0 && (
-        <>
-          <div className="org-stem-down" aria-hidden="true" />
-          <div className="org-junction" aria-hidden="true" />
-          <div className="org-children">
-            {children.map((child) => (
-              <div key={child.id} className="org-subtree">
-                <div className="org-stem-up" aria-hidden="true" />
-                <OrgNode
-                  agent={child}
-                  childrenByParent={childrenByParent}
-                  selectedId={selectedId}
-                  onSelect={onSelect}
-                />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+    <button
+      type="button"
+      className={`agents-card ${selected ? "is-selected" : ""} ${!agent.is_builtin ? "is-custom" : ""}`}
+      onClick={() => onSelect(agent.id)}
+    >
+      <span className="agents-card-icon" aria-hidden="true">
+        <Icon size={16} />
+      </span>
+      <span className="agents-card-name">{agent.name}</span>
+      <span className="agents-card-role">{agent.role}</span>
+      <span className="agents-card-tail">
+        {customised && <span className="agents-card-badge">Edited</span>}
+        {!agent.is_builtin && <span className="agents-card-badge is-custom">Custom</span>}
+        <span className="agents-card-chev" aria-hidden="true">
+          <ArrowUpRight size={12} />
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -248,7 +294,6 @@ function AgentDetailDrawer({
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
 
-  // When the user clicks a different agent, sync the local draft.
   useEffect(() => {
     setDraft(agent.custom_prompt ?? agent.default_prompt);
     setSavedFlash(false);
@@ -262,7 +307,7 @@ function AgentDetailDrawer({
     try {
       const updated = await invoke<AgentInfo>("update_agent_prompt", {
         id: agent.id,
-        prompt: draft,
+        prompt: draft
       });
       if (updated) onUpdated(updated);
       setSavedFlash(true);
@@ -310,7 +355,9 @@ function AgentDetailDrawer({
             <h2>{agent.name}</h2>
             <p className="agents-drawer-role">{agent.role}</p>
           </div>
-          <button type="button" className="agents-drawer-close" onClick={onClose} aria-label="Close"><X size={16} /></button>
+          <button type="button" className="agents-drawer-close" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
         </header>
 
         <div className="agents-drawer-body">

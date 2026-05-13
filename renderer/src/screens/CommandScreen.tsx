@@ -5,24 +5,50 @@ import {
   AlertTriangle,
   ArrowUp,
   Bot,
+  Boxes,
+  Briefcase,
+  Building2,
   ChevronDown,
   Check,
+  ClipboardList,
+  Clock,
   Command,
   Copy,
   Cpu,
+  Crown,
+  DollarSign,
+  Eraser,
   FileText,
+  FolderOpen,
+  HelpCircle,
+  Inbox,
+  Layers,
+  ListChecks,
   Loader2,
+  Megaphone,
   MessageSquare,
   Mic,
+  Microscope,
   Paperclip,
+  PenLine,
+  Plug,
   Plus,
+  Settings,
+  ShieldCheck,
   Sparkles,
+  Sun,
+  Target,
+  TrendingUp,
+  Users,
+  Wand2,
+  Wrench,
   X
 } from "lucide-react";
 import { invoke, newId } from "../lib/api";
 import { formatRelativeTime } from "../lib/workspace-view";
 import { PanelHeader, StatusBadge } from "../components/ui";
 import type {
+  AgentInfo,
   ChatMessage,
   ChatSession,
   ClaudeStreamEvent,
@@ -34,6 +60,80 @@ import type {
   WorkspaceEntry
 } from "../types";
 import type { OnboardingState, Screen } from "../ui";
+
+// Mirror-renderer for the composer overlay. Walks the prompt text and emits
+// a styled <span> for every @AgentName / @ConnectorName token that matches a
+// known entity. Agents render in sage, connectors render in slate. Other
+// text is emitted as plain text so it renders identically to what's in the
+// textarea underneath (which has transparent text + visible caret).
+type MirrorEntity = { name: string; kind: "agent" | "connector" };
+function renderHighlightedPrompt(
+  text: string,
+  entities: MirrorEntity[],
+  slashIds: string[] = []
+): React.ReactNode[] {
+  if (!text) return [];
+  const parts: React.ReactNode[] = [];
+  let key = 0;
+  let scanStart = 0;
+  // Leading slash command — only valid at the very start of the input. Match
+  // the longest known command id (so `/go-context` wins over `/go`).
+  if (text.startsWith("/") && slashIds.length > 0) {
+    const sortedIds = [...slashIds].sort((a, b) => b.length - a.length);
+    for (const id of sortedIds) {
+      const token = `/${id}`;
+      if (
+        text.startsWith(token) &&
+        (text.length === token.length || /[\s\W]/.test(text[token.length]))
+      ) {
+        parts.push(
+          <span key={`c${key++}`} className="aios-mention-token is-command">
+            {token}
+          </span>
+        );
+        scanStart = token.length;
+        break;
+      }
+    }
+  }
+  // @ mention scanning over the remaining text
+  const sorted = [...entities].sort((a, b) => b.name.length - a.name.length);
+  let bufferStart = scanStart;
+  let i = scanStart;
+  while (i < text.length) {
+    if (text[i] === "@") {
+      const rest = text.slice(i + 1);
+      let matched: MirrorEntity | null = null;
+      for (const entity of sorted) {
+        if (rest.toLowerCase().startsWith(entity.name.toLowerCase())) {
+          const boundary = rest[entity.name.length];
+          if (boundary === undefined || /[\s\W]/.test(boundary)) {
+            matched = entity;
+            break;
+          }
+        }
+      }
+      if (matched) {
+        if (bufferStart < i) {
+          parts.push(<React.Fragment key={`t${key++}`}>{text.slice(bufferStart, i)}</React.Fragment>);
+        }
+        parts.push(
+          <span key={`m${key++}`} className={`aios-mention-token is-${matched.kind}`}>
+            @{matched.name}
+          </span>
+        );
+        i += 1 + matched.name.length;
+        bufferStart = i;
+        continue;
+      }
+    }
+    i++;
+  }
+  if (bufferStart < text.length) {
+    parts.push(<React.Fragment key={`t${key++}`}>{text.slice(bufferStart)}</React.Fragment>);
+  }
+  return parts;
+}
 
 function friendlyActivityLabel(activity: { tool: string; summary: string }): string {
   const tool = activity.tool;
@@ -172,7 +272,8 @@ export function CommandScreen({
   onDetectClaude,
   onSessionsChange,
   onRefreshWorkspace,
-  onNavigate
+  onNavigate,
+  onNewChat
 }: {
   claude: ClaudeStatus | null;
   onboarding: OnboardingState | null;
@@ -187,9 +288,15 @@ export function CommandScreen({
   onSessionsChange: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   onRefreshWorkspace: () => Promise<void>;
   onNavigate: (screen: Screen) => void;
+  onNewChat?: () => void | Promise<void>;
 }) {
   const [runtimeMeta, setRuntimeMeta] = useState<{ sessionId?: string; durationMs?: number; costUsd?: number } | null>(null);
   const [prompt, setPrompt] = useState("");
+  // Local "we just kicked off a send" flag — covers the ~50ms between the
+  // optimistic message insert and the first stream event from the host. The
+  // visible busy state is OR'd with "activeSession has any streaming message"
+  // (see streamingBusy below) so returning to chat mid-stream correctly shows
+  // the typing indicator instead of falling back to false.
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -210,6 +317,46 @@ export function CommandScreen({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Composer slash / @ palette state. `from` is the character offset of the
+  // trigger character (the "/" or "@") in the current prompt — we need it so
+  // commit can splice the right range out without confusing tokens elsewhere
+  // in the message body.
+  type PaletteState =
+    | { kind: "none" }
+    | { kind: "slash"; query: string; from: number }
+    | { kind: "at"; query: string; from: number };
+  const [palette, setPalette] = useState<PaletteState>({ kind: "none" });
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  // Combined entity list the mirror + chat-bubble highlighter uses to detect
+  // @mentions. Sage chips for agents, slate chips for connected services.
+  const mirrorEntities = useMemo<MirrorEntity[]>(() => {
+    const a = agents.map<MirrorEntity>((agent) => ({ name: agent.name, kind: "agent" }));
+    const c = (connections || [])
+      .filter((conn) => conn.status === "connected")
+      .map<MirrorEntity>((conn) => ({ name: conn.label, kind: "connector" }));
+    return [...a, ...c];
+  }, [agents, connections]);
+  // When set, the next chat send addresses this agent — its effective_prompt
+  // is overlaid as a system prompt so the response comes back in-character.
+  // Chip lives above the textarea with an × to remove. One agent at a time.
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await invoke<{ agents: AgentInfo[] }>("list_agents", {});
+        if (!cancelled && Array.isArray(res?.agents)) setAgents(res.agents);
+      } catch {
+        /* agents page will recover; this is best-effort for the @ palette */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const installedCount = modules.filter((module) => module.installed).length;
   const contextCount = context.files.filter((file) => file.exists).length;
   const realMessages = activeSession?.messages ?? [];
@@ -257,6 +404,16 @@ export function CommandScreen({
     await invoke("set_setting", { key: "chat_model", value: id }).catch(() => undefined);
   }
 
+  // Are any messages in the active session still streaming? If yes, the chat
+  // is busy even after CommandScreen remounts (the local `busy` flag would be
+  // false on a fresh mount). This keeps the Send button disabled and the
+  // typing indicator correct when the user navigates away and returns.
+  const streamingBusy = useMemo(
+    () => activeSession?.messages.some((m) => m.role === "assistant" && m.streamId) ?? false,
+    [activeSession?.messages]
+  );
+  const effectiveBusy = busy || streamingBusy;
+
   // No-op (previously used for showFullHistory)
 
   useEffect(() => {
@@ -266,6 +423,11 @@ export function CommandScreen({
 
   useEffect(() => {
     if (!window.aios?.onHostEvent) return () => undefined;
+    // App.tsx now owns the content-writing path for claude_stream events
+    // (matching messages by streamId). This local listener only updates UI
+    // side-effects that depend on the screen being open: the activity
+    // indicator + runtime meta footer. When CommandScreen is unmounted these
+    // are irrelevant anyway.
     return window.aios.onHostEvent((event) => {
       if (event.event !== "claude_stream") return;
       const payload = event.data as ClaudeStreamEvent;
@@ -277,14 +439,6 @@ export function CommandScreen({
           durationMs: payload.durationMs ?? current?.durationMs,
           costUsd: payload.costUsd ?? current?.costUsd
         }));
-        if (payload.sessionId && activeSession) {
-          const capturedSessionId = payload.sessionId;
-          onSessionsChange((current) =>
-            current.map((session) => (session.id === activeSession.id
-              ? { ...session, claudeSessionId: capturedSessionId }
-              : session))
-          );
-        }
       }
       if (payload.toolUse) {
         setActivity({ tool: payload.toolUse.name, summary: payload.toolUse.summary });
@@ -292,30 +446,12 @@ export function CommandScreen({
       if (payload.toolResult) {
         setActivity(null);
       }
-      if (!payload.delta && !payload.response) {
-        if (payload.done) {
-          setActivity(null);
-          onRefreshWorkspace().catch(() => undefined);
-        }
-        return;
-      }
-      onSessionsChange((current) =>
-        current.map((session) => ({
-          ...session,
-          messages: session.messages.map((message) => {
-            if (message.id !== activeStream.assistantId) return message;
-            return {
-              ...message,
-              content: payload.response ?? `${message.content}${payload.delta ?? ""}`
-            };
-          })
-        }))
-      );
       if (payload.done || payload.response) {
+        setActivity(null);
         onRefreshWorkspace().catch(() => undefined);
       }
     });
-  }, [onSessionsChange, onRefreshWorkspace, activeSession?.id]);
+  }, [onRefreshWorkspace]);
 
   useEffect(() => {
     if (!busy) composerRef.current?.focus();
@@ -610,17 +746,24 @@ export function CommandScreen({
       ? `Attached files for this message:\n${attachments.map((a) => `- ${a.path}  (${a.name})`).join("\n")}\n\nRead any of these files with the Read tool when relevant to the user's request.\n\n---\n\n`
       : "";
     const finalText = attachmentBlock + trimmed;
+    // The prompt already contains @AgentName tokens inline — show it as-is
+    // in the chat bubble. (The MessageMarkdown renderer turns @Name into a
+    // styled mention chip via the same parser used by the composer overlay.)
     const displayText = attachments.length > 0
       ? `${trimmed || "(see attached files)"}\n\n📎 ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}: ${attachments.map((a) => a.name).join(", ")}`
       : trimmed;
     const userMessage: ChatMessage = { id: newId("msg"), role: "user", content: displayText, createdAt: new Date().toISOString() };
+    const streamId = newId("stream");
+    // Tag the assistant bubble with the streamId so the App-level listener can
+    // keep writing into it even if the user navigates away from chat. (Local
+    // listener below uses it for activity/runtime meta only.)
     const assistant: ChatMessage = {
       id: newId("msg"),
       role: "assistant",
       content: "",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      streamId
     };
-    const streamId = newId("stream");
     activeStreamRef.current = { streamId, assistantId: assistant.id };
     const nextSession = {
       ...activeSession,
@@ -641,6 +784,17 @@ export function CommandScreen({
       // Pass the user-picked model through as --model <alias>. "default" means
       // omit the flag so Claude CLI uses whatever's configured globally.
       if (selectedModel && selectedModel !== "default") baseArgs.model = selectedModel;
+      // Scan the prompt for @AgentName mentions and overlay each addressed
+      // agent's effective prompt as a system prompt for THIS chat turn. The
+      // shim tells Claude to answer in-character (single agent) or as the
+      // team (multiple agents), and to skip task-routing sentinels — chat
+      // mode, not task mode.
+      if (command === "run_task") {
+        const mentionedAgents = collectMentionedAgents(trimmed);
+        if (mentionedAgents.length > 0) {
+          baseArgs.systemPrompt = buildChatSystemPrompt(mentionedAgents);
+        }
+      }
       const taskArgs = command === "run_prime"
         ? baseArgs
         : { ...baseArgs, prompt: finalText };
@@ -677,6 +831,313 @@ export function CommandScreen({
       activeStreamRef.current = null;
       setBusy(false);
       setActivity(null);
+    }
+  }
+
+  // ─── Composer palette: slash commands + @ mentions ──────────────────────
+  type PaletteIcon = React.ComponentType<{ size?: number }>;
+  type SlashCommand = {
+    id: string;
+    label: string;
+    hint: string;
+    icon: PaletteIcon;
+    // Action commands fire run() immediately (clear / new / open page).
+    // Prompt commands populate the input with a canned Claude prompt the user
+    // can tweak then send — covers /prime + workflow shortcuts.
+    run?: () => void | Promise<void>;
+    prompt?: string;
+  };
+
+  function clearChat() {
+    if (!activeSession) return;
+    onSessionsChange((current) =>
+      current.map((s) =>
+        s.id === activeSession.id ? { ...s, messages: [], claudeSessionId: null } : s
+      )
+    );
+    setRuntimeMeta(null);
+  }
+
+  const slashCommands: SlashCommand[] = useMemo(
+    () => [
+      // Actions — run locally, no Claude call
+      { id: "new", label: "/new", hint: "Start a fresh chat", icon: Plus, run: () => onNewChat?.() },
+      { id: "clear", label: "/clear", hint: "Clear this chat's history", icon: Eraser, run: clearChat },
+      { id: "model", label: "/model", hint: "Pick the Claude model", icon: Cpu, run: () => setModelMenuOpen(true) },
+      { id: "sources", label: "/sources", hint: "Attach files to this message", icon: Paperclip, run: () => attachInputRef.current?.click() },
+
+      // Claude prompts — populate the input, user reviews then sends
+      { id: "prime", label: "/prime", hint: "Seed your workspace with foundational context", icon: Sparkles, prompt: "/prime" },
+      { id: "summary", label: "/summary", hint: "Summarize the current workspace state", icon: FileText, prompt: "Summarize my AIOS workspace — context files, connectors, recent activity. Highlight what's strong, thin, or missing." },
+      { id: "review", label: "/review", hint: "Review the context layer for gaps", icon: ShieldCheck, prompt: "Review my AIOS context files (personal-info, business-info, strategy, current-data). Call out what's strong, what's thin, and what's missing — be specific." },
+      { id: "next", label: "/next", hint: "Find the single highest-leverage next action", icon: ArrowUp, prompt: "Based on my AIOS workspace, what is the single highest-leverage next action I should take this week? Explain why in one sentence." },
+      { id: "plan", label: "/plan", hint: "Generate a practical plan from my workspace", icon: ClipboardList, prompt: "Create a practical plan from my current AIOS workspace context. Group by 'this week', 'this month', and 'this quarter'. Keep each item concrete and owned by me." },
+      { id: "goals", label: "/goals", hint: "Surface your top goals from the context layer", icon: Target, prompt: "Read my context files and tell me the top 3 goals I'm working toward in the next 90 days, in order of urgency." },
+      { id: "audit", label: "/audit", hint: "Audit tasks, blockers, and progress", icon: ListChecks, prompt: "Audit my current Tasks (Kanban) and AutoTasks. Tell me what's stuck, what's at risk, and what's quietly succeeding. Be blunt." },
+      { id: "brief-today", label: "/today", hint: "Generate today's daily brief", icon: Sun, prompt: "Generate today's daily brief: priorities, blockers, what's due, what's at risk. Pull from my workspace and recent activity. Tight and skimmable." },
+      { id: "help", label: "/help", hint: "Show what AIOS can do for you", icon: HelpCircle, prompt: "Explain what AIOS Desktop can do for me right now given my current connectors, agents, and workspace context. Give me 5 concrete things I should try this week." },
+
+      // Navigation
+      { id: "agents", label: "/agents", hint: "Open the Agents page", icon: Users, run: () => onNavigate("agents") },
+      { id: "tasks", label: "/tasks", hint: "Open the Tasks board", icon: ClipboardList, run: () => onNavigate("tasks") },
+      { id: "connectors", label: "/connectors", hint: "Manage connected services", icon: Plug, run: () => onNavigate("connectors") },
+      { id: "go-context", label: "/go-context", hint: "Open the Context layer", icon: FileText, run: () => onNavigate("context") },
+      { id: "history", label: "/history", hint: "Open the chat history", icon: Clock, run: () => onNavigate("history") },
+      { id: "outputs", label: "/outputs", hint: "Open outputs", icon: FolderOpen, run: () => onNavigate("outputs") },
+      { id: "go-plans", label: "/go-plans", hint: "Open saved plans", icon: Layers, run: () => onNavigate("plans") },
+      { id: "modules", label: "/modules", hint: "Open the modules library", icon: Boxes, run: () => onNavigate("modules") },
+      { id: "imports", label: "/imports", hint: "Open imported files", icon: Inbox, run: () => onNavigate("imports") },
+      { id: "brief", label: "/brief", hint: "Open the Brief page", icon: Sun, run: () => onNavigate("briefs") },
+      { id: "settings", label: "/settings", hint: "Open settings", icon: Settings, run: () => onNavigate("settings") }
+    ],
+    [activeSession?.id, onNewChat, onNavigate]
+  );
+
+  const slashIds = useMemo(() => slashCommands.map((c) => c.id), [slashCommands]);
+
+  const AGENT_ICONS: Record<string, PaletteIcon> = {
+    ceo: Crown,
+    product: Sparkles,
+    engineering: Wrench,
+    marketing: Megaphone,
+    sales: TrendingUp,
+    operations: Building2,
+    finance: DollarSign,
+    research: Microscope,
+    assistant: Wand2,
+    content: PenLine
+  };
+
+  type MentionItem = {
+    id: string;
+    label: string;
+    group: "agent" | "connector";
+    detail: string;
+    icon: PaletteIcon;
+  };
+
+  const mentions: MentionItem[] = useMemo(() => {
+    const agentItems: MentionItem[] = agents.map((a) => ({
+      id: `agent:${a.id}`,
+      label: a.name,
+      group: "agent",
+      detail: a.role,
+      icon: AGENT_ICONS[a.id] || Briefcase
+    }));
+    const connectorItems: MentionItem[] = (connections || [])
+      .filter((c) => c.status === "connected")
+      .map((c) => ({
+        id: `connector:${c.id}`,
+        label: c.label,
+        group: "connector",
+        detail: c.detail || c.status,
+        icon: Plug
+      }));
+    return [...agentItems, ...connectorItems];
+  }, [agents, connections]);
+
+  function detectTrigger(value: string, cursor: number): PaletteState {
+    // Slash: only when the entire prompt up to the cursor is "/<query>" with
+    // nothing else. That keeps it from misfiring mid-sentence.
+    if (value.startsWith("/")) {
+      const head = value.slice(0, cursor);
+      if (!/\s/.test(head)) {
+        return { kind: "slash", query: head.slice(1), from: 0 };
+      }
+    }
+    // @: trigger at start of input OR after whitespace. Active until the next
+    // whitespace, so the user types "@gma" and we filter "gma" against mentions.
+    for (let i = cursor - 1; i >= 0; i--) {
+      const ch = value[i];
+      if (ch === " " || ch === "\n" || ch === "\t") break;
+      if (ch === "@") {
+        const prev = i === 0 ? " " : value[i - 1];
+        if (prev === " " || prev === "\n" || prev === "\t" || i === 0) {
+          return { kind: "at", query: value.slice(i + 1, cursor), from: i };
+        }
+        break;
+      }
+    }
+    return { kind: "none" };
+  }
+
+  function handlePromptChange(value: string, cursor: number) {
+    setPrompt(value);
+    const next = detectTrigger(value, cursor);
+    setPalette(next);
+    setPaletteIndex(0);
+  }
+
+  const filteredSlash = useMemo(() => {
+    if (palette.kind !== "slash") return [] as SlashCommand[];
+    const q = palette.query.toLowerCase();
+    return slashCommands.filter((c) => c.id.toLowerCase().startsWith(q));
+  }, [palette, slashCommands]);
+
+  const filteredMentions = useMemo(() => {
+    if (palette.kind !== "at") return [] as MentionItem[];
+    const q = palette.query.toLowerCase();
+    if (!q) return mentions;
+    return mentions.filter((m) => m.label.toLowerCase().includes(q));
+  }, [palette, mentions]);
+
+  type PaletteRow = {
+    id: string;
+    label: string;
+    hint: string;
+    icon: PaletteIcon;
+    group?: "command" | "agent" | "connector";
+  };
+
+  const paletteList: PaletteRow[] =
+    palette.kind === "slash"
+      ? filteredSlash.map((c) => ({ id: c.id, label: c.label, hint: c.hint, icon: c.icon, group: "command" as const }))
+      : palette.kind === "at"
+      ? filteredMentions.map((m) => ({ id: m.id, label: `@${m.label}`, hint: m.detail, icon: m.icon, group: m.group }))
+      : [];
+
+  const safePaletteIndex = paletteList.length === 0 ? 0 : Math.min(paletteIndex, paletteList.length - 1);
+
+  function closePalette() {
+    setPalette({ kind: "none" });
+    setPaletteIndex(0);
+  }
+
+  function commitPaletteSelection() {
+    if (palette.kind === "slash") {
+      const cmd = filteredSlash[safePaletteIndex];
+      if (!cmd) return;
+      closePalette();
+      if (cmd.prompt !== undefined) {
+        // Prompt-style command — load the canned prompt into the input,
+        // place caret at end, focus the textarea. User reviews and presses
+        // Enter to send.
+        const text = cmd.prompt;
+        setPrompt(text);
+        requestAnimationFrame(() => {
+          composerRef.current?.focus();
+          composerRef.current?.setSelectionRange(text.length, text.length);
+        });
+        return;
+      }
+      setPrompt("");
+      if (cmd.run) void cmd.run();
+      return;
+    }
+    if (palette.kind === "at") {
+      const item = filteredMentions[safePaletteIndex];
+      if (!item) return;
+      const cursor = composerRef.current?.selectionStart ?? prompt.length;
+      const before = prompt.slice(0, palette.from);
+      const after = prompt.slice(cursor);
+      // Insert the mention as inline text. The overlay-highlighter picks up
+      // `@AgentName` / `@ServiceName` tokens and renders them as styled chips
+      // inside the textarea — supports any number of mentions per message.
+      const inserted = `@${item.label} `;
+      const next = before + inserted + after;
+      const caret = (before + inserted).length;
+      setPrompt(next);
+      closePalette();
+      requestAnimationFrame(() => {
+        composerRef.current?.setSelectionRange(caret, caret);
+        composerRef.current?.focus();
+      });
+    }
+  }
+
+  // Find every @AgentName token in a message and return the matching agents.
+  // Greedy match by longest name first so "Customer Support" wins over the
+  // bare "Customer" prefix when both exist.
+  function collectMentionedAgents(text: string): AgentInfo[] {
+    const sorted = [...agents].sort((a, b) => b.name.length - a.name.length);
+    const seen = new Set<string>();
+    const result: AgentInfo[] = [];
+    let i = 0;
+    while (i < text.length) {
+      if (text[i] === "@") {
+        const rest = text.slice(i + 1);
+        let matched: AgentInfo | null = null;
+        for (const agent of sorted) {
+          if (rest.toLowerCase().startsWith(agent.name.toLowerCase())) {
+            const boundary = rest[agent.name.length];
+            if (boundary === undefined || /[\s\W]/.test(boundary)) {
+              matched = agent;
+              break;
+            }
+          }
+        }
+        if (matched && !seen.has(matched.id)) {
+          seen.add(matched.id);
+          result.push(matched);
+        }
+        if (matched) {
+          i += 1 + matched.name.length;
+          continue;
+        }
+      }
+      i++;
+    }
+    return result;
+  }
+
+  function buildChatSystemPrompt(mentioned: AgentInfo[]): string {
+    // Chat mode persona — INTENTIONALLY lightweight. We don't inject the full
+    // agent task-mode prompt because that's all delegation/routing logic that
+    // conflicts with "respond conversationally." Claude gets the role + chat
+    // posture; it's smart enough to speak in character from that.
+    if (mentioned.length === 1) {
+      const agent = mentioned[0];
+      return (
+        `You are ${agent.name}, the ${agent.role} on this user's AI team. ` +
+        `Stay in character throughout this reply. Be concise, conversational, ` +
+        `and decisive — answer like a real ${agent.role} would in a quick chat. ` +
+        `Skip any preamble about who you are; just answer the user's question. ` +
+        `Do NOT emit [ASSIGN_TASK:], [SPAWN_AGENT:], [NEEDS_CONNECTOR:], or ` +
+        `[BLOCKED:] sentinels — this is a direct chat, not a background task.`
+      );
+    }
+    const team = mentioned.map((a) => `${a.name} (${a.role})`).join(", ");
+    return (
+      `You are speaking on behalf of a coordinated team the user has addressed ` +
+      `together: ${team}. Reply as ONE unified voice that draws on each role's ` +
+      `expertise — don't fragment into separate speakers. Be concise and ` +
+      `conversational. Skip any preamble about who you are. Do NOT emit ` +
+      `[ASSIGN_TASK:], [SPAWN_AGENT:], [NEEDS_CONNECTOR:], or [BLOCKED:] ` +
+      `sentinels — this is a direct chat, not a background task.`
+    );
+  }
+
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (palette.kind !== "none" && paletteList.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setPaletteIndex((cur) => (cur + 1) % paletteList.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setPaletteIndex((cur) => (cur - 1 + paletteList.length) % paletteList.length);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        commitPaletteSelection();
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        commitPaletteSelection();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePalette();
+        return;
+      }
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendPrompt(prompt);
     }
   }
 
@@ -753,7 +1214,17 @@ export function CommandScreen({
                 <div className="aios-message-body">
                   {message.content.trim() ? (
                     <div className="aios-markdown">
-                      <MessageMarkdown content={message.content} />
+                      {message.role === "user" ? (
+                        // User-bubble: render plain text but highlight every
+                        // @AgentName token as a sage chip — same parser the
+                        // composer overlay uses, so the bubble matches what
+                        // the user saw while typing.
+                        <p className="aios-user-text">
+                          {renderHighlightedPrompt(message.content, mirrorEntities, slashIds)}
+                        </p>
+                      ) : (
+                        <MessageMarkdown content={message.content} />
+                      )}
                     </div>
                   ) : (
                     <div className="inline-thinking">
@@ -850,18 +1321,75 @@ export function CommandScreen({
               </div>
             ) : null}
             <div className="aios-composer-input-line">
+              {palette.kind !== "none" && paletteList.length > 0 ? (
+                <div className={`aios-palette is-${palette.kind}`} role="listbox">
+                  <p className="aios-palette-kind">
+                    {palette.kind === "slash" ? "Commands" : "Mentions"}
+                  </p>
+                  {paletteList.map((item, idx) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="option"
+                        aria-selected={idx === safePaletteIndex}
+                        className={`aios-palette-item is-${item.group ?? "command"} ${idx === safePaletteIndex ? "is-active" : ""}`}
+                        onMouseEnter={() => setPaletteIndex(idx)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setPaletteIndex(idx);
+                          commitPaletteSelection();
+                        }}
+                      >
+                        <span className={`aios-palette-avatar is-${item.group ?? "command"}`} aria-hidden="true">
+                          <Icon size={14} />
+                        </span>
+                        <span className="aios-palette-text">
+                          <span className="aios-palette-label">{item.label}</span>
+                          <span className="aios-palette-hint">{item.hint}</span>
+                        </span>
+                        {item.group ? (
+                          <span className={`aios-palette-group is-${item.group}`}>{item.group}</span>
+                        ) : null}
+                        {idx === safePaletteIndex ? (
+                          <span className="aios-palette-key" aria-hidden="true">↵</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="aios-composer-mirror" aria-hidden="true">
+                {renderHighlightedPrompt(prompt, mirrorEntities, slashIds)}
+                {/* Trailing zero-width char keeps the mirror's height in sync
+                    with the textarea when the prompt ends with a newline. */}
+                {"​"}
+              </div>
               <textarea
                 ref={composerRef}
                 value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    sendPrompt(prompt);
+                onChange={(event) => {
+                  const cursor = event.target.selectionStart ?? event.target.value.length;
+                  handlePromptChange(event.target.value, cursor);
+                }}
+                onKeyUp={(event) => {
+                  // Caret moved without text change (arrow keys, click) — re-evaluate
+                  // the trigger so the palette opens/closes as the user navigates.
+                  if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
+                    const target = event.currentTarget;
+                    const cursor = target.selectionStart ?? target.value.length;
+                    setPalette(detectTrigger(target.value, cursor));
+                    setPaletteIndex(0);
                   }
                 }}
-                placeholder="Ask anything"
-                disabled={!claude?.found || !claude.runtimeOk || busy}
+                onKeyDown={handleComposerKeyDown}
+                onBlur={() => {
+                  // Defer so click-to-select in the palette still fires.
+                  window.setTimeout(closePalette, 100);
+                }}
+                placeholder="Ask anything — type / for commands or @ to mention"
+                disabled={!claude?.found || !claude.runtimeOk || effectiveBusy}
               />
             </div>
             <div className="aios-composer-underbar">
@@ -869,7 +1397,7 @@ export function CommandScreen({
                 className="aios-composer-action"
                 type="button"
                 onClick={() => attachInputRef.current?.click()}
-                disabled={busy || uploadingAttachment}
+                disabled={effectiveBusy || uploadingAttachment}
                 title="Attach files to this message"
               >
                 {uploadingAttachment ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
@@ -881,7 +1409,7 @@ export function CommandScreen({
                   type="button"
                   className="aios-model-pill"
                   onClick={() => setModelMenuOpen((open) => !open)}
-                  disabled={busy}
+                  disabled={effectiveBusy}
                   aria-haspopup="menu"
                   aria-expanded={modelMenuOpen}
                   title="Pick the Claude model for this chat"
@@ -909,24 +1437,24 @@ export function CommandScreen({
                   </div>
                 ) : null}
               </div>
-              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : busy ? (activity ? friendlyActivityLabel(activity) : "Claude is thinking…") : "")}</span>
+              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : effectiveBusy ? (activity ? friendlyActivityLabel(activity) : "Claude is thinking…") : "")}</span>
               <div className="aios-composer-right">
                 <button
                   className={`aios-composer-tool ${listening ? "active" : ""}`}
                   type="button"
                   title={listening ? "Stop voice input" : "Voice input"}
                   onClick={toggleVoiceInput}
-                  disabled={busy || transcribing}
+                  disabled={effectiveBusy || transcribing}
                 >
                   {transcribing ? <Loader2 size={15} className="spin" /> : <Mic size={15} />}
                 </button>
                 <button
                   className="aios-send-btn"
-                  disabled={!prompt.trim() || !claude?.found || !claude.runtimeOk || busy}
+                  disabled={!prompt.trim() || !claude?.found || !claude.runtimeOk || effectiveBusy}
                   type="submit"
                   aria-label="Send message"
                 >
-                  {busy ? <Loader2 size={15} className="spin" /> : <ArrowUp size={15} />}
+                  {effectiveBusy ? <Loader2 size={15} className="spin" /> : <ArrowUp size={15} />}
                 </button>
               </div>
             </div>

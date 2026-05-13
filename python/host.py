@@ -339,6 +339,14 @@ _COMPOSIO_SYSTEM_PROMPT = (
     "(following the AIOS format: Title, Overview, Current State, Proposed Changes, Design Decisions, Step-by-Step Tasks) "
     "and save it by running: `python python/save_plan.py --title \"Plan Name\" --content \"FULL_MARKDOWN_CONTENT\"`. "
     "Crucially, you MUST also send the full plan content back in your chat reply so the user can see it on WhatsApp.\n"
+    "• ONE OUTPUT PER IMPLEMENTATION (hard rule): When asked to 'implement' a plan, "
+    "produce EXACTLY ONE consolidated output file under outputs/<slug>/<plan-slug>.md "
+    "(or outputs/<plan-slug>.md if there's no obvious category). Do NOT create one "
+    "file per plan step, one per section, or one per deliverable. If the plan has "
+    "multiple deliverables, fold them all into the single output file with H2 "
+    "headings. If you find yourself about to write a second outputs/* file for the "
+    "same plan, STOP — append to the existing file or rewrite it instead. Users "
+    "have hit 20+ files for one /implement run; that is a regression.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"
 
@@ -366,6 +374,7 @@ def run_claude(
     stream_id: str | None = None,
     session_id: str | None = None,
     model: str | None = None,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     path = claude_path or get_setting("claude_path")
     if not path:
@@ -385,9 +394,13 @@ def run_claude(
     # the legitimately-connected Composio account.
     mcp_isolation = _mcp_isolation_flags()
     composio_hint = ["--append-system-prompt", _COMPOSIO_SYSTEM_PROMPT] if mcp_isolation else []
+    # Per-call system-prompt overlay — used by chat when an @agent is selected.
+    # Stacks on top of the Composio hint, so the agent persona wraps inside the
+    # tool-use guardrails. Empty / missing = chat default behavior.
+    agent_overlay = ["--append-system-prompt", system_prompt] if system_prompt else []
     attempts = [
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *model_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *model_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
     ]
     if stream_id:
         stream_command = [
@@ -396,6 +409,7 @@ def run_claude(
             *resume,
             *mcp_isolation,
             *composio_hint,
+            *agent_overlay,
             *model_flags,
             "--verbose",
             "--output-format",
@@ -713,6 +727,7 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
         stream_id=str(args.get("streamId") or "") or None,
         session_id=str(args.get("sessionId") or "") or None,
         model=str(args.get("model") or "") or None,
+        system_prompt=str(args.get("systemPrompt") or "") or None,
     )
 
 

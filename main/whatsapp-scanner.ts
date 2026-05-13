@@ -58,7 +58,13 @@ async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindo
 
 
     if (text.toLowerCase() === "ping") {
-      workerProcess?.send({ type: "reply", text: "AIOS is online 🟢", jid });
+      const reply = "AIOS is online 🟢";
+      workerProcess?.send({ type: "reply", text: reply, jid });
+      // Persist the ping exchange to the WhatsApp Remote thread too — without
+      // this every ping was silently missing from the in-app history.
+      if (host) {
+        try { await persistToHistory(host, text, reply); } catch { /* logged inside */ }
+      }
       return;
     }
 
@@ -71,7 +77,7 @@ async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindo
         const reply = res?.ok && res.data?.response
           ? res.data.response
           : "AIOS completed but returned no text.";
-        
+
         // Persist to local history so it shows in the UI
         await persistToHistory(host, text, reply);
 
@@ -88,21 +94,26 @@ async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindo
 async function persistToHistory(host: any, userPrompt: string, assistantResponse: string) {
   try {
     const sessionId = "thread-whatsapp-remote";
-    console.log(`\n>>> [WHATSAPP] PERSISTING TO HISTORY: ${sessionId}`);
-    console.log(`>>> [WHATSAPP] Prompt: "${userPrompt.substring(0, 30)}..."`);
-    
-    // 1. Get existing sessions
-    const sessionsRes = await host.invoke("get_sessions", {}) as any;
-    console.log(`>>> [WHATSAPP] Fetched ${sessionsRes?.data?.length || 0} sessions. OK: ${sessionsRes?.ok}`);
 
-    
-    let sessions = sessionsRes?.ok ? sessionsRes.data : [];
-    if (!Array.isArray(sessions)) sessions = [];
+    // 1. Get existing sessions, with one retry. If BOTH reads fail we bail —
+    //    overwriting the saved thread with a fresh empty session would wipe
+    //    every prior WhatsApp exchange (which is what was happening before).
+    let sessionsRes: any = await host.invoke("get_sessions", {});
+    if (!sessionsRes?.ok) {
+      await new Promise((r) => setTimeout(r, 150));
+      sessionsRes = await host.invoke("get_sessions", {});
+    }
+    if (!sessionsRes?.ok || !Array.isArray(sessionsRes.data)) {
+      log("whatsapp", "persistToHistory aborted — get_sessions failed twice", { sessionId });
+      return;
+    }
+    const sessions: any[] = sessionsRes.data;
 
-    // 2. Find or create session
+    // 2. Find existing session OR create fresh. The find-or-create is safe
+    //    now because we only get here when the read succeeded — if the
+    //    thread genuinely doesn't exist yet, it's truly empty.
     let session = sessions.find((s: any) => s.id === sessionId);
     if (!session) {
-      console.log(`[whatsapp] Creating new session: ${sessionId}`);
       session = {
         id: sessionId,
         title: "WhatsApp Remote",
@@ -110,8 +121,6 @@ async function persistToHistory(host: any, userPrompt: string, assistantResponse
         updatedAt: new Date().toISOString(),
         claudeSessionId: null
       };
-    } else {
-      console.log(`[whatsapp] Using existing session: ${sessionId}. Current messages: ${session.messages?.length}`);
     }
 
     // 3. Append messages
@@ -132,9 +141,10 @@ async function persistToHistory(host: any, userPrompt: string, assistantResponse
     session.updatedAt = now;
 
     // 4. Save back
-    console.log(`[whatsapp] Saving session ${sessionId}...`);
     const saveRes = await host.invoke("save_session", { session }) as any;
-    console.log(`[whatsapp] Save result OK: ${saveRes?.ok}`);
+    if (!saveRes?.ok) {
+      log("whatsapp", "persistToHistory save_session failed", { sessionId, len: session.messages.length });
+    }
     
     // 5. Notify UI to refresh history (so it pops up in the sidebar immediately)
     if (currentWindow && !currentWindow.isDestroyed()) {

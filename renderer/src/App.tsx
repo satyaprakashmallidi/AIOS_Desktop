@@ -523,15 +523,49 @@ function App() {
     if (!window.aios?.onHostEvent) return () => undefined;
     return window.aios.onHostEvent((event) => {
       if (event.event === "auto_task_complete" || event.event === "session_updated") {
-        console.log(`[App] Session update event received: ${event.event}. Refreshing workspace...`);
-        refreshWorkspace().then(() => {
-          console.log("[App] Workspace refreshed. Session IDs:", sessions.map(s => s.id));
-        }).catch(() => undefined);
+        refreshWorkspace().catch(() => undefined);
+        return;
+      }
+      // Stream deltas are handled at the App level (not CommandScreen) so the
+      // user can navigate to another page mid-response without losing it —
+      // setSessions keeps writing into the matching message by streamId even
+      // when CommandScreen is unmounted. Without this, returning to chat
+      // shows "Claude is thinking" forever for the empty assistant bubble.
+      if (event.event === "claude_stream") {
+        const payload = event.data as {
+          streamId?: string;
+          delta?: string;
+          response?: string;
+          done?: boolean;
+          sessionId?: string;
+        };
+        if (!payload?.streamId) return;
+        const matchId = payload.streamId;
+        setSessions((current) => current.map((session) => {
+          let touched = false;
+          const nextMessages = session.messages.map((m) => {
+            if (m.streamId !== matchId) return m;
+            touched = true;
+            const nextContent =
+              payload.response !== undefined
+                ? payload.response
+                : payload.delta
+                ? `${m.content}${payload.delta}`
+                : m.content;
+            const clearStream = payload.done || payload.response !== undefined;
+            return {
+              ...m,
+              content: nextContent,
+              streamId: clearStream ? null : m.streamId
+            };
+          });
+          if (!touched) return session;
+          const claudeUpdate = payload.sessionId ? { claudeSessionId: payload.sessionId } : {};
+          return { ...session, ...claudeUpdate, messages: nextMessages };
+        }));
       }
     });
-
-
-  }, []);
+  }, [refreshWorkspace]);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null;
   const contextSections = useMemo(() => buildContextSections(context, recent), [context, recent]);
@@ -755,6 +789,17 @@ function App() {
             onSessionsChange={setSessions}
             onRefreshWorkspace={refreshWorkspace}
             onNavigate={setScreen}
+            onNewChat={async () => {
+              try {
+                const created = await invoke<ChatSession>("create_thread", { title: "New chat" });
+                const fresh = await invoke<ChatSession[]>("get_sessions");
+                const merged = fresh.some((s) => s.id === created.id) ? fresh : [created, ...fresh];
+                setSessions(merged);
+                setActiveSessionId(created.id);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              }
+            }}
           />
           </div>
         ) : null}

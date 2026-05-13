@@ -2913,15 +2913,242 @@ button:active:not(:disabled) { transform: scale(0.98); }
 }
 .aios-attachment-remove:hover { background: var(--surface-deep); color: var(--ink); }
 
+/* Inline mention highlighting — a mirror layer behind the (transparent-text)
+   textarea renders the same content with @AgentName tokens styled as sage
+   chips. Because both share the same font / size / line-height / padding,
+   the highlights sit pixel-aligned to the actual typed characters. */
+.aios-composer-mirror {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  padding: 6px 0;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+}
+/* User-bubble text — plain paragraph, preserves whitespace, allows the
+   mention-token inline chips to render between words. */
+.aios-user-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* CRITICAL: the chip's rendered width MUST equal the underlying text's
+   width, or the textarea's caret drifts out of sync with the mirror's
+   glyphs. So: no padding, no margin, no font-weight change — only color +
+   background-color + a width-neutral border-radius. The inset box-shadow
+   gives the chip outline appearance without affecting layout. */
+.aios-mention-token {
+  display: inline;
+  background: rgba(61, 90, 74, 0.14);
+  color: var(--sage);
+  font-weight: inherit;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(61, 90, 74, 0.22);
+}
+.aios-mention-token.is-agent {
+  background: rgba(61, 90, 74, 0.14);
+  color: var(--sage);
+  box-shadow: inset 0 0 0 1px rgba(61, 90, 74, 0.22);
+}
+.aios-mention-token.is-connector {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.16);
+}
+.aios-mention-token.is-command {
+  background: rgba(61, 90, 74, 0.08);
+  color: var(--sage);
+  box-shadow: inset 0 0 0 1px rgba(61, 90, 74, 0.16);
+}
+
 .aios-composer-input-line {
   display: flex;
   align-items: center;
   min-height: 36px;
+  position: relative;
+}
+
+/* Slash / mention palette — anchored above the input row. */
+.aios-palette {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.10);
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* Slim kind eyebrow — sage for /, slate for @ */
+.aios-palette-kind {
+  margin: 4px 12px 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--sage);
+}
+.aios-palette.is-at .aios-palette-kind {
+  color: #6b7d72;
+}
+
+.aios-palette-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px 8px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+/* Thin colored left-edge per kind — quiet but unmistakable. */
+.aios-palette-item::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease, top 120ms ease, bottom 120ms ease;
+}
+.aios-palette-item.is-command::before { background: var(--sage); opacity: 0.35; }
+.aios-palette-item.is-agent::before   { background: var(--sage); opacity: 0.75; }
+.aios-palette-item.is-connector::before { background: #6b7d72; opacity: 0.75; }
+.aios-palette-item:hover,
+.aios-palette-item.is-active {
+  background: var(--sage-soft, rgba(61, 90, 74, 0.08));
+}
+.aios-palette-item.is-active::before {
+  top: 6px;
+  bottom: 6px;
+  opacity: 1;
+}
+.aios-palette-item.is-active.is-connector {
+  background: rgba(107, 125, 114, 0.10);
+}
+
+.aios-palette-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(61, 90, 74, 0.10);
+  color: var(--sage);
+}
+.aios-palette-avatar.is-connector {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
+}
+.aios-palette-avatar.is-agent {
+  background: rgba(61, 90, 74, 0.14);
+  color: var(--sage);
+}
+.aios-palette-avatar.is-command {
+  background: rgba(61, 90, 74, 0.06);
+  color: var(--sage);
+}
+
+.aios-palette-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.aios-palette-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aios-palette-hint {
+  font-size: 11.5px;
+  color: var(--gray-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.aios-palette-group {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--sage);
+  background: rgba(61, 90, 74, 0.10);
+  border: 1px solid rgba(61, 90, 74, 0.18);
+}
+.aios-palette-group.is-command {
+  color: var(--sage);
+  background: rgba(61, 90, 74, 0.04);
+  border-color: rgba(61, 90, 74, 0.14);
+  opacity: 0.85;
+}
+.aios-palette-group.is-agent {
+  color: var(--sage);
+  background: rgba(61, 90, 74, 0.12);
+  border-color: rgba(61, 90, 74, 0.22);
+}
+.aios-palette-group.is-connector {
+  color: #475569;
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.10);
+}
+
+.aios-palette-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-500);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
 }
 
 .aios-composer-prompt-icon { color: var(--gray-400); }
 
 .aios-composer textarea {
+  position: relative;
+  z-index: 1;
   width: 100%;
   min-height: 32px;
   max-height: 160px;
@@ -2929,12 +3156,22 @@ button:active:not(:disabled) { transform: scale(0.98); }
   resize: none;
   border: 0;
   background: transparent;
-  color: var(--ink);
+  /* Transparent text — the mirror layer behind paints the visible glyphs and
+     applies sage highlighting for @AgentName tokens. The caret stays visible
+     via caret-color so the user knows where they're typing. */
+  color: transparent;
+  caret-color: var(--ink);
   font-family: var(--font-body);
+  font-weight: 400;
   font-size: 14.5px;
   line-height: 1.5;
+  letter-spacing: -0.005em;
 }
 .aios-composer textarea::placeholder { color: var(--gray-400); }
+/* Selection background still works on a transparent-text textarea, but the
+   selected GLYPHS are invisible. Tinting the selection lightly keeps it
+   readable against the mirror's painted text. */
+.aios-composer textarea::selection { background: rgba(61, 90, 74, 0.25); }
 
 .aios-send-btn {
   width: 32px;
@@ -6076,13 +6313,17 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 }
 
 /* ─── Shared detail modal (Plans / Outputs / Folder) ──────────────────── */
+/* z-index bumped + backdrop tightened so the page cards behind the preview
+   don't bleed through visually. Some users were seeing the Outputs grid
+   underneath the open file preview, which looked like the modal hadn't
+   covered the page. */
 .detail-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9000;
-  background: rgba(13, 13, 13, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  z-index: 10500;
+  background: rgba(13, 13, 13, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: grid;
   place-items: center;
   padding: 32px;
@@ -7227,9 +7468,9 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
    .tasks-v2-* family appended at end of file for the redesigned dashboard. */
 
 .detail-modal-overlay {
-  background: rgba(13, 13, 13, 0.4);
-  backdrop-filter: blur(4px);
-  z-index: 10000;
+  background: rgba(13, 13, 13, 0.7);
+  backdrop-filter: blur(12px);
+  z-index: 10500;
 }
 
 .detail-modal-card {
@@ -8084,197 +8325,257 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .agents-body {
   flex: 1;
   overflow: auto;
-  padding: 34px 32px 60px;
+  padding: 28px 32px 60px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 16px;
+  gap: 36px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
 }
 
-.agents-card {
+.agents-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.agents-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.agents-section-label {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sage);
+}
+.agents-section-count {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--gray-500);
+}
+.agents-section-detail {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--gray-500);
+  max-width: 540px;
+}
+
+/* Featured CEO card */
+.agents-feature {
   display: grid;
-  grid-template-rows: auto auto auto;
-  align-items: start;
-  justify-items: start;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 28px;
+  background:
+    linear-gradient(135deg, rgba(61, 90, 74, 0.07), rgba(61, 90, 74, 0) 60%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  width: 100%;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 100ms ease;
+}
+.agents-feature:hover {
+  border-color: var(--sage);
+  box-shadow: 0 6px 24px rgba(61, 90, 74, 0.10);
+}
+.agents-feature:hover .agents-feature-cta {
+  transform: translate(2px, -2px);
+}
+.agents-feature.is-selected {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 3px rgba(61, 90, 74, 0.12);
+}
+.agents-feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--sage);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(61, 90, 74, 0.22);
+}
+.agents-feature-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.agents-feature-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+}
+.agents-feature-name {
+  margin: 0;
+  font-family: var(--font-display, "Instrument Serif", Georgia, serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--sage);
+}
+.agents-feature-desc {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--gray-500);
+  max-width: 620px;
+}
+.agents-feature-tail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.agents-feature-badge {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sage);
+  background: rgba(61, 90, 74, 0.10);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.agents-feature-cta {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--sage);
+  white-space: nowrap;
+  transition: transform 140ms ease;
+}
+
+/* Specialist + custom grid */
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+/* Tile */
+.agents-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 3px;
   padding: 16px 18px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  position: relative;
   font: inherit;
+  text-align: left;
   color: var(--ink);
-  transition: border-color 140ms ease, transform 100ms ease, box-shadow 140ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 100ms ease;
 }
 .agents-card:hover {
   border-color: var(--sage);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 18px rgba(61, 90, 74, 0.06);
+}
+.agents-card:hover .agents-card-chev {
+  color: var(--sage);
+  transform: translate(2px, -2px);
 }
 .agents-card.is-selected {
   border-color: var(--sage);
   box-shadow: 0 0 0 3px rgba(61, 90, 74, 0.12);
 }
-
+.agents-card.is-custom {
+  border-style: dashed;
+}
 .agents-card-icon {
+  grid-row: 1 / 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--surface-soft);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--sage-soft, rgba(61, 90, 74, 0.08));
   color: var(--sage);
 }
 .agents-card-name {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
-  color: var(--ink);
   letter-spacing: -0.005em;
+  color: var(--ink);
+  align-self: end;
 }
 .agents-card-role {
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
   color: var(--gray-500);
-  line-height: 1.4;
-  white-space: normal;
+  align-self: start;
+}
+.agents-card-tail {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .agents-card-badge {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  font-size: 9.5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--sage);
   background: rgba(61, 90, 74, 0.10);
   padding: 2px 6px;
   border-radius: 999px;
 }
-
-.agents-card.is-custom {
-  border-style: dashed;
+.agents-card-badge.is-custom {
+  color: var(--gray-600, #475569);
+  background: rgba(15, 23, 42, 0.06);
 }
-
-/* ─── Org-chart tree connectors ──────────────────────────────────────────── */
-/* Each .org-node centers its card and (if it has children) drops a vertical
-   stem → junction dot → horizontal bus → row of children. Each child is
-   wrapped in an .org-subtree that draws its own short vertical stem UP to
-   the bus. The bus is constructed from each subtree's ::after half-line so
-   first/last children naturally trim it at the center, just like in the
-   reference image. */
-
-.org-tree {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
-}
-
-.org-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
-}
-
-.org-node .agents-card {
-  min-width: 0;
-  width: 100%;
-}
-
-.org-node.is-root .agents-card {
-  width: min(360px, calc(100vw - 420px));
-  min-width: 260px;
-  background:
-    linear-gradient(135deg, rgba(61, 90, 74, 0.08), rgba(255,255,255,0) 58%),
-    var(--surface);
-}
-
-/* Vertical stem from the bottom of THIS card down to the junction. */
-.org-stem-down {
-  width: 1px;
-  height: 26px;
-  background: var(--border);
-}
-
-/* Sage dot at the T-intersection (matches the reference image). */
-.org-junction {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--sage);
-  margin-bottom: 0;
-  /* Sit on the horizontal bus so it looks like a connector node. */
-  position: relative;
-  z-index: 2;
-}
-
-/* Row of children below the junction. Each child draws its own top half-bus. */
-.org-children {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  align-items: stretch;
-  justify-content: center;
-  gap: 18px;
-  width: 100%;
-  margin-top: 18px;
-  position: relative;
-}
-
-.org-subtree {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0;
-  position: relative;
-}
-
-/* Horizontal bus segment — each subtree draws a 1px line across its top.
-   When all siblings sit edge-to-edge with their padding, the segments
-   visually connect into one continuous bus. */
-.org-subtree::before {
-  display: none;
-}
-
-/* First sibling: trim the bus so it starts at THIS subtree's center. */
-.org-subtree:first-child::before {
-  left: 50%;
-}
-
-/* Last sibling: trim the bus so it ends at THIS subtree's center. */
-.org-subtree:last-child::before {
-  right: 50%;
-}
-
-/* Only child: no horizontal bus at all (the stem alone is enough). */
-.org-subtree:only-child::before {
-  display: none;
-}
-
-/* Short vertical stem from the bus down to the child card. */
-.org-stem-up {
-  display: none;
+.agents-card-chev {
+  display: inline-flex;
+  color: var(--gray-400, #94a3b8);
+  transition: color 140ms ease, transform 140ms ease;
 }
 
 @media (max-width: 900px) {
-  .agents-hero {
-    padding: 16px 20px 20px;
+  .agents-hero { padding: 16px 20px 20px; }
+  .agents-body { padding: 24px 20px 44px; gap: 28px; }
+  .agents-feature {
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    padding: 18px 20px;
   }
-  .agents-body {
-    padding: 24px 20px 44px;
+  .agents-feature-tail {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
-  .org-node.is-root .agents-card {
-    width: 100%;
-    min-width: 0;
-  }
-  .org-children {
-    grid-template-columns: 1fr;
-  }
+  .agents-feature-name { font-size: 24px; }
 }
 
 .agents-empty {
