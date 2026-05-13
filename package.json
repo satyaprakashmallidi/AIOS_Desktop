@@ -25,9 +25,12 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
+    "@whiskeysockets/baileys": "^6.7.18",
     "electron-updater": "^6.8.3",
     "keytar": "^7.9.0",
     "lucide-react": "^0.561.0",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-markdown": "^10.1.0",

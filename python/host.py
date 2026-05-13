@@ -330,11 +330,14 @@ def _mcp_isolation_flags() -> list[str]:
 _COMPOSIO_SYSTEM_PROMPT = (
     "Tools: COMPOSIO_SEARCH_TOOLS finds a slug, COMPOSIO_MULTI_EXECUTE_TOOL "
     "runs it. Use these — don't assume what's connected.\n"
-    "• Local Tasks: To add a mission to the AIOS 'Tasks' page, use bash to run: "
-    "`python3 python/create_mission.py --name \"Mission Title\" --message \"Mission Details\" --agent \"ceo\"`.\n"
+    "• Local Tasks: To add a mission to the AIOS 'Tasks' page, run from your "
+    "shell: `python python/create_mission.py --name \"Mission Title\" --message "
+    "\"Mission Details\" --agent \"ceo\"`. (On Windows the launcher is `python` "
+    "or `py`; on macOS/Linux it is `python3` — Claude should pick the one "
+    "available; do not hardcode python3.)\n"
     "• Implementation Plans: When asked to 'create a plan', draft a detailed Markdown implementation plan "
     "(following the AIOS format: Title, Overview, Current State, Proposed Changes, Design Decisions, Step-by-Step Tasks) "
-    "and save it by running: `python3 python/save_plan.py --title \"Plan Name\" --content \"FULL_MARKDOWN_CONTENT\"`. "
+    "and save it by running: `python python/save_plan.py --title \"Plan Name\" --content \"FULL_MARKDOWN_CONTENT\"`. "
     "Crucially, you MUST also send the full plan content back in your chat reply so the user can see it on WhatsApp.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"

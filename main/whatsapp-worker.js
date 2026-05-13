@@ -12,8 +12,12 @@ const {
 const qrcode = require("qrcode");
 const P = require("pino");
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
-const LOG_FILE = "/tmp/wa-worker.log";
+// Log file lives in the OS temp dir so this works on Windows, macOS, and
+// Linux without any platform-specific path. (Was hardcoded to /tmp/...)
+const LOG_FILE = path.join(os.tmpdir(), "wa-worker.log");
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stderr.write(line);
