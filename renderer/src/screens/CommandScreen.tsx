@@ -806,7 +806,14 @@ export function CommandScreen({
       const saved = {
         ...nextSession,
         messages: nextSession.messages.map((message) =>
-          message.id === assistant.id ? { ...message, content: result.response } : message
+          // CRUCIAL: explicitly null `streamId` on the saved assistant message.
+          // Without this, the snapshot's stale streamId clobbers the cleared
+          // value App.tsx set when `done` fired, leaving streamingBusy=true
+          // forever — the "Claude is thinking…" indicator gets stuck even
+          // though the full response has rendered.
+          message.id === assistant.id
+            ? { ...message, content: result.response, streamId: null }
+            : message
         ),
         updatedAt: new Date().toISOString(),
         claudeSessionId: nextClaudeSessionId

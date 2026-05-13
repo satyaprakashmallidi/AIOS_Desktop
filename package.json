@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -11,7 +11,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 0.0.0.0\" \"wait-on http://127.0.0.1:3100 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:3100 electron .\"",
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && vite build",
+    "build": "tsc -p tsconfig.main.json && node scripts/copy-main-assets.cjs && tsc -p tsconfig.renderer.json && vite build",
     "start": "electron dist/main/main.js",
     "test": "vitest run --config vitest.config.ts",
     "test:python": "node scripts/run-python-tests.js",
