@@ -653,8 +653,10 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
                 onRetry={() => retry(connector.service, connector.connectionId)}
                 onDisconnect={() => disconnect(connector.service, connector.connectionId)}
               />
-            ))}
-          </div>
+          ))}
+        </div>
+
+        <WhatsAppScanner />
       </div>
       {credsModalService && CONNECTOR_FIELD_REQUIREMENTS[credsModalService] && (
         <ConnectorCredsModal
@@ -892,3 +894,145 @@ function ConnectorCard({
     </article>
   );
 }
+
+function WhatsAppScanner() {
+  const [status, setStatus] = useState<"disconnected" | "qr" | "authenticating" | "connected">("disconnected");
+  const [qr, setQr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    invoke("whatsapp_status").then((res: any) => {
+      if (res?.status) setStatus(res.status);
+      if (res?.qr) setQr(res.qr);
+    });
+    const off = window.aios.onUpdateState((data: any) => {
+      if (data.state === "whatsapp_update") {
+        setStatus(data.status);
+        setQr(data.qr ?? null);
+      }
+    });
+    return off;
+  }, []);
+
+  async function handleStart() {
+    setBusy(true);
+    try { await invoke("whatsapp_start"); } finally { setBusy(false); }
+  }
+
+  async function handleStop() {
+    setBusy(true);
+    try {
+      await invoke("whatsapp_stop");
+      setStatus("disconnected");
+      setQr(null);
+    } finally { setBusy(false); }
+  }
+
+  // Inline SVG icons — no emoji
+  const StatusDot = ({ color }: { color: string }) => (
+    <div style={{ 
+      width: 8, 
+      height: 8, 
+      borderRadius: "50%", 
+      background: color, 
+      marginRight: 8,
+      boxShadow: `0 0 8px ${color}66`,
+      flexShrink: 0
+    }} />
+  );
+  const IconLoader = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5, animation: "spin 1s linear infinite" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </svg>
+  );
+  const IconQr = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5 }}>
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      <path d="M14 14h.01M18 14h.01M14 18h.01M18 18h.01M21 14v4M14 21h4"/>
+    </svg>
+  );
+  const IconPhone = () => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5 }}>
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.18 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+    </svg>
+  );
+
+  return (
+    <div style={{ marginTop: 40, padding: 24, background: "var(--surface-soft)", borderRadius: 12, border: "1px solid var(--border)" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: status === "disconnected" ? 0 : 20 }}>
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", margin: "0 0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+            <IconPhone />
+            Personal WhatsApp Remote
+          </h2>
+          <p style={{ fontSize: 13, color: "var(--gray-500)", margin: 0 }}>
+            {status === "connected" ? "Connected — text yourself on WhatsApp to trigger AIOS tasks." :
+             status === "qr" ? "Open WhatsApp → Linked Devices → Scan this QR code." :
+             status === "authenticating" ? "Connecting to WhatsApp, please wait..." :
+             "Connect your personal WhatsApp to control AIOS remotely."}
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {status === "connected" && (
+            <span style={{ color: "var(--ink)", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center" }}>
+              <StatusDot color="#22c55e" />Connected
+            </span>
+          )}
+          {status === "disconnected" && (
+            <span style={{ color: "var(--gray-500)", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
+              <StatusDot color="#ef4444" />Disconnected
+            </span>
+          )}
+          {status === "authenticating" && (
+            <span style={{ color: "#f59e0b", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
+              <IconLoader />Connecting...
+            </span>
+          )}
+          {status === "qr" && (
+            <span style={{ color: "#3b82f6", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
+              <IconQr />Scan QR Code
+            </span>
+          )}
+          {status === "disconnected" ? (
+            <button className="connector-btn is-primary" onClick={handleStart} disabled={busy}>
+              {busy ? "Starting..." : "Start Scanner"}
+            </button>
+          ) : (
+            <button className="connector-btn is-secondary" onClick={handleStop} disabled={busy}>Disconnect</button>
+          )}
+        </div>
+      </div>
+
+      {/* QR Code */}
+      {status === "qr" && qr && (
+        <div style={{ padding: 24, background: "var(--surface)", borderRadius: 10, textAlign: "center", border: "1px solid var(--border)" }}>
+          <img src={qr} alt="WhatsApp QR Code" style={{ width: 240, height: 240, display: "block", margin: "0 auto", borderRadius: 8 }} />
+          <p style={{ fontSize: 13, color: "var(--gray-500)", marginTop: 14, marginBottom: 0 }}>
+            Open WhatsApp on your phone → tap <strong>Linked Devices</strong> → <strong>Link a Device</strong>
+          </p>
+        </div>
+      )}
+
+      {/* Authenticating */}
+      {status === "authenticating" && (
+        <div style={{ padding: 28, textAlign: "center", color: "var(--gray-500)", fontSize: 13 }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite", display: "block", margin: "0 auto 12px" }}>
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          </svg>
+          Connecting to WhatsApp, this takes 5–15 seconds...
+        </div>
+      )}
+
+      {/* Connected */}
+      {status === "connected" && (
+        <div style={{ padding: 14, background: "var(--surface-soft)", borderRadius: 10, border: "1px solid var(--border)", fontSize: 13, color: "var(--gray-600)", display: "flex", alignItems: "center", gap: 10 }}>
+          <StatusDot color="#22c55e" />
+          <span>WhatsApp connected. Text yourself <strong>any message</strong> to trigger an AIOS task. Try sending <code>ping</code> to verify.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+

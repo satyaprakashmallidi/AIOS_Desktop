@@ -72,7 +72,10 @@ const allowedCommands = new Set<AiosCommand>([
   "get_task",
   "create_task",
   "task_action",
-  "cancel_task"
+  "cancel_task",
+  "whatsapp_status",
+  "whatsapp_start",
+  "whatsapp_stop"
 ]);
 
 contextBridge.exposeInMainWorld("aios", {
