@@ -872,7 +872,10 @@ function App() {
           ) : null}
         </header>
 
-        <AutoUpdateBanner platform={workspace?.platform ?? null} />
+        <AutoUpdateBanner
+          platform={workspace?.platform ?? null}
+          onNavigateToSettings={() => setScreen("settings")}
+        />
 
         {error ? <div className="banner banner-danger">{error}</div> : null}
 

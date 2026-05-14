@@ -1,75 +1,55 @@
 import React, { useEffect, useState } from "react";
-import { Download, RefreshCw, X } from "lucide-react";
+import { ConfirmModal } from "./ui";
 
-// Auto-update banner — Windows only. Sits at the top of the app shell and
-// surfaces the existing `aios:update-state` events as a non-blocking nudge so
-// the user doesn't have to dig into Settings to find out an update is ready.
+// Auto-update popup — Windows-only nudge. Replaces the earlier banner/toast
+// designs with a single centered modal that fires once when an update is
+// detected. Two buttons:
+//   - Skip      → dismiss + remember this version in localStorage
+//   - Download  → close the popup and route the user to Settings → General,
+//                 where the existing "Restart & install" / "Check for updates"
+//                 button lives. The actual download/install path is unchanged;
+//                 this component is purely the entry-point nudge.
 //
-// Lifecycle handled here:
-//   "available"   → "Update vX.Y.Z available · [Download now] [Skip]"
-//   "downloading" → progress strip with percent
-//   "ready"       → "Update vX.Y.Z is ready · [Install & restart] [Later]"
-// Anything else (checking / up-to-date / idle / error without message) renders
-// nothing. macOS builds never render this — the manual-download fallback in
-// Settings → General stays as the Mac path.
-//
-// Skip persistence: skipping a specific version writes to localStorage so the
-// banner stays hidden for that version. A newer announced version clears the
-// skip and shows the banner again.
+// Mac builds (unsigned, no working in-place updates) never render this. Idle
+// / checking / up-to-date / error states never trigger the popup either —
+// only "available" or "ready" signal an actionable update.
 
 const SKIP_STORAGE_KEY = "aios.autoUpdate.skippedVersion";
-
-type UpdateState =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "ready"
-  | "error"
-  | "up-to-date";
 
 interface AutoUpdateEvent {
   state: string;
   version?: string;
-  percent?: number;
-  message?: string;
 }
 
 interface AutoUpdateBannerProps {
   platform?: string | null;
+  onNavigateToSettings: () => void;
 }
 
-export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
-  const [state, setState] = useState<UpdateState>("idle");
+export function AutoUpdateBanner({ platform, onNavigateToSettings }: AutoUpdateBannerProps) {
+  const [hasUpdate, setHasUpdate] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
-  const [percent, setPercent] = useState<number>(0);
-  // `dismissedForVersion`: user clicked Skip/Later for this version this
-  // session. Differs from the localStorage "skip" which persists across runs.
   const [dismissedForVersion, setDismissedForVersion] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
 
-  // Only the Windows packaged path has working in-place auto-update. On Mac
-  // (unsigned) and on dev builds the banner shouldn't promise anything.
   const isWindows = platform === "win32";
 
   useEffect(() => {
     if (!isWindows) return;
     const unsubscribe = window.aios?.onUpdateState?.((event: AutoUpdateEvent) => {
-      const next = event.state as UpdateState;
-      setState(next);
-      if (event.version) setVersion(event.version);
-      if (typeof event.percent === "number") setPercent(event.percent);
-      // Clear the per-session dismiss when a new version comes in or when the
-      // flow advances past "available" (the user committed to it).
-      if (next === "ready" || next === "downloading") {
-        setDismissedForVersion(null);
+      // Treat "available" and "ready" identically — both mean an update
+      // exists. The actual download happens silently in the background; from
+      // the user's perspective the only thing they need to know is "there's
+      // an update, click Download to act on it."
+      if (event.state === "available" || event.state === "ready") {
+        setHasUpdate(true);
+        if (event.version) setVersion(event.version);
       }
     });
     return () => unsubscribe?.();
   }, [isWindows]);
 
-  // When a new version is announced that's newer than the persisted skip,
-  // clear the persisted skip so the banner appears again.
+  // Clear the persisted skip when a newer version comes in so the popup
+  // shows again for the new version.
   useEffect(() => {
     if (!version) return;
     try {
@@ -82,20 +62,11 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
     }
   }, [version]);
 
-  if (!isWindows) return null;
-  // STRICT whitelist of states that have content to show. Anything else —
-  // including unexpected event names from electron-updater, manual-available
-  // (Mac only), or partial/transient broadcasts — renders nothing. Without
-  // this guard v0.1.21 surfaced an empty husk (just the download icon with
-  // no message or buttons) whenever any unexpected state value arrived.
-  if (state !== "available" && state !== "downloading" && state !== "ready") return null;
+  if (!isWindows || !hasUpdate || !version) return null;
 
-  // Treat session-level Skip and persisted localStorage Skip the same way.
   let persistedSkip: string | null = null;
   try { persistedSkip = localStorage.getItem(SKIP_STORAGE_KEY); } catch { /* ignore */ }
-  if (state === "available" && version && (dismissedForVersion === version || persistedSkip === version)) {
-    return null;
-  }
+  if (dismissedForVersion === version || persistedSkip === version) return null;
 
   function handleSkip() {
     if (!version) return;
@@ -103,131 +74,20 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
     setDismissedForVersion(version);
   }
 
-  function handleLater() {
-    if (!version) return;
-    setDismissedForVersion(version);
-  }
-
   function handleDownload() {
-    // electron-updater is already auto-downloading on Windows; clicking
-    // Download just acknowledges the user's intent and bumps the banner into
-    // the downloading state (the next progress event will take over).
-    setState("downloading");
-  }
-
-  async function handleInstall() {
-    setInstalling(true);
-    try {
-      await window.aios?.installUpdate?.();
-      // App will quit + relaunch via quitAndInstall — no further UI needed.
-    } catch {
-      setInstalling(false);
-    }
-  }
-
-  // Floating bottom-right popup card — pops up over the app content instead of
-  // pushing it down with a top-of-window banner. Same three states (available
-  // / downloading / ready) rendered inside the same card shape, so the popup
-  // size stays consistent as the state transitions.
-  const versionLabel = version ? `v${version}` : "";
-  const clampedPercent = Math.max(0, Math.min(100, percent));
-
-  let title = "";
-  let body: React.ReactNode = null;
-  let footer: React.ReactNode = null;
-  let canDismiss = false;
-
-  if (state === "available") {
-    title = "Update available";
-    body = (
-      <>
-        AIOS Desktop {versionLabel || "(new version)"} is ready to download.
-      </>
-    );
-    footer = (
-      <>
-        <button type="button" className="auto-update-toast-secondary" onClick={handleSkip}>
-          Skip
-        </button>
-        <button type="button" className="auto-update-toast-primary" onClick={handleDownload}>
-          Download
-        </button>
-      </>
-    );
-    canDismiss = true;
-  } else if (state === "downloading") {
-    title = "Downloading update";
-    body = (
-      <>
-        <span className="auto-update-toast-version">{versionLabel || "new version"}</span>
-        <span className="auto-update-toast-percent">{clampedPercent}%</span>
-      </>
-    );
-    footer = (
-      <div className="auto-update-toast-progress" aria-hidden="true">
-        <div
-          className="auto-update-toast-progress-fill"
-          style={{ width: `${clampedPercent}%` }}
-        />
-      </div>
-    );
-    canDismiss = false; // keep the card open so the user sees progress
-  } else if (state === "ready") {
-    title = "Update ready to install";
-    body = (
-      <>
-        AIOS Desktop {versionLabel || "(new version)"} is downloaded. The app will close, install, and reopen.
-      </>
-    );
-    footer = (
-      <>
-        <button
-          type="button"
-          className="auto-update-toast-secondary"
-          onClick={handleLater}
-          disabled={installing}
-        >
-          Later
-        </button>
-        <button
-          type="button"
-          className="auto-update-toast-primary"
-          onClick={handleInstall}
-          disabled={installing}
-        >
-          {installing ? "Installing…" : "Install & restart"}
-        </button>
-      </>
-    );
-    canDismiss = true;
+    if (version) setDismissedForVersion(version);
+    onNavigateToSettings();
   }
 
   return (
-    <div
-      className={`auto-update-toast state-${state}`}
-      role="status"
-      aria-live="polite"
-    >
-      <div className="auto-update-toast-card">
-        <div className="auto-update-toast-head">
-          <div className="auto-update-toast-icon">
-            {state === "downloading" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
-          </div>
-          <div className="auto-update-toast-title">{title}</div>
-          {canDismiss ? (
-            <button
-              type="button"
-              className="auto-update-toast-close"
-              onClick={state === "ready" ? handleLater : handleSkip}
-              aria-label="Dismiss"
-            >
-              <X size={14} />
-            </button>
-          ) : null}
-        </div>
-        <div className="auto-update-toast-body">{body}</div>
-        {footer ? <div className="auto-update-toast-footer">{footer}</div> : null}
-      </div>
-    </div>
+    <ConfirmModal
+      open={true}
+      title="Update available"
+      message={`AIOS Desktop v${version} is available. Open Settings to download and install.`}
+      confirmLabel="Download"
+      cancelLabel="Skip"
+      onConfirm={handleDownload}
+      onCancel={handleSkip}
+    />
   );
 }
