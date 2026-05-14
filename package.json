@@ -58,7 +58,6 @@
       "buildResources": "build",
       "output": "release"
     },
-    "_comment_compression": "electron-builder defaults to LZMA/maximum compression. Switching to 'normal' makes the installer self-extract noticeably faster (the gap between double-clicking Setup.exe and seeing the wizard) at the cost of ~5-10% larger file size.",
     "compression": "normal",
     "files": [
       "dist/main/**/*",
