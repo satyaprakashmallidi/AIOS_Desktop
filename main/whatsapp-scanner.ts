@@ -14,6 +14,12 @@ let clientStatus: "disconnected" | "qr" | "authenticating" | "connected" = "disc
 let connectedPhoneNumber: string | null = null;
 let currentHost: any = null;
 let currentWindow: BrowserWindow | null = null;
+// Tracks the reason for the most recent disconnect (set by the worker's
+// "disconnected" IPC message before the worker exits). The exit handler
+// reads it to decide whether to auto-respawn (only on server-side
+// loggedOut — never on user-initiated stops). Cleared on consumption.
+let lastDisconnectReason: string | null = null;
+let respawnInFlight = false;
 
 type MarkdownArtifact = {
   relativePath: string;
@@ -28,6 +34,154 @@ type PendingDocumentSend = {
 };
 
 const pendingDocumentSends = new Map<string, PendingDocumentSend>();
+
+const WHATSAPP_IMPORTS_FOLDER = "whatsapp";
+const WHATSAPP_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+
+// Save-intent detection — broad keyword + phrase match so the user doesn't
+// have to learn a precise phrase. Catches inflected forms (saving / saved /
+// kept / imports / etc.) AND natural English like "add this photo" or
+// "put it in imports". When in doubt about a real edge case the worker
+// will err on the side of saving — better to over-import the occasional
+// photo than to drop one the user clearly meant to keep.
+function captionWantsSave(caption: string): boolean {
+  if (!caption) return false;
+  const lower = caption.toLowerCase();
+  // Single-word save verbs in any common inflected form.
+  if (/\b(save|saved|saving|keep|keeping|kept|store|stored|storing|import|imports|imported|importing|attach|attached|attaching|upload|uploaded|uploading)\b/i.test(lower)) {
+    return true;
+  }
+  // "add this" / "add to imports" / "put it in" / "put this here" — verb +
+  // pointer/target combinations that read as save-intent in normal English.
+  if (/\b(add|put)\s+(this|that|it|to|in|the|file|photo|pic|picture|image|doc|document|pdf|video)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+// Mirror of the worker-side filename sanitizer, run again on the scanner
+// side as a safety net before any disk write.
+function sanitizeWorkspaceFilename(name: string): string {
+  const cleaned = String(name || "")
+    .replace(/[^a-zA-Z0-9._\- ]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+|\.+$/g, "");
+  return cleaned || `wa-file-${Date.now()}`;
+}
+
+const WHATSAPP_HELP_TEXT = [
+  "*AIOS WhatsApp commands*",
+  "",
+  "/new — start a fresh chat",
+  "/clear — clear conversation context",
+  "/prime — refresh AIOS context",
+  "/help — show this list",
+  "",
+  "Mention an agent:",
+  "@CEO summarise my week",
+  "@Marketing draft a tweet about X",
+  "",
+  "Save a file:",
+  "Send the photo or document with a caption like \"save this\" or \"keep this\". It lands in Imports → whatsapp."
+].join("\n");
+
+// Clears the persisted Claude session id on the WhatsApp Remote thread so
+// the next message starts a brand-new Claude conversation context.
+async function clearWhatsAppClaudeSession(host: any): Promise<void> {
+  if (!host) return;
+  const sessionId = "thread-whatsapp-remote";
+  try {
+    const res = await host.invoke("get_sessions", {}) as any;
+    if (!res?.ok || !Array.isArray(res.data)) return;
+    const session = res.data.find((s: any) => s.id === sessionId);
+    if (!session) return;
+    session.claudeSessionId = null;
+    await host.invoke("save_session", { session });
+  } catch (e) {
+    log("whatsapp", "clearWhatsAppClaudeSession failed", { error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+// Returns true if `text` matched a known slash command and the scanner
+// already replied + persisted it. Caller should `return` early in that case.
+async function handleWhatsAppSlashCommand(text: string, host: any): Promise<boolean> {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (trimmed === "/" || lower === "/help") {
+    workerProcess?.send({ type: "reply", text: WHATSAPP_HELP_TEXT });
+    if (host) {
+      try { await persistToHistory(host, text, WHATSAPP_HELP_TEXT); } catch { /* logged inside */ }
+    }
+    return true;
+  }
+
+  if (lower === "/new" || lower === "/clear") {
+    await clearWhatsAppClaudeSession(host);
+    const reply = "Started a new chat. Old context cleared.";
+    workerProcess?.send({ type: "reply", text: reply });
+    if (host) {
+      try { await persistToHistory(host, text, reply, undefined); } catch { /* logged inside */ }
+    }
+    return true;
+  }
+
+  if (lower === "/prime") {
+    workerProcess?.send({ type: "reply", text: "Priming AIOS context — one moment…" });
+    if (!host) return true;
+    try {
+      const res = await host.invoke("run_prime", {}) as any;
+      const reply = (typeof res?.data?.response === "string" ? res.data.response : "").trim()
+        || "Primed AIOS context.";
+      workerProcess?.send({ type: "reply", text: reply });
+      try { await persistToHistory(host, text, reply); } catch { /* logged inside */ }
+    } catch (e) {
+      const errMsg = `Couldn't run /prime: ${e instanceof Error ? e.message : String(e)}`;
+      workerProcess?.send({ type: "reply", text: errMsg });
+      try { await persistToHistory(host, text, errMsg); } catch { /* logged inside */ }
+    }
+    return true;
+  }
+
+  return false;
+}
+
+// Detects a leading "@AgentName " mention. Returns { remaining text, system
+// prompt overlay } when the agent exists; null otherwise. Falls back silently
+// when the agent registry can't be fetched so a typo doesn't dead-end the
+// message — it just goes through as a normal Claude prompt.
+async function extractWhatsAppMention(
+  text: string,
+  host: any
+): Promise<{ promptText: string; systemPrompt: string } | null> {
+  if (!host) return null;
+  const m = text.match(/^@([A-Za-z][A-Za-z0-9_\-]*)\s+([\s\S]+)$/);
+  if (!m) return null;
+  const requestedName = m[1];
+  const remaining = m[2].trim();
+  if (!remaining) return null;
+
+  try {
+    const res = await host.invoke("list_agents", {}) as any;
+    if (!res?.ok || !Array.isArray(res.data)) return null;
+    const agent = res.data.find(
+      (a: any) => typeof a?.name === "string" && a.name.toLowerCase() === requestedName.toLowerCase()
+    );
+    if (!agent) return null;
+    const personaOverlay =
+      `${WHATSAPP_SYSTEM_PROMPT}\n\n` +
+      `You are ${agent.name}, the ${agent.role || "specialist"} on this user's AI team. ` +
+      `Stay in character throughout this reply. Be concise, conversational, and decisive — ` +
+      `answer like a real ${agent.role || "specialist"} would in a quick chat. ` +
+      `Skip any preamble about who you are; just answer the user's question. ` +
+      `Do NOT emit [ASSIGN_TASK:], [SPAWN_AGENT:], [NEEDS_CONNECTOR:], or [BLOCKED:] ` +
+      `sentinels — this is a direct chat, not a background task.`;
+    return { promptText: remaining, systemPrompt: personaOverlay };
+  } catch {
+    return null;
+  }
+}
 
 const WHATSAPP_SYSTEM_PROMPT = [
   "You are AIOS, talking to the user through WhatsApp on their phone.",
@@ -292,6 +446,100 @@ export function getWhatsAppStatus() {
   return { status: clientStatus, qr: qrCodeData, phoneNumber: connectedPhoneNumber };
 }
 
+// Handles a media file forwarded from the worker. Three outcomes:
+//   1. Caption has save intent + file is within size cap → copy from temp into
+//      <workspace>/context/import/whatsapp/<sanitized> + reply with success.
+//   2. Caption has save intent but file is too large → reply with the cap.
+//   3. No save intent → discard temp file; nudge the user with the keywords
+//      so they know how to opt in next time.
+// The temp file is always cleaned up afterwards regardless of outcome.
+async function handleInboundMedia(msg: any, host: any): Promise<void> {
+  const tempPath: string = String(msg.tempPath || "");
+  const filename: string = String(msg.filename || "");
+  const size: number = Number(msg.size) || 0;
+  const caption: string = String(msg.caption || "");
+
+  const cleanupTemp = () => {
+    if (!tempPath) return;
+    try { fs.unlinkSync(tempPath); } catch { /* file may already be gone */ }
+  };
+
+  if (!tempPath || !fs.existsSync(tempPath)) {
+    log("whatsapp", "Media missing temp file", { tempPath });
+    return;
+  }
+
+  if (!captionWantsSave(caption)) {
+    cleanupTemp();
+    const hint = caption
+      ? "I wasn't sure if you wanted me to save that file. Try a caption like \"save this\" or \"add this to imports\" and send it again."
+      : "Send the file again with a caption like \"save this\" or \"keep this in imports\" and I'll add it to the Imports tab.";
+    workerProcess?.send({ type: "reply", text: hint });
+    if (host) {
+      try {
+        const summary = caption ? `${caption}\n[attachment: ${filename}]` : `[attachment: ${filename}]`;
+        await persistToHistory(host, summary, hint);
+      } catch { /* logged inside */ }
+    }
+    return;
+  }
+
+  if (size > WHATSAPP_MEDIA_MAX_BYTES) {
+    cleanupTemp();
+    const mb = (size / 1024 / 1024).toFixed(1);
+    const reply = `That file is ${mb} MB — too large to import over WhatsApp (max 25 MB). Upload it directly from the AIOS Imports page instead.`;
+    workerProcess?.send({ type: "reply", text: reply });
+    if (host) {
+      try {
+        await persistToHistory(host, `${caption}\n[attachment too large: ${filename}, ${mb} MB]`, reply);
+      } catch { /* logged inside */ }
+    }
+    return;
+  }
+
+  try {
+    const workspaceRoot = ensureRuntimeWorkspace();
+    // The Imports page lives at <workspace>/context/import/ — folders inside
+    // surface as first-class entries on that screen via list_imports.
+    const importsDir = path.join(workspaceRoot, "context", "import", WHATSAPP_IMPORTS_FOLDER);
+    fs.mkdirSync(importsDir, { recursive: true });
+
+    let candidate = sanitizeWorkspaceFilename(filename);
+    let destPath = path.join(importsDir, candidate);
+    // Don't overwrite existing files — append -1, -2, ... before the extension.
+    if (fs.existsSync(destPath)) {
+      const ext = path.extname(candidate);
+      const base = path.basename(candidate, ext);
+      let n = 1;
+      while (fs.existsSync(destPath)) {
+        destPath = path.join(importsDir, `${base}-${n}${ext}`);
+        n += 1;
+      }
+      candidate = path.basename(destPath);
+    }
+
+    fs.copyFileSync(tempPath, destPath);
+    cleanupTemp();
+
+    const reply = `Saved "${candidate}" to Imports → ${WHATSAPP_IMPORTS_FOLDER}.`;
+    workerProcess?.send({ type: "reply", text: reply });
+    log("whatsapp", "Media saved to imports", { destPath, size, caption });
+    if (host) {
+      try {
+        const persistedPrompt = caption
+          ? `${caption}\n[attachment: ${filename}]`
+          : `[attachment: ${filename}]`;
+        await persistToHistory(host, persistedPrompt, reply);
+      } catch { /* logged inside */ }
+    }
+  } catch (e) {
+    cleanupTemp();
+    const errMsg = `Couldn't save the file: ${e instanceof Error ? e.message : String(e)}`;
+    workerProcess?.send({ type: "reply", text: errMsg });
+    log("whatsapp", "Media save failed", { error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
 async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindow) {
   if (!msg?.type) return;
   log("whatsapp", "Worker message", { type: msg.type });
@@ -322,7 +570,26 @@ async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindo
   } else if (msg.type === "disconnected") {
     clientStatus = "disconnected";
     connectedPhoneNumber = null;
+    qrCodeData = null;
+    // Track the reason so the exit handler can auto-respawn when WhatsApp
+    // logs us out. The worker already wipes its own session in that case;
+    // we just need to make sure the next spawn happens so the user sees a
+    // fresh QR without manually clicking Connect again.
+    lastDisconnectReason = typeof msg.reason === "string" ? msg.reason : null;
+    if (lastDisconnectReason === "loggedOut") {
+      log("whatsapp", "WhatsApp server logged us out — will respawn after worker exits");
+      // Defensive: also clear the sidecar files in case the worker didn't.
+      const userDataPath = app.getPath("userData");
+      for (const sidecar of ["wa-my-lid.txt", "wa-processed-ids.json"]) {
+        const file = path.join(userDataPath, sidecar);
+        if (fs.existsSync(file)) {
+          try { fs.unlinkSync(file); } catch { /* non-fatal */ }
+        }
+      }
+    }
     broadcastStatus(mainWindow);
+  } else if (msg.type === "media") {
+    await handleInboundMedia(msg, host);
   } else if (msg.type === "command") {
     const text: string = msg.text;
     // `jid` is kept locally only so the audit log records which inbound JID this
@@ -342,13 +609,26 @@ async function handleWorkerMessage(msg: any, host: any, mainWindow: BrowserWindo
       return;
     }
 
+    // Slash commands handled locally, no Claude roundtrip. Returns true when
+    // the command matched + has been answered.
+    if (await handleWhatsAppSlashCommand(text, host)) {
+      return;
+    }
+
+    // @AgentName routing — strips the mention prefix and overlays the agent's
+    // chat persona on the Claude system prompt. Falls back to a normal run
+    // if the mention doesn't resolve to a real agent.
+    const mention = await extractWhatsAppMention(text, host);
+    const promptText = mention ? mention.promptText : text;
+    const taskSystemPrompt = mention ? mention.systemPrompt : WHATSAPP_SYSTEM_PROMPT;
+
     if (host) {
       try {
         const claudeSessionId = await getWhatsAppClaudeSessionId(host);
         const runTaskArgs: Record<string, unknown> = {
-          prompt: text,
+          prompt: promptText,
           streamId: "whatsapp-remote", // Consistent ID for history grouping
-          systemPrompt: WHATSAPP_SYSTEM_PROMPT,
+          systemPrompt: taskSystemPrompt,
           // Haiku is built for low-latency conversational replies. On the
           // in-app chat we use the user's default model (Sonnet / Opus) because
           // they can see streaming and tolerate the wait, but on WhatsApp the
@@ -596,6 +876,27 @@ export function startWhatsApp(host: any, mainWindow: BrowserWindow) {
     }
     pendingDocumentSends.clear();
     broadcastStatus(mainWindow);
+
+    // Auto-respawn once after a server-side loggedOut. The worker already
+    // cleaned its session folder in that case, so the new spawn lands on
+    // the fresh-QR pairing path — the user's open "Connect" modal goes
+    // straight from "Starting…" to showing a QR without a manual retry.
+    // Guarded by `respawnInFlight` so we never get stuck in a tight loop.
+    if (lastDisconnectReason === "loggedOut" && !respawnInFlight && currentHost && currentWindow) {
+      respawnInFlight = true;
+      lastDisconnectReason = null;
+      const respawnHost = currentHost;
+      const respawnWindow = currentWindow;
+      setTimeout(() => {
+        respawnInFlight = false;
+        if (!workerProcess && respawnHost && respawnWindow && !respawnWindow.isDestroyed()) {
+          log("whatsapp", "Auto-respawning after server loggedOut (session was cleaned)");
+          startWhatsApp(respawnHost, respawnWindow);
+        }
+      }, 500);
+    } else {
+      lastDisconnectReason = null;
+    }
   });
 
   clientStatus = "authenticating";

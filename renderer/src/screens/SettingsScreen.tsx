@@ -313,32 +313,39 @@ function GeneralPanel({
             </button>
           }
         />
-        <SettingsRow
-          title="App version"
-          description={updateLabel()}
-          control={
-            updateState === "ready" ? (
-              <button type="button" className="button button-primary compact" onClick={installNow}>
-                Restart & install
-              </button>
-            ) : updateState === "manual-available" ? (
-              <button type="button" className="button button-primary compact" onClick={installNow}>
-                <ExternalLink size={14} />
-                Open release page
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="button button-secondary compact"
-                onClick={checkForUpdates}
-                disabled={checking || updateState === "checking" || updateState === "downloading" || updateState === "available"}
-              >
-                <RotateCcw size={14} />
-                {checking || updateState === "checking" ? "Checking…" : "Check for updates"}
-              </button>
-            )
-          }
-        />
+        {/* Auto-update is Windows-only — Mac builds are unsigned, so ShipIt
+            can't swap the .app bundle in place. On Mac we hide this row
+            entirely; users update by downloading a fresh DMG from GitHub
+            Releases. The in-app popup (AutoUpdateBanner) is already
+            Windows-only via its own platform guard. */}
+        {workspace?.platform === "win32" ? (
+          <SettingsRow
+            title="App version"
+            description={updateLabel()}
+            control={
+              updateState === "ready" ? (
+                <button type="button" className="button button-primary compact" onClick={installNow}>
+                  Restart & install
+                </button>
+              ) : updateState === "manual-available" ? (
+                <button type="button" className="button button-primary compact" onClick={installNow}>
+                  <ExternalLink size={14} />
+                  Open release page
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="button button-secondary compact"
+                  onClick={checkForUpdates}
+                  disabled={checking || updateState === "checking" || updateState === "downloading" || updateState === "available"}
+                >
+                  <RotateCcw size={14} />
+                  {checking || updateState === "checking" ? "Checking…" : "Check for updates"}
+                </button>
+              )
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       {savedHint ? <div className="settings-toast">{savedHint}</div> : null}

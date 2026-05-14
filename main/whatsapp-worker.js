@@ -8,6 +8,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 const qrcode = require("qrcode");
 const P = require("pino");
@@ -199,6 +200,81 @@ async function sendToSelfOnly(content) {
   return sent;
 }
 
+// WhatsApp wraps some messages in container types — e.g. a document sent
+// with a caption arrives as `documentWithCaptionMessage` whose `.message`
+// field holds the actual documentMessage. Same for view-once and ephemeral
+// messages. Unwrap once so downstream code can rely on a flat structure.
+// `downloadMediaMessage` needs the wrapped message too, so we rebuild the
+// outer `msg` with the unwrapped inner content rather than just returning
+// the inner payload.
+function unwrapMessageContainers(msg) {
+  if (!msg || !msg.message) return msg;
+  let m = msg.message;
+  for (let i = 0; i < 4; i++) {
+    if (m.documentWithCaptionMessage && m.documentWithCaptionMessage.message) {
+      m = m.documentWithCaptionMessage.message;
+      continue;
+    }
+    if (m.ephemeralMessage && m.ephemeralMessage.message) {
+      m = m.ephemeralMessage.message;
+      continue;
+    }
+    if (m.viewOnceMessageV2 && m.viewOnceMessageV2.message) {
+      m = m.viewOnceMessageV2.message;
+      continue;
+    }
+    if (m.viewOnceMessage && m.viewOnceMessage.message) {
+      m = m.viewOnceMessage.message;
+      continue;
+    }
+    break;
+  }
+  if (m === msg.message) return msg;
+  return { ...msg, message: m };
+}
+
+// Best-effort filename for an inbound media message. Documents carry their
+// original filename; images / videos / audio don't, so we synthesize one
+// using the mime type. The scanner re-sanitizes before writing to disk.
+function inferMediaFilename(msg) {
+  const m = msg.message || {};
+  const ts = Date.now();
+  if (m.documentMessage && m.documentMessage.fileName) return m.documentMessage.fileName;
+  if (m.imageMessage) {
+    const mime = m.imageMessage.mimetype || "image/jpeg";
+    const ext = (mime.split("/")[1] || "jpg").split(";")[0];
+    return `whatsapp-${ts}.${ext}`;
+  }
+  if (m.videoMessage) {
+    const mime = m.videoMessage.mimetype || "video/mp4";
+    const ext = (mime.split("/")[1] || "mp4").split(";")[0];
+    return `whatsapp-${ts}.${ext}`;
+  }
+  if (m.audioMessage) {
+    const mime = m.audioMessage.mimetype || "audio/ogg";
+    const ext = (mime.split("/")[1] || "ogg").split(";")[0];
+    return `whatsapp-${ts}.${ext}`;
+  }
+  if (m.stickerMessage) {
+    const mime = m.stickerMessage.mimetype || "image/webp";
+    const ext = (mime.split("/")[1] || "webp").split(";")[0];
+    return `whatsapp-sticker-${ts}.${ext}`;
+  }
+  return `whatsapp-${ts}.bin`;
+}
+
+function sanitizeFilename(name) {
+  // Allow letters, digits, dot, dash, underscore, space; replace the rest
+  // with underscore. Strip leading/trailing dots so the file can't escape
+  // the target directory on Windows.
+  const cleaned = String(name)
+    .replace(/[^a-zA-Z0-9._\- ]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+|\.+$/g, "");
+  return cleaned || `wa-file-${Date.now()}`;
+}
+
 async function connectToWhatsApp() {
   if (restarting) return;
   restarting = true;
@@ -276,8 +352,25 @@ async function connectToWhatsApp() {
       );
 
       if (loggedOut) {
+        // The server has invalidated this session. Without removing the auth
+        // state on disk, every subsequent worker spawn would load the same
+        // dead session and get the same 401, leaving the user's "Connect"
+        // modal stuck on "Starting…" forever. Wipe it ourselves so the next
+        // start lands on the fresh-QR path. Best-effort — if the unlink
+        // fails, scanner-side cleanup still has a chance to run.
+        try {
+          if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            log("[wa-worker] Session folder cleaned after loggedOut\n");
+          }
+        } catch (e) {
+          log(`[wa-worker] Session cleanup after loggedOut failed: ${e.message}\n`);
+        }
         send({ type: "disconnected", reason: "loggedOut" });
-        process.exit(0);
+        // Small delay so the IPC message is flushed to the parent before
+        // the process exits. process.send is best-effort; without the
+        // delay the message can be dropped mid-flight on exit.
+        setTimeout(() => process.exit(0), 200);
       } else {
         log("[wa-worker] Reconnecting in 3s...\n");
         send({ type: "authenticated" });
@@ -298,7 +391,13 @@ async function connectToWhatsApp() {
       return;
     }
 
-    for (const msg of messages) {
+    for (const rawMsg of messages) {
+      // Unwrap container variants (documentWithCaptionMessage, ephemeral,
+      // view-once) so the rest of the loop can rely on msg.message having
+      // the actual content at the top level. Without this, captioned
+      // documents arrive as `documentWithCaptionMessage` and our detection
+      // sees text="" and hasMedia=false and drops the message silently.
+      const msg = unwrapMessageContainers(rawMsg);
       // Ignore messages sent before this worker session started. Baileys hands
       // `messageTimestamp` as either a number or a protobufjs Long; on Long,
       // `Number(long)` returns NaN — use `toNumber()` when it exists.
@@ -324,17 +423,37 @@ async function connectToWhatsApp() {
       const from = msg.key.remoteJid || "";
       const fromMe = !!msg.key.fromMe;
 
-      // Extract text
+      // Pull caption-or-conversation text from any of the message variants we
+      // know how to handle. A media message may have a caption (the user's
+      // "save this" / @mention) OR no caption at all.
       const text = (
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         msg.message.imageMessage?.caption ||
+        msg.message.documentMessage?.caption ||
+        msg.message.videoMessage?.caption ||
         ""
       ).trim();
 
-      log(`[wa-worker] MSG from=${from} fromMe=${fromMe} text="${text}"`);
+      // Did this message arrive with attached media? Covers every media
+      // variant WhatsApp's protocol exposes through Baileys. Note: audio
+      // (voice notes) and stickers do reach this branch, but WhatsApp's
+      // mobile UI doesn't let the user attach a caption to either, so they
+      // can never express save-intent and will always fall to the friendly
+      // "I couldn't tell" hint on the scanner side. That's a platform
+      // limitation, not a code gap.
+      const hasMedia = !!(
+        msg.message.imageMessage ||
+        msg.message.documentMessage ||
+        msg.message.videoMessage ||
+        msg.message.audioMessage ||
+        msg.message.stickerMessage
+      );
 
-      if (!text) continue;
+      log(`[wa-worker] MSG from=${from} fromMe=${fromMe} text="${text}" hasMedia=${hasMedia}`);
+
+      // Nothing actionable
+      if (!text && !hasMedia) continue;
 
       // A message is the user's self-chat (the "Message yourself" thread) only
       // when BOTH conditions hold:
@@ -368,10 +487,44 @@ async function connectToWhatsApp() {
       }
       markProcessed(messageId);
 
-      let command = text;
-      if (command.startsWith("/")) command = command.substring(1).trim();
-      log(`[wa-worker] COMMAND ACCEPTED: "${command}" (fromMe=${fromMe} jid=${from} id=${messageId})`);
-      send({ type: "command", text: command, jid: from });
+      // If the message carries media, download it to the OS temp dir and
+      // forward the local path to the scanner. The scanner reads the caption
+      // for save-intent ("save this", "keep this", etc.) and either copies
+      // the file into context/import/whatsapp/ or discards it. Text-only
+      // messages take the existing run_task / slash-command path.
+      if (hasMedia) {
+        try {
+          const buffer = await downloadMediaMessage(msg, "buffer", {});
+          const originalName = inferMediaFilename(msg);
+          const safeName = sanitizeFilename(originalName);
+          const tempPath = path.join(os.tmpdir(), `wa-media-${Date.now()}-${safeName}`);
+          fs.writeFileSync(tempPath, buffer);
+          log(`[wa-worker] MEDIA RECEIVED: name="${originalName}" size=${buffer.length} caption="${text}" tempPath=${tempPath}`);
+          send({
+            type: "media",
+            caption: text,
+            tempPath,
+            filename: originalName,
+            size: buffer.length,
+            jid: from
+          });
+        } catch (e) {
+          log(`[wa-worker] Media download failed: ${e.message}`);
+          // If the user also wrote a caption, fall back to treating it as a
+          // plain text command so we don't silently drop it.
+          if (text) {
+            send({ type: "command", text, jid: from });
+          }
+        }
+        continue;
+      }
+
+      // Text-only path. NOTE: we no longer strip a leading "/" here — the
+      // scanner needs the raw text to detect slash commands like /new,
+      // /clear, /prime, /help. Backwards-compatible: Claude doesn't care
+      // whether a prompt happens to start with a slash.
+      log(`[wa-worker] COMMAND ACCEPTED: "${text}" (fromMe=${fromMe} jid=${from} id=${messageId})`);
+      send({ type: "command", text, jid: from });
     }
   });
 }
