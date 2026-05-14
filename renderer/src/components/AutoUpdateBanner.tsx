@@ -120,50 +120,73 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
     }
   }
 
-  // Unified slim layout — same 36px strip for every state. The progress bar
-  // for "downloading" is a 2px line at the very bottom of the strip so the
-  // banner height doesn't change between states.
+  // Floating bottom-right popup card — pops up over the app content instead of
+  // pushing it down with a top-of-window banner. Same three states (available
+  // / downloading / ready) rendered inside the same card shape, so the popup
+  // size stays consistent as the state transitions.
   const versionLabel = version ? `v${version}` : "";
   const clampedPercent = Math.max(0, Math.min(100, percent));
 
-  let icon: React.ReactNode = <Download size={13} />;
-  let message: React.ReactNode = null;
-  let actions: React.ReactNode = null;
+  let title = "";
+  let body: React.ReactNode = null;
+  let footer: React.ReactNode = null;
+  let canDismiss = false;
 
   if (state === "available") {
-    message = (
+    title = "Update available";
+    body = (
       <>
-        Update {versionLabel ? `${versionLabel} ` : ""}is available.
-        <span className="auto-update-banner-hint"> A new version is ready to download.</span>
+        AIOS Desktop {versionLabel || "(new version)"} is ready to download.
       </>
     );
-    actions = (
+    footer = (
       <>
-        <button type="button" className="auto-update-banner-secondary" onClick={handleSkip}>Skip</button>
-        <button type="button" className="auto-update-banner-primary" onClick={handleDownload}>Download</button>
+        <button type="button" className="auto-update-toast-secondary" onClick={handleSkip}>
+          Skip
+        </button>
+        <button type="button" className="auto-update-toast-primary" onClick={handleDownload}>
+          Download
+        </button>
       </>
     );
+    canDismiss = true;
   } else if (state === "downloading") {
-    icon = <RefreshCw size={13} className="spin" />;
-    message = (
+    title = "Downloading update";
+    body = (
       <>
-        Downloading update{versionLabel ? ` ${versionLabel}` : ""}… <strong>{clampedPercent}%</strong>
+        <span className="auto-update-toast-version">{versionLabel || "new version"}</span>
+        <span className="auto-update-toast-percent">{clampedPercent}%</span>
       </>
     );
+    footer = (
+      <div className="auto-update-toast-progress" aria-hidden="true">
+        <div
+          className="auto-update-toast-progress-fill"
+          style={{ width: `${clampedPercent}%` }}
+        />
+      </div>
+    );
+    canDismiss = false; // keep the card open so the user sees progress
   } else if (state === "ready") {
-    message = (
+    title = "Update ready to install";
+    body = (
       <>
-        Update {versionLabel ? `${versionLabel} ` : ""}is ready to install.
+        AIOS Desktop {versionLabel || "(new version)"} is downloaded. The app will close, install, and reopen.
       </>
     );
-    actions = (
+    footer = (
       <>
-        <button type="button" className="auto-update-banner-secondary" onClick={handleLater} disabled={installing}>
+        <button
+          type="button"
+          className="auto-update-toast-secondary"
+          onClick={handleLater}
+          disabled={installing}
+        >
           Later
         </button>
         <button
           type="button"
-          className="auto-update-banner-primary"
+          className="auto-update-toast-primary"
           onClick={handleInstall}
           disabled={installing}
         >
@@ -171,26 +194,35 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
         </button>
       </>
     );
+    canDismiss = true;
   }
 
   return (
     <div
-      className={`auto-update-banner state-${state}${state === "ready" ? " is-ready" : ""}`}
+      className={`auto-update-toast state-${state}`}
       role="status"
+      aria-live="polite"
     >
-      <div className="auto-update-banner-text">
-        {icon}
-        <span>{message}</span>
-      </div>
-      {actions && <div className="auto-update-banner-actions">{actions}</div>}
-      {state === "downloading" && (
-        <div className="auto-update-banner-progress" aria-hidden="true">
-          <div
-            className="auto-update-banner-progress-fill"
-            style={{ width: `${clampedPercent}%` }}
-          />
+      <div className="auto-update-toast-card">
+        <div className="auto-update-toast-head">
+          <div className="auto-update-toast-icon">
+            {state === "downloading" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+          </div>
+          <div className="auto-update-toast-title">{title}</div>
+          {canDismiss ? (
+            <button
+              type="button"
+              className="auto-update-toast-close"
+              onClick={state === "ready" ? handleLater : handleSkip}
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
         </div>
-      )}
+        <div className="auto-update-toast-body">{body}</div>
+        {footer ? <div className="auto-update-toast-footer">{footer}</div> : null}
+      </div>
     </div>
   );
 }
