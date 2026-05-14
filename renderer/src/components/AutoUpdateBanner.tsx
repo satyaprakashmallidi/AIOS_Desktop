@@ -83,7 +83,12 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
   }, [version]);
 
   if (!isWindows) return null;
-  if (state === "idle" || state === "checking" || state === "up-to-date" || state === "error") return null;
+  // STRICT whitelist of states that have content to show. Anything else —
+  // including unexpected event names from electron-updater, manual-available
+  // (Mac only), or partial/transient broadcasts — renders nothing. Without
+  // this guard v0.1.21 surfaced an empty husk (just the download icon with
+  // no message or buttons) whenever any unexpected state value arrived.
+  if (state !== "available" && state !== "downloading" && state !== "ready") return null;
 
   // Treat session-level Skip and persisted localStorage Skip the same way.
   let persistedSkip: string | null = null;
