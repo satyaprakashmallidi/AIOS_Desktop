@@ -18,6 +18,7 @@ import {
   X
 } from "lucide-react";
 import { invoke } from "../lib/api";
+import { ConfirmModal } from "../components/ui";
 import type { AgentInfo } from "../types";
 
 type AgentIcon = React.ComponentType<{ size?: number }>;
@@ -334,8 +335,12 @@ function AgentDetailDrawer({
     }
   }
 
-  async function remove() {
-    if (!confirm(`Delete the "${agent.name}" agent? This can't be undone.`)) return;
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  function remove() {
+    setConfirmRemove(true);
+  }
+  async function handleConfirmRemove() {
+    setConfirmRemove(false);
     setSaving(true);
     try {
       await invoke("delete_agent", { id: agent.id });
@@ -418,6 +423,15 @@ function AgentDetailDrawer({
           </div>
         </footer>
       </aside>
+      <ConfirmModal
+        open={confirmRemove}
+        title="Delete agent?"
+        message={`Delete the "${agent.name}" agent? This can't be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setConfirmRemove(false)}
+      />
     </div>
   );
 }

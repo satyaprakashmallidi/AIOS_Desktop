@@ -56,11 +56,16 @@ function createWindow(): void {
     titleBarStyle: isMac ? "hiddenInset" : "hidden",
     trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     icon,
-    // Hold the window hidden until the renderer is ready to paint. Combined
-    // with the inline boot splash in index.html, this guarantees the user
-    // never sees a flash of white — when the window appears, the sage
-    // paper background + spinner is already on screen.
-    show: false,
+    // Show the window IMMEDIATELY on creation. Earlier we used `show: false`
+    // + `ready-to-show` to avoid a brief flash before the renderer painted,
+    // but on a cold first launch the renderer can take 2–5 s to produce its
+    // first frame — meaning the user saw no window at all after double-
+    // clicking the icon, which felt broken. With `backgroundColor` already
+    // set to the paper sage, Electron paints the window in the right color
+    // the instant it appears, and the inline boot splash in `index.html`
+    // takes over a moment later once the renderer loads its HTML. Net effect:
+    // the user sees a window confirming their click immediately.
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -68,18 +73,6 @@ function createWindow(): void {
       sandbox: true
     }
   });
-
-  // Show the window only when the first frame is ready. A 1.5 s safety
-  // timeout ensures we never leave the window invisible if something delays
-  // `ready-to-show` (rare, but worth having).
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-  });
-  setTimeout(() => {
-    if (mainWindow && !mainWindow.isVisible() && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-    }
-  }, 1500);
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {

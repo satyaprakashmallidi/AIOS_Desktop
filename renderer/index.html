@@ -11,6 +11,20 @@
       rel="stylesheet"
     />
     <!--
+      Apply the saved theme to <html> BEFORE any styles or JS load. App.tsx
+      mirrors the user's theme to localStorage on every change so this read
+      is synchronous and accurate. First launch (no saved value) falls back
+      to "light" — matches the inline boot splash colors. Without this
+      script, a user with dark theme would see a light boot splash flash
+      before React mounts and corrects the attribute.
+    -->
+    <script>
+      try {
+        var t = localStorage.getItem("aios-theme") || "light";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* ignore — fall back to default sheet */ }
+    </script>
+    <!--
       Boot splash — paints before any JS/CSS bundle has loaded so the user
       never sees a white frame between the Electron window opening and React
       mounting. Once App.tsx renders, an effect tears `#aios-boot-splash`
@@ -72,9 +86,30 @@
       <div class="card">
         <div class="brand">aios</div>
         <div class="spinner"></div>
-        <div class="label">Loading your workspace…</div>
+        <div class="label" id="aios-boot-label">Loading your workspace…</div>
       </div>
     </div>
+    <script>
+      // Rotate through plausible "what we're doing" labels so the user sees
+      // continuous progress instead of one frozen line. The text doesn't need
+      // to map to literal subprocess steps — it just has to feel alive while
+      // the PyInstaller binary expands, Defender scans it, and the Python
+      // sidecar warms up. After ~22s we switch to the explicit
+      // "first launch can take a minute" copy so any further wait doesn't
+      // feel broken.
+      var aiosSplashStages = [
+        { at: 4000,  text: "Verifying Claude runtime…" },
+        { at: 9000,  text: "Starting the AIOS engine…" },
+        { at: 14000, text: "Almost ready, hang tight…" },
+        { at: 22000, text: "Setting up for the first time — this can take up to a minute." }
+      ];
+      aiosSplashStages.forEach(function (s) {
+        setTimeout(function () {
+          var label = document.getElementById("aios-boot-label");
+          if (label) label.innerText = s.text;
+        }, s.at);
+      });
+    </script>
     <div id="root"></div>
     <div style="position: fixed; right: 0.002px; bottom: 0.002px; font-size: 6px; font-weight: 300; color: rgba(228, 228, 231, 0.2); z-index: 9999; pointer-events: none; user-select: none; letter-spacing: 0;">VRK</div>
     <script type="module" src="/src/App.tsx"></script>

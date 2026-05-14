@@ -16,7 +16,7 @@ import {
   Users
 } from "lucide-react";
 import { invoke } from "../lib/api";
-import { PanelHeader, StatusBadge } from "../components/ui";
+import { PanelHeader, StatusBadge, ConfirmModal } from "../components/ui";
 import type { ClaudeStatus, ConnectionStatus, WorkspaceInfo } from "../types";
 
 type TabId = "general" | "claude" | "appearance" | "about";
@@ -178,8 +178,12 @@ function GeneralPanel({
     }
   }
 
-  async function resetWorkspace() {
-    if (!confirm("Erase ALL context, chats, plans, and outputs? Claude path and connectors are kept. This cannot be undone.")) return;
+  const [confirmReset, setConfirmReset] = useState(false);
+  function resetWorkspace() {
+    setConfirmReset(true);
+  }
+  async function handleConfirmReset() {
+    setConfirmReset(false);
     setWiping(true);
     try {
       await invoke("reset_workspace");
@@ -338,6 +342,16 @@ function GeneralPanel({
       </SettingsSection>
 
       {savedHint ? <div className="settings-toast">{savedHint}</div> : null}
+
+      <ConfirmModal
+        open={confirmReset}
+        title="Erase workspace?"
+        message="This wipes ALL context, chats, plans, and outputs. Claude path and connectors are kept. This can't be undone."
+        confirmLabel="Erase data"
+        danger
+        onConfirm={handleConfirmReset}
+        onCancel={() => setConfirmReset(false)}
+      />
     </>
   );
 }

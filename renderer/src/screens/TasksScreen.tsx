@@ -22,7 +22,16 @@ const KANBAN_COLUMNS: Array<{ id: Bucket; title: string; statuses: Set<TaskInfo[
   { id: "failed",    title: "Failed",      statuses: new Set(["failed", "cancelled"]),                                                                                    tone: "failed"    }
 ];
 
+// User-facing label override for statuses where the raw DB value reads as
+// jargon. "Blocked" sounds like a system error — but in practice it just
+// means the agent has a question for the user and is waiting for guidance.
+// "Needs your input" sets the right expectation: this is on you, not broken.
+const STATUS_LABEL_OVERRIDES: Record<string, string> = {
+  blocked: "Needs your input",
+};
+
 function formatStatusLabel(status: string): string {
+  if (STATUS_LABEL_OVERRIDES[status]) return STATUS_LABEL_OVERRIDES[status];
   const normalized = status.replace(/_/g, " ").trim();
   return normalized ? normalized.replace(/\b\w/g, (ch) => ch.toUpperCase()) : "Unknown";
 }
@@ -315,7 +324,17 @@ function KanbanView({
   return (
     <div className="tasks-v2-kanban">
       {KANBAN_COLUMNS.map((column) => {
-        const columnTasks = tasks.filter((t) => column.statuses.has(t.status));
+        const columnTasks = tasks.filter((t) => {
+          if (!column.statuses.has(t.status)) return false;
+          // In the Completed column, only the top-level (main-agent) task
+          // surfaces. The parent's synthesis result already rolls up every
+          // child's work, and the user can drill into the parent to see the
+          // per-child breakdown via the "Delegated sub-tasks" section in the
+          // details modal. Other columns keep every task visible so users
+          // can watch children running in real time.
+          if (column.id === "completed" && t.parent_task_id) return false;
+          return true;
+        });
         return (
           <div key={column.id} className={`tasks-v2-column tone-${column.tone}`}>
             <div className="tasks-v2-column-head">
@@ -638,7 +657,7 @@ function TaskDetailsModal({
                 {task.status === "awaiting_connection" &&
                   `${task.needs_connector ? `${task.needs_connector} isn't connected.` : "A required connector isn't connected."} Retry after connecting it.`}
                 {task.status === "blocked" &&
-                  (task.blocked_reason || "The agent hit a blocker. Provide resolution guidance and retry.")}
+                  (task.blocked_reason || "The agent has a question for you before it can keep going. Answer below and retry.")}
                 {task.status === "failed" && "The last run failed. Provide guidance for the retry."}
               </p>
               <textarea

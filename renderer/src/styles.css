@@ -608,44 +608,49 @@ body.is-mac .sidebar-brand {
 
 /* ─── Topbar ────────────────────────────────────────────────────────────────── */
 .topbar {
-  min-height: 56px;
-  padding: 0 20px 0 26px;
+  min-height: 42px;
+  /* No right-side padding — the window controls sit flush against the edge.
+     When maximized, every pixel of padding becomes a visible gap between the
+     close button and the screen edge, which felt broken. The left padding
+     stays so the app menu has breathing room. */
+  padding: 0 0 0 26px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
   gap: var(--space-4);
   border-bottom: 1px solid var(--border);
   background: var(--paper);
   -webkit-app-region: drag;
+}
+.windows-titlebar-left {
   display: flex;
   align-items: center;
 }
 .topbar-status {
+  /* Pushed to the right; the window-controls sit immediately after. */
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  padding-right: 12px;
   -webkit-app-region: no-drag;
 }
 
 .window-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
+  display: flex;
+  align-items: stretch;
+  /* `align-self: stretch` + parent `align-items: stretch` makes the control
+     row fill the topbar's full vertical extent — no top-edge gap when the
+     window is maximized. */
   align-self: stretch;
-  margin: 0 -20px 0 6px;
-  padding-left: 4px;
-  border-left: 1px solid var(--border);
   -webkit-app-region: no-drag;
 }
 
 .window-control {
   width: 46px;
-  height: 100%;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--gray-700);
+  color: var(--gray-600);
   display: inline-grid;
   place-items: center;
   cursor: pointer;
@@ -656,7 +661,7 @@ body.is-mac .sidebar-brand {
 .window-control svg {
   width: 12px;
   height: 12px;
-  stroke-width: 1.8;
+  stroke-width: 1.6;
 }
 
 .window-control:hover {
@@ -665,8 +670,19 @@ body.is-mac .sidebar-brand {
 }
 
 .window-control.close:hover {
-  background: #e81123;
-  color: white;
+  /* Softer than Windows' default #e81123 — still reads as "destructive"
+     but doesn't blare against the paper theme. */
+  background: #d13a3a;
+  color: #ffffff;
+}
+.window-control.close:active {
+  background: #b22b2b;
+}
+
+/* Maximized window has no OS-chrome gap, so let nothing else introduce one
+   on the right or top edge. */
+.topbar.is-maximized {
+  border-top: 0;
 }
 
 /* ─── Status Badge ──────────────────────────────────────────────────────────── */
@@ -6495,7 +6511,11 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
-  z-index: 9999;
+  /* Must sit above any modal that triggered the confirm — task details overlay
+     uses z-index: 10500. Anything below that renders behind, which is the bug
+     the user saw: clicking "Delete task" inside the details modal showed the
+     confirm dialog underneath, invisible. */
+  z-index: 11000;
   animation: fadeIn var(--duration-base) var(--ease-out);
 }
 

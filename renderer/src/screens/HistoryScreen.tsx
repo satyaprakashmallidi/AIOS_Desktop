@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Clock, Inbox, MessageSquare, Search, Trash2 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { formatRelativeTime } from "../lib/workspace-view";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ConfirmModal } from "../components/ui";
 import type { ChatSession } from "../types";
 
 function displayTitle(session: ChatSession): string {
@@ -84,8 +84,16 @@ export function HistoryScreen({
 
   const groups = useMemo(() => groupSessions(filtered), [filtered]);
 
-  async function deleteSession(session: ChatSession) {
-    if (!confirm(`Delete chat "${session.title}"? This cannot be undone.`)) return;
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState<ChatSession | null>(null);
+
+  function deleteSession(session: ChatSession) {
+    setConfirmDeleteSession(session);
+  }
+
+  async function handleConfirmDeleteSession() {
+    const session = confirmDeleteSession;
+    if (!session) return;
+    setConfirmDeleteSession(null);
     setBusyId(session.id);
     try {
       await invoke("delete_thread", { id: session.id });
@@ -189,6 +197,15 @@ export function HistoryScreen({
           </div>
         )}
       </div>
+      <ConfirmModal
+        open={!!confirmDeleteSession}
+        title="Delete chat?"
+        message={confirmDeleteSession ? `Delete "${displayTitle(confirmDeleteSession)}"? This can't be undone.` : ""}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDeleteSession}
+        onCancel={() => setConfirmDeleteSession(null)}
+      />
     </section>
   );
 }

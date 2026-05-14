@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { formatRelativeTime } from "../lib/workspace-view";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ConfirmModal } from "../components/ui";
 import type { FilePreview, WorkspaceEntry } from "../types";
 
 function cleanMarkdownPreview(raw: string | null | undefined): string {
@@ -51,6 +51,10 @@ export function PlansScreen({
 }) {
   const [planPrompt, setPlanPrompt] = useState("");
   const [openEntry, setOpenEntry] = useState<WorkspaceEntry | null>(null);
+  // Lift the delete-confirm state to the parent so both the card click and the
+  // detail modal click route through the same ConfirmModal. Matches the
+  // pattern OutputsScreen uses.
+  const [confirmDeleteEntry, setConfirmDeleteEntry] = useState<WorkspaceEntry | null>(null);
 
   useEffect(() => {
     if (!openEntry) return;
@@ -69,6 +73,19 @@ export function PlansScreen({
       onInitialOpenConsumed?.();
     }
   }, [initialOpenPath, entries, onInitialOpenConsumed]);
+
+  async function handleConfirmDelete() {
+    if (!confirmDeleteEntry) return;
+    try {
+      await invoke("delete_workspace_file", { path: confirmDeleteEntry.path });
+      setConfirmDeleteEntry(null);
+      if (openEntry && openEntry.path === confirmDeleteEntry.path) setOpenEntry(null);
+      await onRefresh();
+    } catch (err) {
+      console.error("Failed to delete plan:", err);
+      setConfirmDeleteEntry(null);
+    }
+  }
 
   return (
     <section className="plans-screen">
@@ -129,7 +146,7 @@ export function PlansScreen({
                 entry={entry}
                 onOpen={() => setOpenEntry(entry)}
                 onAskClaude={onAskClaude}
-                onRefresh={onRefresh}
+                onDelete={() => setConfirmDeleteEntry(entry)}
               />
             ))}
           </div>
@@ -141,9 +158,19 @@ export function PlansScreen({
           entry={openEntry}
           onClose={() => setOpenEntry(null)}
           onAskClaude={onAskClaude}
-          onRefresh={onRefresh}
+          onDelete={() => setConfirmDeleteEntry(openEntry)}
         />
       ) : null}
+
+      <ConfirmModal
+        open={!!confirmDeleteEntry}
+        title="Delete plan?"
+        message={confirmDeleteEntry ? `Delete "${confirmDeleteEntry.name}"? This can't be undone.` : ""}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setConfirmDeleteEntry(null)}
+      />
     </section>
   );
 }
@@ -152,25 +179,16 @@ function PlanCard({
   entry,
   onOpen,
   onAskClaude,
-  onRefresh
+  onDelete
 }: {
   entry: WorkspaceEntry;
   onOpen: () => void;
   onAskClaude: (prompt: string) => void;
-  onRefresh: () => Promise<void>;
+  onDelete: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-
-  async function deletePlan(event: React.MouseEvent) {
+  function deletePlan(event: React.MouseEvent) {
     event.stopPropagation();
-    if (!confirm(`Delete ${entry.name}?`)) return;
-    setBusy(true);
-    try {
-      await invoke("delete_workspace_file", { path: entry.path });
-      await onRefresh();
-    } finally {
-      setBusy(false);
-    }
+    onDelete();
   }
 
   const cleanedPreview = cleanMarkdownPreview(entry.preview);
@@ -216,7 +234,6 @@ function PlanCard({
             type="button"
             className="plan-icon-btn danger"
             onClick={deletePlan}
-            disabled={busy}
             title="Delete plan"
             aria-label="Delete plan"
           >
@@ -232,16 +249,15 @@ function PlanDetailModal({
   entry,
   onClose,
   onAskClaude,
-  onRefresh
+  onDelete
 }: {
   entry: WorkspaceEntry;
   onClose: () => void;
   onAskClaude: (prompt: string) => void;
-  onRefresh: () => Promise<void>;
+  onDelete: () => void;
 }) {
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,18 +274,6 @@ function PlanDetailModal({
       cancelled = true;
     };
   }, [entry.path]);
-
-  async function deletePlan() {
-    if (!confirm(`Delete ${entry.name}?`)) return;
-    setBusy(true);
-    try {
-      await invoke("delete_workspace_file", { path: entry.path });
-      await onRefresh();
-      onClose();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div
@@ -349,8 +353,7 @@ function PlanDetailModal({
             <button
               type="button"
               className="plan-icon-btn danger"
-              onClick={deletePlan}
-              disabled={busy}
+              onClick={onDelete}
               title="Delete plan"
             >
               <Trash2 size={13} />

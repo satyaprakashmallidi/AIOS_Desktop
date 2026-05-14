@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { formatRelativeTime } from "../lib/workspace-view";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ConfirmModal } from "../components/ui";
 import type { AutoTask } from "../types";
 
 const SCHEDULE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -91,8 +91,14 @@ export function AutoTasksScreen() {
     }
   }
 
-  async function deleteTask(task: AutoTask) {
-    if (!confirm(`Delete auto-task "${task.name}"?`)) return;
+  const [confirmDeleteTask, setConfirmDeleteTask] = useState<AutoTask | null>(null);
+  function deleteTask(task: AutoTask) {
+    setConfirmDeleteTask(task);
+  }
+  async function handleConfirmDeleteTask() {
+    const task = confirmDeleteTask;
+    if (!task) return;
+    setConfirmDeleteTask(null);
     setBusy(true);
     try {
       await invoke("delete_auto_task", { id: task.id });
@@ -213,6 +219,16 @@ export function AutoTasksScreen() {
         </div>
       </div>
       {status ? <div className="auto-tasks-toast">{status}</div> : null}
+
+      <ConfirmModal
+        open={!!confirmDeleteTask}
+        title="Delete auto-task?"
+        message={confirmDeleteTask ? `Delete auto-task "${confirmDeleteTask.name}"? This can't be undone.` : ""}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDeleteTask}
+        onCancel={() => setConfirmDeleteTask(null)}
+      />
     </section>
   );
 }

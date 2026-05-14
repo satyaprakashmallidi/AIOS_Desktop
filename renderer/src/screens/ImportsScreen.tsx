@@ -11,7 +11,7 @@ import {
   X
 } from "lucide-react";
 import { invoke } from "../lib/api";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ConfirmModal } from "../components/ui";
 
 interface ImportFile {
   name: string;
@@ -148,8 +148,14 @@ export function ImportsScreen({
     }
   }
 
-  async function deleteFolder(folder: ImportFolder) {
-    if (!confirm(`Delete folder "${folder.name}" and all ${folder.fileCount} file${folder.fileCount === 1 ? "" : "s"} inside?`)) return;
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<ImportFolder | null>(null);
+  function deleteFolder(folder: ImportFolder) {
+    setConfirmDeleteFolder(folder);
+  }
+  async function handleConfirmDeleteFolder() {
+    const folder = confirmDeleteFolder;
+    if (!folder) return;
+    setConfirmDeleteFolder(null);
     setBusy(true);
     try {
       await invoke("delete_import_folder", { name: folder.name });
@@ -310,6 +316,20 @@ export function ImportsScreen({
       ) : null}
 
       {status ? <div className="imports-toast">{status}</div> : null}
+
+      <ConfirmModal
+        open={!!confirmDeleteFolder}
+        title="Delete import folder?"
+        message={
+          confirmDeleteFolder
+            ? `Delete folder "${confirmDeleteFolder.name}" and all ${confirmDeleteFolder.fileCount} file${confirmDeleteFolder.fileCount === 1 ? "" : "s"} inside? This can't be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDeleteFolder}
+        onCancel={() => setConfirmDeleteFolder(null)}
+      />
     </section>
   );
 }

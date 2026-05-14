@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { invoke } from "./lib/api";
 import { buildConnections, buildContextSections } from "./lib/workspace-view";
-import { NavItem, StatusBadge } from "./components/ui";
+import { NavItem, StatusBadge, ConfirmModal } from "./components/ui";
 import { BrandMark } from "./components/BrandMark";
 import { AutoUpdateBanner } from "./components/AutoUpdateBanner";
 import { CommandScreen } from "./screens/CommandScreen";
@@ -170,29 +170,49 @@ function App() {
     path: string;
   } | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Staged thread id for the chat-delete ConfirmModal. Set by the sidebar
+  // trash icon; cleared on Cancel/Confirm.
+  const [confirmDeleteThreadId, setConfirmDeleteThreadId] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingSlow, setLoadingSlow] = useState(false);
+  // splashStage advances as time passes so the React splash subtitle rotates
+  // through "what we're doing now" messages — mirrors the staged copy in
+  // the inline boot splash so the user feels continuous progress across the
+  // handoff between the two splashes.
+  const [splashStage, setSplashStage] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [theme, setTheme] = useState<string>("auto");
+  // Default to "light" on first launch — the inline boot splash in index.html
+  // paints the paper background unconditionally, so any other default would
+  // cause a flash when React mounts. Subsequent launches read the value from
+  // localStorage first (synchronously, before SQLite) so the data-theme
+  // attribute is correct from the very first React render.
+  const [theme, setTheme] = useState<string>(() => {
+    try {
+      const cached = localStorage.getItem("aios-theme");
+      return cached || "light";
+    } catch {
+      return "light";
+    }
+  });
 
   // Fast cold-start path. Loads only the 3 IPC calls needed for first paint:
   // workspace info (paths, deviceUserId, cached claude path), onboarding state
   // (which screen to show), and the session list (sidebar). Everything else is
   // deferred to refreshWorkspaceBackground after splash dismisses.
   async function refreshWorkspaceCritical(): Promise<{ workspace: WorkspaceInfo; sessions: ChatSession[] }> {
-    // The Python sidecar can take 2–5 s (sometimes longer on first launch) to
-    // become RPC-ready. During that window IPC calls reject with HOST_MISSING
-    // / connection-refused style errors. Without retry the splash would fail
-    // hard immediately and show the "Retry" button before the sidecar even
-    // had a chance — terrible first impression. Retry quietly for up to ~15 s,
-    // then let the outer .catch handle it (the existing 10 s slow-loading hook
-    // already surfaces a Retry button as a separate safety net).
-    const deadline = Date.now() + 15000;
+    // The Python sidecar can take 2–5 s on a warm install, but a fresh
+    // Windows install often takes 15–30 s on the first cold launch — the
+    // PyInstaller-bundled binary is extracted and scanned by Defender on
+    // first run. Without a generous retry window the splash would flip to
+    // the error state during a totally normal first-launch warmup. Retry
+    // quietly for 30 s; the existing 10 s "slow loading" hook surfaces a
+    // Retry button as a separate safety net for genuinely-stuck cases.
+    const deadline = Date.now() + 30000;
     async function withWarmupRetry<T>(call: () => Promise<T>): Promise<T> {
       let lastErr: unknown;
       while (Date.now() < deadline) {
@@ -209,7 +229,7 @@ function App() {
       withWarmupRetry(() => invoke<WorkspaceInfo>("get_workspace_info")),
       withWarmupRetry(() => invoke<OnboardingState>("get_onboarding_state")),
       withWarmupRetry(() => invoke<ChatSession[]>("get_sessions")),
-      withWarmupRetry(() => invoke<{ value: string | null }>("get_setting", { key: "theme" })).catch(() => ({ value: "auto" }))
+      withWarmupRetry(() => invoke<{ value: string | null }>("get_setting", { key: "theme" })).catch(() => ({ value: "light" }))
     ]);
 
     let nextSessions = sessionList;
@@ -221,7 +241,7 @@ function App() {
     startTransition(() => {
       setWorkspace(workspaceInfo);
       setOnboarding(onboardingState);
-      setTheme(themeSetting?.value || "auto");
+      setTheme(themeSetting?.value || "light");
       // Merge — preserves any in-flight chat (see mergeSessions doc above).
       setSessions((current) => mergeSessions(current, nextSessions));
       setActiveSessionId((current) => current ?? nextSessions[0]?.id ?? null);
@@ -291,8 +311,18 @@ function App() {
     }
   }
 
-  async function deleteThread(id: string) {
-    if (!window.confirm("Are you sure you want to delete this chat?")) return;
+  // Two-step delete: clicking the trash icon stages the thread id; the actual
+  // delete runs when the ConfirmModal "Delete" is clicked. Native confirm()
+  // is gone — the in-app modal is themed and works inside other modals via
+  // its higher z-index.
+  function deleteThread(id: string) {
+    setConfirmDeleteThreadId(id);
+  }
+
+  async function handleConfirmDeleteThread() {
+    const id = confirmDeleteThreadId;
+    if (!id) return;
+    setConfirmDeleteThreadId(null);
     try {
       await invoke("delete_thread", { id });
       setSessions((current) => {
@@ -368,6 +398,22 @@ function App() {
       });
   }, []);
 
+  // Rotate the React splash subtitle through the same staged messages the
+  // inline boot splash uses, so the user feels continuous progress across
+  // the handoff. Timers tick from the moment React mounts (which is also
+  // when the inline splash gets torn down), so the React-side stages run
+  // SHORTER than the inline-splash stages by the time-to-mount delta.
+  useEffect(() => {
+    if (!loading) return;
+    const timers = [
+      window.setTimeout(() => setSplashStage(1), 3500),
+      window.setTimeout(() => setSplashStage(2), 8000),
+      window.setTimeout(() => setSplashStage(3), 14000),
+      window.setTimeout(() => setSplashStage(4), 22000),
+    ];
+    return () => { timers.forEach(window.clearTimeout); };
+  }, [loading]);
+
   // Tear down the index.html boot splash as soon as React's tree is on
   // screen. The in-React splash (rendered when `loading` is true) takes over
   // visually, so the transition is seamless. Without this, the inline splash
@@ -377,9 +423,13 @@ function App() {
     if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
   }, []);
 
-  // Apply theme to document
+  // Apply theme to document and mirror to localStorage so the inline script in
+  // index.html can pick it up on the next cold start (before React mounts) —
+  // that's what kills the dark/light flash between the boot splash and the
+  // first React render.
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("aios-theme", theme); } catch { /* ignore */ }
   }, [theme]);
 
   // Sync theme changes from settings (every 2s for reactive feel across instances)
@@ -648,13 +698,26 @@ function App() {
   }[screen];
 
   if (loading) {
+    // Subtitle steps through these as time passes so the user sees continuous
+    // activity. Pinned to "longer than usual" once the 10s loadingSlow timer
+    // fires — at that point we surface the Retry escape hatch underneath.
+    const splashMessages = [
+      "Connecting workspace, Claude runtime, and threads…",
+      "Verifying Claude runtime…",
+      "Starting the AIOS engine…",
+      "Almost ready, hang tight…",
+      "Setting up for the first time — this can take up to a minute."
+    ];
+    const splashText = loadingSlow
+      ? "This is taking longer than usual."
+      : splashMessages[Math.min(splashStage, splashMessages.length - 1)];
     return (
       <div className="app-loading">
         <div className="app-loading-card">
           <BrandMark size={48} variant="filled" />
           <div className="app-loading-copy">
             <strong>Loading <em>AIOS</em></strong>
-            <p>{loadingSlow ? "This is taking longer than usual." : "Connecting workspace, Claude runtime, and threads."}</p>
+            <p>{splashText}</p>
           </div>
           <div className="app-loading-bar" aria-label="Loading">
             <span />
@@ -783,7 +846,7 @@ function App() {
       ) : null}
 
       <main className="app-main">
-        <header className="topbar">
+        <header className={`topbar${maximized ? " is-maximized" : ""}`}>
           <div className="windows-titlebar-left">
             <nav className="windows-menu-bar" aria-label="Application menu">
               <span>{currentTitle}</span>
@@ -791,22 +854,22 @@ function App() {
           </div>
 
           <div className="topbar-status">
-
             {screen !== "command" && !setupRequired ? <StatusBadge tone={activeModules ? "neutral" : "warning"} label={`${activeModules} modules`} /> : null}
-            {workspace?.platform !== "darwin" ? (
-              <div className="window-controls" aria-label="Window controls">
-                <button className="window-control" type="button" aria-label="Minimize window" onClick={() => window.aios?.window?.minimize()}>
-                  <Minus />
-                </button>
-                <button className="window-control" type="button" aria-label={maximized ? "Restore window" : "Maximize window"} onClick={() => window.aios?.window?.maximize()}>
-                  <Square />
-                </button>
-                <button className="window-control close" type="button" aria-label="Close window" onClick={() => window.aios?.window?.close()}>
-                  <X />
-                </button>
-              </div>
-            ) : null}
           </div>
+
+          {workspace?.platform !== "darwin" ? (
+            <div className="window-controls" aria-label="Window controls">
+              <button className="window-control" type="button" aria-label="Minimize window" onClick={() => window.aios?.window?.minimize()}>
+                <Minus />
+              </button>
+              <button className="window-control" type="button" aria-label={maximized ? "Restore window" : "Maximize window"} onClick={() => window.aios?.window?.maximize()}>
+                <Square />
+              </button>
+              <button className="window-control close" type="button" aria-label="Close window" onClick={() => window.aios?.window?.close()}>
+                <X />
+              </button>
+            </div>
+          ) : null}
         </header>
 
         <AutoUpdateBanner platform={workspace?.platform ?? null} />
@@ -992,6 +1055,15 @@ function App() {
           }}
         />
       ) : null}
+      <ConfirmModal
+        open={!!confirmDeleteThreadId}
+        title="Delete chat?"
+        message="This chat and its history will be removed permanently."
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDeleteThread}
+        onCancel={() => setConfirmDeleteThreadId(null)}
+      />
     </div>
   );
 }
