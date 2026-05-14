@@ -120,73 +120,77 @@ export function AutoUpdateBanner({ platform }: AutoUpdateBannerProps) {
     }
   }
 
+  // Unified slim layout — same 36px strip for every state. The progress bar
+  // for "downloading" is a 2px line at the very bottom of the strip so the
+  // banner height doesn't change between states.
+  const versionLabel = version ? `v${version}` : "";
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+
+  let icon: React.ReactNode = <Download size={13} />;
+  let message: React.ReactNode = null;
+  let actions: React.ReactNode = null;
+
   if (state === "available") {
-    return (
-      <div className="auto-update-banner" role="status">
-        <div className="auto-update-banner-text">
-          <Download size={14} />
-          <span>
-            Update {version ? `v${version} ` : ""}available.{" "}
-            <span className="auto-update-banner-hint">Click Download now to grab it in the background.</span>
-          </span>
-        </div>
-        <div className="auto-update-banner-actions">
-          <button type="button" className="auto-update-banner-secondary" onClick={handleSkip}>
-            Skip
-          </button>
-          <button type="button" className="auto-update-banner-primary" onClick={handleDownload}>
-            Download now
-          </button>
-        </div>
-      </div>
+    message = (
+      <>
+        Update {versionLabel ? `${versionLabel} ` : ""}is available.
+        <span className="auto-update-banner-hint"> A new version is ready to download.</span>
+      </>
+    );
+    actions = (
+      <>
+        <button type="button" className="auto-update-banner-secondary" onClick={handleSkip}>Skip</button>
+        <button type="button" className="auto-update-banner-primary" onClick={handleDownload}>Download</button>
+      </>
+    );
+  } else if (state === "downloading") {
+    icon = <RefreshCw size={13} className="spin" />;
+    message = (
+      <>
+        Downloading update{versionLabel ? ` ${versionLabel}` : ""}… <strong>{clampedPercent}%</strong>
+      </>
+    );
+  } else if (state === "ready") {
+    message = (
+      <>
+        Update {versionLabel ? `${versionLabel} ` : ""}is ready to install.
+      </>
+    );
+    actions = (
+      <>
+        <button type="button" className="auto-update-banner-secondary" onClick={handleLater} disabled={installing}>
+          Later
+        </button>
+        <button
+          type="button"
+          className="auto-update-banner-primary"
+          onClick={handleInstall}
+          disabled={installing}
+        >
+          {installing ? "Installing…" : "Install & restart"}
+        </button>
+      </>
     );
   }
 
-  if (state === "downloading") {
-    return (
-      <div className="auto-update-banner is-progress" role="status">
-        <div className="auto-update-banner-text">
-          <RefreshCw size={14} className="spin" />
-          <span>
-            Downloading update{version ? ` v${version}` : ""}… {Math.max(0, Math.min(100, percent))}%
-          </span>
-        </div>
-        <div className="auto-update-banner-progress">
+  return (
+    <div
+      className={`auto-update-banner state-${state}${state === "ready" ? " is-ready" : ""}`}
+      role="status"
+    >
+      <div className="auto-update-banner-text">
+        {icon}
+        <span>{message}</span>
+      </div>
+      {actions && <div className="auto-update-banner-actions">{actions}</div>}
+      {state === "downloading" && (
+        <div className="auto-update-banner-progress" aria-hidden="true">
           <div
             className="auto-update-banner-progress-fill"
-            style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+            style={{ width: `${clampedPercent}%` }}
           />
         </div>
-      </div>
-    );
-  }
-
-  if (state === "ready") {
-    return (
-      <div className="auto-update-banner is-ready" role="status">
-        <div className="auto-update-banner-text">
-          <Download size={14} />
-          <span>
-            Update {version ? `v${version} ` : ""}is ready to install.
-          </span>
-        </div>
-        <div className="auto-update-banner-actions">
-          <button type="button" className="auto-update-banner-secondary" onClick={handleLater} disabled={installing}>
-            <X size={12} />
-            Later
-          </button>
-          <button
-            type="button"
-            className="auto-update-banner-primary"
-            onClick={handleInstall}
-            disabled={installing}
-          >
-            {installing ? "Installing…" : "Install & restart"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+      )}
+    </div>
+  );
 }
