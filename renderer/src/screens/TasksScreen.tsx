@@ -6,9 +6,11 @@ import {
   MessageSquare,
   Plus,
   Search,
+  Trash2,
   X
 } from "lucide-react";
 import { invoke } from "../lib/api";
+import { ConfirmModal } from "../components/ui";
 import type { AgentInfo, TaskInfo } from "../types";
 
 type Bucket = "queued" | "running" | "completed" | "failed";
@@ -75,6 +77,7 @@ export function TasksScreen() {
   const [detailsActionLoading, setDetailsActionLoading] = useState(false);
   const [detailsActionError, setDetailsActionError] = useState("");
   const [detailsActionNote, setDetailsActionNote] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -184,6 +187,25 @@ export function TasksScreen() {
     }
   }
 
+  async function handleDeleteTask(taskId: string) {
+    setConfirmDeleteId(taskId);
+  }
+
+  async function confirmDelete() {
+    if (!confirmDeleteId) return;
+    try {
+      await invoke("delete_task", { id: confirmDeleteId });
+      setDetailsOpen(false);
+      setDetailsTask(null);
+      setConfirmDeleteId(null);
+      void refresh();
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+      alert("Failed to delete task. Error: " + (err instanceof Error ? err.message : String(err)));
+      setConfirmDeleteId(null);
+    }
+  }
+
   if (loading) {
     return (
       <section className="tasks-v2-screen">
@@ -263,9 +285,20 @@ export function TasksScreen() {
           setActionNote={setDetailsActionNote}
           onClose={closeDetails}
           onAction={handleTaskAction}
+          onDelete={handleDeleteTask}
           onOpenTask={openDetails}
         />
       )}
+
+      <ConfirmModal
+        open={!!confirmDeleteId}
+        title="Delete task?"
+        message="Are you sure you want to delete this task? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </section>
   );
 }
@@ -457,6 +490,7 @@ function TaskDetailsModal({
   setActionNote,
   onClose,
   onAction,
+  onDelete,
   onOpenTask
 }: {
   task: TaskInfo;
@@ -465,9 +499,10 @@ function TaskDetailsModal({
   actionLoading: boolean;
   actionError: string;
   actionNote: string;
-  setActionNote: (s: string) => void;
+  setActionNote: (v: string) => void;
   onClose: () => void;
   onAction: (action: string) => void;
+  onDelete: (taskId: string) => void;
   onOpenTask: (task: TaskInfo) => void;
 }) {
   const childTasks = useMemo(
@@ -672,7 +707,10 @@ function TaskDetailsModal({
         </div>
 
         <footer className="detail-modal-footer">
-          <button className="button button-ghost" onClick={onClose}>Close</button>
+          <div className="detail-modal-footer-left">
+            <button className="button button-ghost" onClick={onClose}>Close</button>
+            <button className="button button-danger-link" onClick={() => onDelete(task.id)}>Delete task</button>
+          </div>
         </footer>
       </div>
     </div>

@@ -867,6 +867,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
             limit=int(a.get("limit") or 500),
         ),
         "get_task": lambda a: tasks_store.get_task(require_str(a, "id")) or {},
+        "delete_task": lambda a: (print(f"[host] DELETING TASK {a.get('id')}", file=sys.stderr, flush=True), tasks_store.delete_task(require_str(a, "id")))[1],
         "create_task": lambda a: tasks_store.create_task(
             name=str(a.get("name") or "").strip() or "",
             message=require_str(a, "message"),

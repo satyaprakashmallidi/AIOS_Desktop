@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Plug,
   Plus,
+  Search,
   Send,
   Sheet,
   Twitter,
@@ -303,6 +304,8 @@ function mergeConnections(
 export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: string; claude: ClaudeStatus | null }) {
   const [identifying, setIdentifying] = useState<Set<string>>(new Set());
   const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const identifyAttemptedRef = useRef<Set<string>>(new Set());
 
   // Ask Claude to identify the connected account's email. Composio's REST API
@@ -398,7 +401,6 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   const [liveConnections, setLiveConnections] = useState<RelayConnection[]>([]);
   const [busyService, setBusyService] = useState<string | null>(null);
   const [stalledServices, setStalledServices] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [credsModalService, setCredsModalService] = useState<string | null>(null);
   // WhatsApp Personal state, driven by whatsapp_update broadcasts from the
@@ -446,6 +448,12 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
     () => mergeConnections(CONNECTOR_CATALOG, liveConnections, stalledServices, localLabels, whatsappPersonal),
     [liveConnections, stalledServices, localLabels, whatsappPersonal]
   );
+  
+  const filteredCatalog = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return connectors.filter(c => c.label.toLowerCase().includes(q) || c.description.toLowerCase().includes(q));
+  }, [connectors, searchQuery]);
+
   const connectedCount = useMemo(() => connectors.filter((c) => c.status === "connected").length, [connectors]);
   const totalActive = useMemo(() => connectors.filter((c) => !c.comingSoon).length, [connectors]);
 
@@ -768,6 +776,23 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
           </div>
         </header>
 
+        <div className="connectors-search-bar">
+          <div className="connectors-search-inner">
+            <Search size={16} className="search-icon" />
+            <input 
+              type="text" 
+              placeholder="Search services..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="search-clear" onClick={() => setSearchQuery("")}>
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
         {error ? (
           <div className="connectors-error">
             <strong>Connectors error:</strong> {error}
@@ -781,7 +806,7 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
           </div>
         ) : null}
         <div className="connectors-grid">
-          {connectors.map((connector) => (
+          {filteredCatalog.map((connector) => (
               <ConnectorCard
                 key={connector.service}
                 connector={connector}

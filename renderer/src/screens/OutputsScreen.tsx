@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { invoke } from "../lib/api";
 import { formatRelativeTime } from "../lib/workspace-view";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ConfirmModal } from "../components/ui";
 import type { AutoTaskRun, FilePreview, WorkspaceEntry } from "../types";
 
 type CategoryId = "all" | "auto-tasks" | "data" | "intel" | "shares" | "other";
@@ -82,6 +82,7 @@ export function OutputsScreen({
   const [filter, setFilter] = useState<CategoryId>("all");
   const [openEntry, setOpenEntry] = useState<WorkspaceEntry | null>(null);
   const [recentRuns, setRecentRuns] = useState<AutoTaskRun[]>([]);
+  const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
 
   useEffect(() => {
     if (!initialOpenPath) return;
@@ -119,6 +120,19 @@ export function OutputsScreen({
     const spec = CATEGORIES.find((c) => c.id === filter);
     return spec ? allEntries.filter(spec.match) : allEntries;
   }, [allEntries, filter]);
+
+  async function handleConfirmDelete() {
+    if (!confirmDeletePath) return;
+    try {
+      await invoke("delete_workspace_file", { path: confirmDeletePath });
+      setConfirmDeletePath(null);
+      setOpenEntry(null);
+      await onRefresh();
+    } catch (err) {
+      console.error("Failed to delete file:", err);
+      setConfirmDeletePath(null);
+    }
+  }
 
   return (
     <section className="outputs-screen">
@@ -206,6 +220,7 @@ export function OutputsScreen({
                 onOpen={() => setOpenEntry(entry)}
                 onAskClaude={onAskClaude}
                 onRefresh={onRefresh}
+                onDelete={() => setConfirmDeletePath(entry.path)}
               />
             ))}
           </div>
@@ -218,8 +233,19 @@ export function OutputsScreen({
           onClose={() => setOpenEntry(null)}
           onAskClaude={onAskClaude}
           onRefresh={onRefresh}
+          onDelete={() => setConfirmDeletePath(openEntry.path)}
         />
       ) : null}
+
+      <ConfirmModal
+        open={!!confirmDeletePath}
+        title="Delete file?"
+        message={`Are you sure you want to delete this file? This action cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setConfirmDeletePath(null)}
+      />
     </section>
   );
 }
@@ -228,26 +254,21 @@ function OutputCard({
   entry,
   onOpen,
   onAskClaude,
-  onRefresh
+  onRefresh,
+  onDelete
 }: {
   entry: WorkspaceEntry;
   onOpen: () => void;
   onAskClaude: (prompt: string) => void;
   onRefresh: () => Promise<void>;
+  onDelete: () => void;
 }) {
   const category = categorize(entry);
   const [busy, setBusy] = useState(false);
 
   async function deleteEntry(event: React.MouseEvent) {
     event.stopPropagation();
-    if (!confirm(`Delete ${entry.name}?`)) return;
-    setBusy(true);
-    try {
-      await invoke("delete_workspace_file", { path: entry.path });
-      await onRefresh();
-    } finally {
-      setBusy(false);
-    }
+    onDelete();
   }
 
   return (
@@ -309,12 +330,14 @@ function OutputDetailModal({
   entry,
   onClose,
   onAskClaude,
-  onRefresh
+  onRefresh,
+  onDelete
 }: {
   entry: WorkspaceEntry;
   onClose: () => void;
   onAskClaude: (prompt: string) => void;
   onRefresh: () => Promise<void>;
+  onDelete: () => void;
 }) {
   const category = categorize(entry);
   const [preview, setPreview] = useState<FilePreview | null>(null);
@@ -340,15 +363,7 @@ function OutputDetailModal({
   }, [entry.path, isPreviewable]);
 
   async function deleteEntry() {
-    if (!confirm(`Delete ${entry.name}?`)) return;
-    setBusy(true);
-    try {
-      await invoke("delete_workspace_file", { path: entry.path });
-      await onRefresh();
-      onClose();
-    } finally {
-      setBusy(false);
-    }
+    onDelete();
   }
 
   return (
