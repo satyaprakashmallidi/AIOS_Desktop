@@ -380,3 +380,11 @@ def maybe_trigger_parent_synthesis(child_task_id: str) -> bool:
             # Race: somebody else flipped it already. Harmless.
             return False
     return True
+
+
+def delete_task(task_id: str) -> bool:
+    """Delete a task by ID. Returns True if a row was deleted."""
+    with closing(workspace.connect()) as conn:
+        cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        conn.commit()
+        return cur.rowcount > 0

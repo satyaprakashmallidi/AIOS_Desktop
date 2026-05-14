@@ -189,3 +189,43 @@ export interface Toast {
   type: "success" | "error" | "info";
   onDismiss?: () => void;
 }
+
+export function ConfirmModal({
+  open,
+  title,
+  message,
+  onConfirm,
+  onCancel,
+  confirmLabel = "OK",
+  cancelLabel = "Cancel",
+  danger = false
+}: {
+  open: boolean;
+  title?: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="confirm-modal-overlay" onClick={onCancel}>
+      <div className="confirm-modal-card" onClick={(e) => e.stopPropagation()}>
+        {title && <h3>{title}</h3>}
+        <p>{message}</p>
+        <div className="confirm-modal-actions">
+          <button className="button button-ghost" onClick={onCancel}>{cancelLabel}</button>
+          <button
+            className={`button ${danger ? "button-danger" : "button-primary"}`}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
