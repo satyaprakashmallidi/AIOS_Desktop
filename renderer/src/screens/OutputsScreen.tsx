@@ -66,16 +66,32 @@ export function OutputsScreen({
   outputs,
   shares,
   onAskClaude,
-  onRefresh
+  onRefresh,
+  initialOpenPath,
+  onInitialOpenConsumed
 }: {
   outputs: WorkspaceEntry[];
   shares: WorkspaceEntry[];
   onAskClaude: (prompt: string) => void;
   onRefresh: () => Promise<void>;
+  // When set, find the matching entry on mount and open it. Used to deep-link
+  // from chat-bubble attachment chips into the relevant output file.
+  initialOpenPath?: string | null;
+  onInitialOpenConsumed?: () => void;
 }) {
   const [filter, setFilter] = useState<CategoryId>("all");
   const [openEntry, setOpenEntry] = useState<WorkspaceEntry | null>(null);
   const [recentRuns, setRecentRuns] = useState<AutoTaskRun[]>([]);
+
+  useEffect(() => {
+    if (!initialOpenPath) return;
+    const allEntries = [...outputs, ...shares];
+    const match = allEntries.find((e) => e.path === initialOpenPath);
+    if (match) {
+      setOpenEntry(match);
+      onInitialOpenConsumed?.();
+    }
+  }, [initialOpenPath, outputs, shares, onInitialOpenConsumed]);
 
   useEffect(() => {
     if (!openEntry) return;

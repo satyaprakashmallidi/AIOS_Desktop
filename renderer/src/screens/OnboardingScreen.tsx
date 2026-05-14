@@ -152,16 +152,14 @@ export function OnboardingScreen({
     setDraft(answers[onboardingQuestions[last]?.id] ?? "");
   }
 
-  async function skipProfile() {
-    setSaving(true);
+  function skipProfile() {
+    // Match the Next-button flow: don't immediately bounce into chat, route
+    // through the stage-3 "Ready" summary so the user gets the same
+    // confirmation card and clicks "Start using AIOS" themselves. The
+    // existing finish() handler is what actually persists onboarding state
+    // and navigates, so we don't duplicate that work here.
     setSetupMessage(null);
-    try {
-      await invoke("complete_onboarding", { answers });
-      await onRefreshWorkspace();
-      onNavigate("command");
-    } finally {
-      setSaving(false);
-    }
+    setStage("finish");
   }
 
   function jumpToLayer(layer: (typeof profileLayers)[number]) {

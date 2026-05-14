@@ -273,7 +273,8 @@ export function CommandScreen({
   onSessionsChange,
   onRefreshWorkspace,
   onNavigate,
-  onNewChat
+  onNewChat,
+  onOpenAttachment
 }: {
   claude: ClaudeStatus | null;
   onboarding: OnboardingState | null;
@@ -289,6 +290,7 @@ export function CommandScreen({
   onRefreshWorkspace: () => Promise<void>;
   onNavigate: (screen: Screen) => void;
   onNewChat?: () => void | Promise<void>;
+  onOpenAttachment?: (attachment: import("../types").ChatAttachment) => void;
 }) {
   const [runtimeMeta, setRuntimeMeta] = useState<{ sessionId?: string; durationMs?: number; costUsd?: number } | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -1243,6 +1245,23 @@ export function CommandScreen({
                       <span>Claude is thinking</span>
                     </div>
                   )}
+                  {message.role === "assistant" && message.attachments && message.attachments.length > 0 ? (
+                    <div className="aios-attachment-list">
+                      {message.attachments.map((att) => (
+                        <button
+                          key={`${att.kind}:${att.path}`}
+                          type="button"
+                          className={`aios-attachment-chip kind-${att.kind}`}
+                          onClick={() => onOpenAttachment?.(att)}
+                          title={`Open ${att.kind === "plan" ? "plan" : "output"} in AIOS`}
+                        >
+                          <FileText size={14} />
+                          <span className="aios-attachment-name">{att.filename}</span>
+                          <span className="aios-attachment-kind">{att.kind === "plan" ? "Plan" : "Output"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 {message.role === "assistant" && message.content.trim() ? <MessageActions content={message.content} /> : null}
               </article>

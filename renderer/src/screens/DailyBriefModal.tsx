@@ -148,14 +148,25 @@ export function DailyBriefModal({ status, claude, onAcknowledge, onOpenBriefsPag
 
         <div className="daily-brief-actions">
           {!error ? (
-            <button
-              type="button"
-              className="daily-brief-secondary"
-              onClick={openBriefsPage}
-              disabled={loading}
-            >
-              View past briefs
-            </button>
+            <div className="daily-brief-actions-secondary">
+              <button
+                type="button"
+                className="daily-brief-secondary"
+                onClick={openBriefsPage}
+                disabled={loading}
+              >
+                View past briefs
+              </button>
+              <button
+                type="button"
+                className="daily-brief-secondary"
+                onClick={acknowledge}
+                disabled={loading}
+                title="Dismiss the modal — today's brief keeps generating in the background and lands in the Briefs tab"
+              >
+                Skip for now
+              </button>
+            </div>
           ) : <span />}
           <button
             type="button"

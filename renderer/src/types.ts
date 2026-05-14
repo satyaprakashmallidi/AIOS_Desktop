@@ -244,6 +244,18 @@ export interface ClaudeStatus {
   runtimeError?: string;
 }
 
+export interface ChatAttachment {
+  // Workspace area the file lives in — drives which screen we route to when
+  // the chip is clicked. Currently only used for plans and outputs surfaced
+  // through WhatsApp Remote, but the shape is generic enough to extend later.
+  kind: "plan" | "output";
+  // Workspace-relative path (e.g. "plans/2026-05-14-jokes-plan.md") so it can
+  // be matched against WorkspaceEntry.path on the destination screen.
+  path: string;
+  // Display label shown inside the chip.
+  filename: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -253,6 +265,11 @@ export interface ChatMessage {
   // listener fills in `content` by matching this id. Cleared when `done` fires.
   // Without this, navigating away from chat mid-stream would lose the response.
   streamId?: string | null;
+  // Optional file chips rendered under the message body. Populated today by
+  // the WhatsApp Remote scanner when a plan or output PDF has been delivered;
+  // clicking a chip jumps to the matching Plans / Outputs screen with that
+  // file pre-opened.
+  attachments?: ChatAttachment[];
 }
 
 export interface ChatSession {

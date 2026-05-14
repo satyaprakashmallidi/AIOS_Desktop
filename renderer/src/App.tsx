@@ -25,6 +25,7 @@ import { invoke } from "./lib/api";
 import { buildConnections, buildContextSections } from "./lib/workspace-view";
 import { NavItem, StatusBadge } from "./components/ui";
 import { BrandMark } from "./components/BrandMark";
+import { AutoUpdateBanner } from "./components/AutoUpdateBanner";
 import { CommandScreen } from "./screens/CommandScreen";
 import { AutoTasksScreen } from "./screens/AutoTasksScreen";
 import { ContextScreen } from "./screens/ContextScreen";
@@ -160,6 +161,14 @@ function App() {
   const [plans, setPlans] = useState<WorkspaceEntry[]>([]);
   const [shares, setShares] = useState<WorkspaceEntry[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  // When the user clicks an attachment chip in the chat (e.g. a plan PDF
+  // delivered through WhatsApp Remote), we route to the matching screen and
+  // pass this path down so the screen pre-opens the file. Cleared once the
+  // destination screen has consumed it.
+  const [pendingAttachmentOpen, setPendingAttachmentOpen] = useState<{
+    kind: "plan" | "output";
+    path: string;
+  } | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -176,11 +185,31 @@ function App() {
   // (which screen to show), and the session list (sidebar). Everything else is
   // deferred to refreshWorkspaceBackground after splash dismisses.
   async function refreshWorkspaceCritical(): Promise<{ workspace: WorkspaceInfo; sessions: ChatSession[] }> {
+    // The Python sidecar can take 2–5 s (sometimes longer on first launch) to
+    // become RPC-ready. During that window IPC calls reject with HOST_MISSING
+    // / connection-refused style errors. Without retry the splash would fail
+    // hard immediately and show the "Retry" button before the sidecar even
+    // had a chance — terrible first impression. Retry quietly for up to ~15 s,
+    // then let the outer .catch handle it (the existing 10 s slow-loading hook
+    // already surfaces a Retry button as a separate safety net).
+    const deadline = Date.now() + 15000;
+    async function withWarmupRetry<T>(call: () => Promise<T>): Promise<T> {
+      let lastErr: unknown;
+      while (Date.now() < deadline) {
+        try { return await call(); }
+        catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    }
+
     const [workspaceInfo, onboardingState, sessionList, themeSetting] = await Promise.all([
-      invoke<WorkspaceInfo>("get_workspace_info"),
-      invoke<OnboardingState>("get_onboarding_state"),
-      invoke<ChatSession[]>("get_sessions"),
-      invoke<{ value: string | null }>("get_setting", { key: "theme" }).catch(() => ({ value: "auto" }))
+      withWarmupRetry(() => invoke<WorkspaceInfo>("get_workspace_info")),
+      withWarmupRetry(() => invoke<OnboardingState>("get_onboarding_state")),
+      withWarmupRetry(() => invoke<ChatSession[]>("get_sessions")),
+      withWarmupRetry(() => invoke<{ value: string | null }>("get_setting", { key: "theme" })).catch(() => ({ value: "auto" }))
     ]);
 
     let nextSessions = sessionList;
@@ -337,6 +366,15 @@ function App() {
         window.clearTimeout(slowTimer);
         setLoading(false);
       });
+  }, []);
+
+  // Tear down the index.html boot splash as soon as React's tree is on
+  // screen. The in-React splash (rendered when `loading` is true) takes over
+  // visually, so the transition is seamless. Without this, the inline splash
+  // would stay forever on top of the app once it had served its purpose.
+  useEffect(() => {
+    const boot = document.getElementById("aios-boot-splash");
+    if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
   }, []);
 
   // Apply theme to document
@@ -771,6 +809,8 @@ function App() {
           </div>
         </header>
 
+        <AutoUpdateBanner platform={workspace?.platform ?? null} />
+
         {error ? <div className="banner banner-danger">{error}</div> : null}
 
         {screen === "command" && !setupRequired ? (
@@ -799,6 +839,10 @@ function App() {
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               }
+            }}
+            onOpenAttachment={(att) => {
+              setPendingAttachmentOpen({ kind: att.kind, path: att.path });
+              setScreen(att.kind === "plan" ? "plans" : "outputs");
             }}
           />
           </div>
@@ -834,6 +878,8 @@ function App() {
             shares={shares}
             onAskClaude={openInNewChat}
             onRefresh={refreshWorkspace}
+            initialOpenPath={pendingAttachmentOpen?.kind === "output" ? pendingAttachmentOpen.path : null}
+            onInitialOpenConsumed={() => setPendingAttachmentOpen(null)}
           />
           </div>
         ) : null}
@@ -844,6 +890,8 @@ function App() {
             entries={plans}
             onAskClaude={openInNewChat}
             onRefresh={refreshWorkspace}
+            initialOpenPath={pendingAttachmentOpen?.kind === "plan" ? pendingAttachmentOpen.path : null}
+            onInitialOpenConsumed={() => setPendingAttachmentOpen(null)}
           />
           </div>
         ) : null}

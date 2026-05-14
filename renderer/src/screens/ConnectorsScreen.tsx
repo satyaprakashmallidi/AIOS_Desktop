@@ -37,6 +37,28 @@ interface Connector {
   Icon: React.ComponentType<{ size?: number }>;
   logoUrl?: string;
   comingSoon?: boolean;
+  // Most connectors authorize via Composio OAuth through the relay; a small
+  // number (currently just WhatsApp Personal via Baileys) auth locally on the
+  // device. The flag tells `connect()` to skip the OAuth path and run the
+  // local flow instead — for baileys-qr, that means opening a QR-pairing modal
+  // backed by the whatsapp_start / whatsapp_stop IPC commands.
+  localAuth?: "baileys-qr";
+}
+
+// Format a raw WhatsApp phone number (digits only, e.g. "917013252723") into
+// a readable display string like "+91 70132 52723". Falls back to a +<digits>
+// prefix when the country-code split isn't obvious.
+function formatPhoneNumber(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const digits = String(raw).replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return `+${digits}`;
 }
 
 const CONNECTOR_CATALOG: Connector[] = [
@@ -127,10 +149,18 @@ const CONNECTOR_CATALOG: Connector[] = [
   },
   {
     service: "whatsapp",
-    label: "WhatsApp",
+    label: "WhatsApp Business",
     description: "Send WhatsApp Business messages, manage templates, read profile.",
     Icon: MessageCircle,
     logoUrl: "https://api.iconify.design/logos:whatsapp-icon.svg"
+  },
+  {
+    service: "whatsapp-personal",
+    label: "WhatsApp Personal",
+    description: "Link your own WhatsApp number to chat with AIOS from your phone.",
+    Icon: MessageCircle,
+    logoUrl: "https://api.iconify.design/logos:whatsapp-icon.svg",
+    localAuth: "baileys-qr"
   },
   {
     service: "twitter",
@@ -221,14 +251,36 @@ interface ConnectorView extends Connector {
   errorMessage?: string;
 }
 
+// Status of the locally-authed WhatsApp Personal worker, surfaced from the
+// scanner's whatsapp_update broadcasts. mergeConnections uses it to drive the
+// WhatsApp Personal card without going through the relay.
+interface WhatsAppPersonalState {
+  status: "disconnected" | "qr" | "authenticating" | "connected";
+  phoneNumber: string | null;
+}
+
 function mergeConnections(
   catalog: Connector[],
   live: RelayConnection[],
   stalled: Set<string>,
-  localLabels: Record<string, string>
+  localLabels: Record<string, string>,
+  whatsappPersonal: WhatsAppPersonalState
 ): ConnectorView[] {
   const byService = new Map(live.map((c) => [c.service, c]));
   return catalog.map((entry) => {
+    // Locally-authed connectors (today only WhatsApp Personal via Baileys)
+    // skip the relay entirely; their status comes from the device's worker.
+    if (entry.localAuth === "baileys-qr") {
+      let status: ConnectorStatus;
+      if (whatsappPersonal.status === "connected") status = "connected";
+      else if (whatsappPersonal.status === "qr" || whatsappPersonal.status === "authenticating") status = "connecting";
+      else status = "not_connected";
+      return {
+        ...entry,
+        status,
+        accountLabel: whatsappPersonal.phoneNumber ? formatPhoneNumber(whatsappPersonal.phoneNumber) : undefined
+      };
+    }
     const found = byService.get(entry.service);
     if (!found) {
       return { ...entry, status: "not_connected" as ConnectorStatus };
@@ -349,12 +401,50 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [credsModalService, setCredsModalService] = useState<string | null>(null);
+  // WhatsApp Personal state, driven by whatsapp_update broadcasts from the
+  // main process. Drives both the card status pill on the Connectors grid AND
+  // the open/closed state of the QR pairing modal.
+  const [whatsappPersonal, setWhatsappPersonal] = useState<WhatsAppPersonalState>({
+    status: "disconnected",
+    phoneNumber: null
+  });
+  const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
+  const [waModalOpen, setWaModalOpen] = useState(false);
   // Each entry tracks an active poll so cancel can abort + clean up the right row.
   const activePollsRef = useRef<Map<string, { aborted: boolean; connectionId: string }>>(new Map());
 
+  // Pull initial WhatsApp Personal status on mount + subscribe to live updates.
+  // The worker may auto-start at app launch (when a saved session exists), so
+  // the card needs to reflect that without the user having to interact.
+  useEffect(() => {
+    invoke<{ status: WhatsAppPersonalState["status"]; qr: string | null; phoneNumber: string | null }>("whatsapp_status")
+      .then((res) => {
+        if (res?.status) setWhatsappPersonal({ status: res.status, phoneNumber: res.phoneNumber ?? null });
+        if (res?.qr) setWhatsappQr(res.qr);
+      })
+      .catch(() => undefined);
+    const off = window.aios.onUpdateState((data: any) => {
+      if (data?.state !== "whatsapp_update") return;
+      setWhatsappPersonal({
+        status: data.status,
+        phoneNumber: data.phoneNumber ?? null
+      });
+      setWhatsappQr(data.qr ?? null);
+    });
+    return off;
+  }, []);
+
+  // Auto-dismiss the QR modal a moment after a successful pairing.
+  useEffect(() => {
+    if (!waModalOpen) return;
+    if (whatsappPersonal.status !== "connected") return;
+    const timer = window.setTimeout(() => setWaModalOpen(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [waModalOpen, whatsappPersonal.status]);
+
   const connectors = useMemo(
-    () => mergeConnections(CONNECTOR_CATALOG, liveConnections, stalledServices, localLabels),
-    [liveConnections, stalledServices, localLabels]
+    () => mergeConnections(CONNECTOR_CATALOG, liveConnections, stalledServices, localLabels, whatsappPersonal),
+    [liveConnections, stalledServices, localLabels, whatsappPersonal]
   );
   const connectedCount = useMemo(() => connectors.filter((c) => c.status === "connected").length, [connectors]);
   const totalActive = useMemo(() => connectors.filter((c) => !c.comingSoon).length, [connectors]);
@@ -479,6 +569,23 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   }
 
   async function connect(service: string) {
+    // Local-auth connectors (WhatsApp Personal via Baileys): no relay, no
+    // OAuth — kick off the device-local worker and open the QR modal. The
+    // modal subscribes to the same whatsapp_update events the card listens
+    // to, so all three (card, modal, worker) stay in sync.
+    const entry = CONNECTOR_CATALOG.find((c) => c.service === service);
+    if (entry?.localAuth === "baileys-qr") {
+      setError(null);
+      setWaModalOpen(true);
+      try {
+        await invoke("whatsapp_start");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`WhatsApp scanner failed to start: ${msg}`);
+        setWaModalOpen(false);
+      }
+      return;
+    }
     // Services that need user-provided fields (e.g. WhatsApp WABA ID) get a
     // credentials modal first; the actual initiate happens in submitCreds().
     if (CONNECTOR_FIELD_REQUIREMENTS[service]) {
@@ -592,6 +699,20 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
   }
 
   async function disconnect(service: string, connectionId?: string) {
+    // Local-auth connectors: tear down the Baileys worker via the existing
+    // whatsapp_stop IPC. The scanner clears its session folder so the next
+    // Connect shows a fresh QR.
+    const entry = CONNECTOR_CATALOG.find((c) => c.service === service);
+    if (entry?.localAuth === "baileys-qr") {
+      setError(null);
+      try {
+        await invoke("whatsapp_stop");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`WhatsApp scanner failed to stop: ${msg}`);
+      }
+      return;
+    }
     setBusyService(service);
     setError(null);
     // Optimistically clear the card right away so the user sees feedback.
@@ -673,8 +794,6 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
               />
           ))}
         </div>
-
-        <WhatsAppScanner />
       </div>
       {credsModalService && CONNECTOR_FIELD_REQUIREMENTS[credsModalService] && (
         <ConnectorCredsModal
@@ -683,6 +802,23 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
           requirements={CONNECTOR_FIELD_REQUIREMENTS[credsModalService]}
           onCancel={() => setCredsModalService(null)}
           onSubmit={(values) => submitCreds(credsModalService, values)}
+        />
+      )}
+      {waModalOpen && (
+        <WhatsAppQrModal
+          status={whatsappPersonal.status}
+          qr={whatsappQr}
+          phoneNumber={whatsappPersonal.phoneNumber}
+          onClose={async () => {
+            setWaModalOpen(false);
+            // If the user dismisses while pairing is in progress, stop the
+            // worker so we don't leave a half-paired session behind. If we're
+            // already connected, leave it alone — they're just closing the
+            // dialog, not disconnecting.
+            if (whatsappPersonal.status === "qr" || whatsappPersonal.status === "authenticating") {
+              try { await invoke("whatsapp_stop"); } catch { /* non-fatal */ }
+            }
+          }}
         />
       )}
     </section>
@@ -913,142 +1049,72 @@ function ConnectorCard({
   );
 }
 
-function WhatsAppScanner() {
-  const [status, setStatus] = useState<"disconnected" | "qr" | "authenticating" | "connected">("disconnected");
-  const [qr, setQr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
+function WhatsAppQrModal({
+  status,
+  qr,
+  phoneNumber,
+  onClose
+}: {
+  status: "disconnected" | "qr" | "authenticating" | "connected";
+  qr: string | null;
+  phoneNumber: string | null;
+  onClose: () => void;
+}) {
+  // Close on Escape — same affordance every other modal in the app uses.
   useEffect(() => {
-    invoke("whatsapp_status").then((res: any) => {
-      if (res?.status) setStatus(res.status);
-      if (res?.qr) setQr(res.qr);
-    });
-    const off = window.aios.onUpdateState((data: any) => {
-      if (data.state === "whatsapp_update") {
-        setStatus(data.status);
-        setQr(data.qr ?? null);
-      }
-    });
-    return off;
-  }, []);
-
-  async function handleStart() {
-    setBusy(true);
-    try { await invoke("whatsapp_start"); } finally { setBusy(false); }
-  }
-
-  async function handleStop() {
-    setBusy(true);
-    try {
-      await invoke("whatsapp_stop");
-      setStatus("disconnected");
-      setQr(null);
-    } finally { setBusy(false); }
-  }
-
-  // Inline SVG icons — no emoji
-  const StatusDot = ({ color }: { color: string }) => (
-    <div style={{ 
-      width: 8, 
-      height: 8, 
-      borderRadius: "50%", 
-      background: color, 
-      marginRight: 8,
-      boxShadow: `0 0 8px ${color}66`,
-      flexShrink: 0
-    }} />
-  );
-  const IconLoader = () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5, animation: "spin 1s linear infinite" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-    </svg>
-  );
-  const IconQr = () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5 }}>
-      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-      <path d="M14 14h.01M18 14h.01M14 18h.01M18 18h.01M21 14v4M14 21h4"/>
-    </svg>
-  );
-  const IconPhone = () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", verticalAlign: "middle", marginRight: 5 }}>
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.18 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-    </svg>
-  );
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
-    <div style={{ marginTop: 40, padding: 24, background: "var(--surface-soft)", borderRadius: 12, border: "1px solid var(--border)" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: status === "disconnected" ? 0 : 20 }}>
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", margin: "0 0 4px", display: "flex", alignItems: "center", gap: 8 }}>
-            <IconPhone />
-            Personal WhatsApp Remote
-          </h2>
-          <p style={{ fontSize: 13, color: "var(--gray-500)", margin: 0 }}>
-            {status === "connected" ? "Connected — text yourself on WhatsApp to trigger AIOS tasks." :
-             status === "qr" ? "Open WhatsApp → Linked Devices → Scan this QR code." :
-             status === "authenticating" ? "Connecting to WhatsApp, please wait..." :
-             "Connect your personal WhatsApp to control AIOS remotely."}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          {status === "connected" && (
-            <span style={{ color: "var(--ink)", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center" }}>
-              <StatusDot color="#22c55e" />Connected
-            </span>
-          )}
-          {status === "disconnected" && (
-            <span style={{ color: "var(--gray-500)", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
-              <StatusDot color="#ef4444" />Disconnected
-            </span>
-          )}
-          {status === "authenticating" && (
-            <span style={{ color: "#f59e0b", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
-              <IconLoader />Connecting...
-            </span>
-          )}
-          {status === "qr" && (
-            <span style={{ color: "#3b82f6", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center" }}>
-              <IconQr />Scan QR Code
-            </span>
-          )}
-          {status === "disconnected" ? (
-            <button className="connector-btn is-primary" onClick={handleStart} disabled={busy}>
-              {busy ? "Starting..." : "Start Scanner"}
-            </button>
-          ) : (
-            <button className="connector-btn is-secondary" onClick={handleStop} disabled={busy}>Disconnect</button>
-          )}
-        </div>
+    <div className="wa-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="wa-modal-title" onClick={onClose}>
+      <div className="wa-modal-card" onClick={(e) => e.stopPropagation()}>
+        <header className="wa-modal-head">
+          <div>
+            <p className="wa-modal-eyebrow">Connector</p>
+            <h2 id="wa-modal-title">Link your <em>WhatsApp</em></h2>
+          </div>
+          <button type="button" className="wa-modal-close" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </header>
+
+        {status === "qr" && qr ? (
+          <div className="wa-modal-body wa-modal-body-qr">
+            <ol className="wa-modal-steps">
+              <li>Open <strong>WhatsApp</strong> on your phone</li>
+              <li>Tap <strong>Settings → Linked Devices</strong></li>
+              <li>Tap <strong>Link a Device</strong> and scan this code</li>
+            </ol>
+            <div className="wa-modal-qr">
+              <img src={qr} alt="WhatsApp pairing QR code" />
+            </div>
+            <p className="wa-modal-status wa-modal-status-pending">Waiting for scan…</p>
+          </div>
+        ) : status === "authenticating" ? (
+          <div className="wa-modal-body wa-modal-body-status">
+            <Loader2 size={28} className="spin wa-modal-spinner" />
+            <p className="wa-modal-status">Linking your account…</p>
+            <p className="wa-modal-sub">This usually takes 5–15 seconds.</p>
+          </div>
+        ) : status === "connected" ? (
+          <div className="wa-modal-body wa-modal-body-status">
+            <div className="wa-modal-check"><Check size={28} /></div>
+            <p className="wa-modal-status wa-modal-status-ok">
+              Connected{phoneNumber ? ` as ${formatPhoneNumber(phoneNumber)}` : ""}
+            </p>
+            <p className="wa-modal-sub">Text yourself on WhatsApp to talk to AIOS.</p>
+          </div>
+        ) : (
+          <div className="wa-modal-body wa-modal-body-status">
+            <Loader2 size={28} className="spin wa-modal-spinner" />
+            <p className="wa-modal-status">Starting…</p>
+          </div>
+        )}
       </div>
-
-      {/* QR Code */}
-      {status === "qr" && qr && (
-        <div style={{ padding: 24, background: "var(--surface)", borderRadius: 10, textAlign: "center", border: "1px solid var(--border)" }}>
-          <img src={qr} alt="WhatsApp QR Code" style={{ width: 240, height: 240, display: "block", margin: "0 auto", borderRadius: 8 }} />
-          <p style={{ fontSize: 13, color: "var(--gray-500)", marginTop: 14, marginBottom: 0 }}>
-            Open WhatsApp on your phone → tap <strong>Linked Devices</strong> → <strong>Link a Device</strong>
-          </p>
-        </div>
-      )}
-
-      {/* Authenticating */}
-      {status === "authenticating" && (
-        <div style={{ padding: 28, textAlign: "center", color: "var(--gray-500)", fontSize: 13 }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite", display: "block", margin: "0 auto 12px" }}>
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-          </svg>
-          Connecting to WhatsApp, this takes 5–15 seconds...
-        </div>
-      )}
-
-      {/* Connected */}
-      {status === "connected" && (
-        <div style={{ padding: 14, background: "var(--surface-soft)", borderRadius: 10, border: "1px solid var(--border)", fontSize: 13, color: "var(--gray-600)", display: "flex", alignItems: "center", gap: 10 }}>
-          <StatusDot color="#22c55e" />
-          <span>WhatsApp connected. Text yourself <strong>any message</strong> to trigger an AIOS task. Try sending <code>ping</code> to verify.</span>
-        </div>
-      )}
     </div>
   );
 }

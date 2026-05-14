@@ -37,11 +37,17 @@ function cleanMarkdownPreview(raw: string | null | undefined): string {
 export function PlansScreen({
   entries,
   onAskClaude,
-  onRefresh
+  onRefresh,
+  initialOpenPath,
+  onInitialOpenConsumed
 }: {
   entries: WorkspaceEntry[];
   onAskClaude: (prompt: string) => void;
   onRefresh: () => Promise<void>;
+  // When set, find the matching entry on mount and open it. Used to deep-link
+  // from chat-bubble attachment chips into the relevant plan file.
+  initialOpenPath?: string | null;
+  onInitialOpenConsumed?: () => void;
 }) {
   const [planPrompt, setPlanPrompt] = useState("");
   const [openEntry, setOpenEntry] = useState<WorkspaceEntry | null>(null);
@@ -54,6 +60,15 @@ export function PlansScreen({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [openEntry]);
+
+  useEffect(() => {
+    if (!initialOpenPath) return;
+    const match = entries.find((e) => e.path === initialOpenPath);
+    if (match) {
+      setOpenEntry(match);
+      onInitialOpenConsumed?.();
+    }
+  }, [initialOpenPath, entries, onInitialOpenConsumed]);
 
   return (
     <section className="plans-screen">

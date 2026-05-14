@@ -2701,6 +2701,74 @@ button:active:not(:disabled) { transform: scale(0.98); }
   padding-left: 4px;
 }
 
+/* Attachment chips — surfaced under an assistant message when a plan or output
+   file was delivered to WhatsApp Remote as a PDF. Click jumps to the matching
+   Plans/Outputs screen with that file open. */
+.aios-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  /* Use the full bubble width so each chip can stretch out cleanly instead of
+     being squeezed by the inline-flex's default shrink behavior. */
+  width: 100%;
+}
+
+.aios-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(61, 90, 74, 0.05);
+  border: 1px solid rgba(61, 90, 74, 0.18);
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  /* Don't shrink below content — wrap to a new line via parent's flex-wrap
+     instead of squeezing the chip into something illegible. */
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.aios-attachment-chip:hover {
+  background: rgba(61, 90, 74, 0.09);
+  border-color: rgba(61, 90, 74, 0.32);
+}
+
+.aios-attachment-chip:active {
+  transform: translateY(1px);
+}
+
+.aios-attachment-chip svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.aios-attachment-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Allow truncation only when the chip itself is constrained by max-width
+     above; in normal cases the filename renders in full. */
+  min-width: 0;
+}
+
+.aios-attachment-kind {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  padding-left: 10px;
+  border-left: 1px solid rgba(61, 90, 74, 0.18);
+  /* Always one line — "OUTPUT" / "PLAN" must never wrap into "OUTPU / T". */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .aios-message-body p,
 .aios-message-body li {
   margin: 0;
@@ -5868,6 +5936,11 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
+.daily-brief-actions-secondary {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
 .daily-brief-secondary {
   background: transparent;
   border: none;
@@ -6842,6 +6915,112 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   width: fit-content;
 }
 .connectors-status-pill .spin { color: var(--sage); }
+
+/* Auto-update banner — slim sage strip pinned to the top of the app shell,
+   above all screens. Renders only when there's something actionable; hidden
+   otherwise. Designed to nudge, not interrupt. */
+.auto-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 18px 9px 22px;
+  background: rgba(61, 90, 74, 0.07);
+  border-bottom: 1px solid rgba(61, 90, 74, 0.20);
+  color: var(--ink);
+  font-size: 13px;
+  position: relative;
+  z-index: 50;
+}
+.auto-update-banner.is-ready {
+  background: rgba(61, 90, 74, 0.12);
+  border-bottom-color: rgba(61, 90, 74, 0.32);
+}
+.auto-update-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+.auto-update-banner-text svg {
+  color: var(--sage, #3d5a4a);
+  flex-shrink: 0;
+}
+.auto-update-banner-hint {
+  color: var(--text-soft, #6b7280);
+  font-size: 12.5px;
+}
+.auto-update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.auto-update-banner-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-soft, #6b7280);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.auto-update-banner-secondary:hover:not(:disabled) {
+  color: var(--ink);
+  background: rgba(61, 90, 74, 0.06);
+}
+.auto-update-banner-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.auto-update-banner-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  background: var(--sage, #3d5a4a);
+  border: 1px solid var(--sage, #3d5a4a);
+  color: #fafaf7;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.auto-update-banner-primary:hover:not(:disabled) {
+  background: #2f4a3b;
+}
+.auto-update-banner-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.auto-update-banner.is-progress {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.auto-update-banner-progress {
+  height: 3px;
+  background: rgba(61, 90, 74, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.auto-update-banner-progress-fill {
+  height: 100%;
+  background: var(--sage, #3d5a4a);
+  transition: width 220ms ease-out;
+}
+.auto-update-banner .spin {
+  animation: spin 1s linear infinite;
+  color: var(--sage, #3d5a4a);
+}
 .connectors-error {
   padding: 12px 16px;
   background: rgba(220, 38, 38, 0.06);
@@ -7644,6 +7823,160 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   justify-content: flex-end;
   gap: 10px;
   padding: 18px 22px 22px;
+}
+
+/* ─── WhatsApp Personal QR pairing modal ────────────────────────────────── */
+.wa-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 13, 13, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 24px;
+}
+.wa-modal-card {
+  background: var(--surface, #ffffff);
+  color: var(--text, #1a1a1a);
+  border-radius: 18px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  animation: modalEnter 220ms cubic-bezier(.22,.61,.36,1);
+  border: 1px solid var(--border, rgba(0,0,0,0.08));
+  overflow: hidden;
+}
+.wa-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.wa-modal-eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft, #6b7280);
+}
+.wa-modal-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.wa-modal-head h2 em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--sage, #3d5a4a);
+}
+.wa-modal-close {
+  background: transparent;
+  border: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-soft, #6b7280);
+}
+.wa-modal-close:hover { background: var(--surface-soft, rgba(0,0,0,0.04)); }
+
+.wa-modal-body {
+  padding: 24px 24px 28px;
+}
+.wa-modal-body-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 24px 32px;
+}
+.wa-modal-body-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.wa-modal-steps {
+  margin: 0;
+  padding: 0 0 0 22px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-soft, #555);
+  align-self: stretch;
+}
+.wa-modal-steps li strong { color: var(--ink); font-weight: 500; }
+
+.wa-modal-qr {
+  background: #ffffff;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border, rgba(0,0,0,0.08));
+}
+.wa-modal-qr img {
+  display: block;
+  width: 240px;
+  height: 240px;
+  border-radius: 6px;
+}
+
+.wa-modal-status {
+  margin: 14px 0 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.wa-modal-status-pending {
+  color: var(--text-soft, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.wa-modal-status-pending::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sage, #3d5a4a);
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+@keyframes pulseDot {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+.wa-modal-status-ok { color: var(--sage, #3d5a4a); }
+.wa-modal-sub {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-soft, #6b7280);
+}
+
+.wa-modal-spinner {
+  color: var(--sage, #3d5a4a);
+  animation: spin 1s linear infinite;
+}
+.wa-modal-check {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(61, 90, 74, 0.12);
+  color: var(--sage, #3d5a4a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ─── Tasks (v2 — multi-view dashboard, v0.1.16+) ────────────────────────── */

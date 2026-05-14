@@ -118,9 +118,12 @@ Service slug → env var: `service.toUpperCase().replace(/-/g, "_")` → `COMPOS
 | Google Sheets | `ac_289PHe7QdUXw` | `google-sheets` | Live (v0.1.9+) | DataOS |
 | Outlook | `ac_3ImWpplXGnoc` | `outlook` | Live (v0.1.11+) | (no module yet) |
 | LinkedIn | `ac_RbmbGiYtSqX1` | `linkedin` | Live (v0.1.11+) | (no module yet) |
-| WhatsApp | `ac_OOszVgWp2Xix` | `whatsapp` | Live (v0.1.15+) | (no module yet) |
+| WhatsApp Business | `ac_OOszVgWp2Xix` | `whatsapp` | Live (v0.1.15+) | (no module yet) |
 | X (Twitter) | `ac_bOjT46HAfYwP` | `twitter` | Live (v0.1.16+) | (no module yet) |
 | Telegram | `ac_W1_RWREtn21R` | `telegram` | Live (v0.1.16+) | (no module yet — Daily Brief still uses TELEGRAM_BOT_TOKEN env var) |
+| Facebook | `ac_NzprCc18CEWA` | `facebook` | Live (v0.1.17+) | (no module yet) |
+| Instagram | `ac_XzChOFJu_1mf` | `instagram` | Live (v0.1.17+) | (no module yet) |
+| WhatsApp Personal | n/a (local Baileys, not Composio) | `whatsapp-personal` | Live (v0.1.19+) | Self-chat → AIOS task trigger |
 
 All 15 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. **Auth flow split:** OAuth toolkits open the system browser for authorization; **API-key toolkits (Telegram)** prompt for the key in a modal and complete synchronously — no browser. See `CONNECTOR_FIELD_REQUIREMENTS` in `ConnectorsScreen.tsx`. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
 
@@ -405,3 +408,111 @@ End user prerequisites after install:
 - **Single-column editorial onboarding screens** — sage italic accent, sane typography, no purple gradients
 
 When in doubt: read the existing screens for vocabulary, grep for similar patterns before inventing new ones.
+
+---
+
+## v0.1.19 architecture additions
+
+### First-launch boot performance
+
+The app used to show ~30 s of white window on first launch. v0.1.19 layered three fixes so cold start now feels instant.
+
+1. **Inline boot splash** (`renderer/index.html`) — a sage paper background + italic "aios" mark + spinner + "Loading your workspace…" is hardcoded in the HTML with inline `<style>`. Paints the moment Electron loads the page, well before the React bundle parses. Once React mounts, an effect in `App.tsx` removes `#aios-boot-splash` from the DOM and the in-React splash takes over seamlessly. **Never add an external stylesheet load to index.html** — the whole point is that no resource has to download before something shows.
+
+2. **`show: false` + `ready-to-show`** (`main/main.ts:createWindow`) — the `BrowserWindow` is created hidden and only shown when the first renderer frame is ready. A 1.5 s fallback `setTimeout` shows it anyway if the event somehow doesn't fire. Combined with #1, the window appears already painted — no flash of background-only frame.
+
+3. **Fast workspace bootstrap** (`main/workspace.ts`) — `ensureRuntimeWorkspace()` is now **mkdir-only** (creates `data/` and `logs/` and returns). The heavy `copyDirClean(starterKit → workspace)` was extracted into a separate `backfillStarterKit()` that runs AFTER `ready-to-show` via `setImmediate`. First launch no longer pays ~0.5–2 s of synchronous file I/O on the main process.
+
+4. **IPC critical-path warmup retry** (`renderer/src/App.tsx:refreshWorkspaceCritical`) — the four critical IPC calls (`get_workspace_info`, `get_onboarding_state`, `get_sessions`, `get_setting`) retry silently on failure for up to 15 s. During the Python sidecar's 2–5 s cold boot, IPC calls fail with `HOST_MISSING` — without retry the splash would surface the 10 s "Retry" button before the sidecar even had a chance.
+
+### Auto-update banner (Windows-only)
+
+`renderer/src/components/AutoUpdateBanner.tsx` is a slim top-of-window banner that subscribes to the existing `aios:update-state` events (broadcast from `main/main.ts:385-426`). Three visual states:
+
+- **`available`** — "Update vX.Y.Z available · [Skip] [Download now]". Skip persists to localStorage (`aios.autoUpdate.skippedVersion`) and hides the banner until a newer version is announced.
+- **`downloading`** — progress strip + percent. No buttons; electron-updater already auto-downloads on Windows.
+- **`ready`** — "Update vX.Y.Z is ready to install · [Later] [Install & restart]". Install calls `aios:install-update` IPC → `autoUpdater.quitAndInstall(true, true)` (silent + auto-relaunch).
+
+**Platform guard:** banner returns `null` on `platform !== "win32"`. Mac (unsigned) keeps the manual "open release page" fallback through Settings → General.
+
+**Boot timing:** banner has zero cost when hidden (returns `null` before any DOM). The auto-update check that drives it already ran after `ready-to-show` even before v0.1.19, so it's never on the critical path.
+
+### Chat-bubble file attachments
+
+`ChatMessage.attachments: ChatAttachment[]` (renderer/src/types.ts) — assistant messages can now carry a list of `{ kind: "plan" | "output", path, filename }`. Rendered as sage file chips under the message body in `CommandScreen.tsx`. Click → App.tsx's `setPendingAttachmentOpen` routes to Plans or Outputs screen and pre-opens that file's preview modal via the screen's new `initialOpenPath` / `onInitialOpenConsumed` props.
+
+Currently only the WhatsApp Remote PDF flow writes attachments to history (`main/whatsapp-scanner.ts:persistToHistory`). The renderer plumbing is generic, so future paths (chat-spawned plans, etc.) just need to populate the field.
+
+### WhatsApp Personal — hardened
+
+The personal WhatsApp Remote (Baileys-based) was rewritten this session for both UX and safety:
+
+**As a Connectors card.** Lives in `CONNECTOR_CATALOG` (`renderer/src/screens/ConnectorsScreen.tsx`) with `localAuth: "baileys-qr"`. The card branch in `connect()` opens `WhatsAppQrModal` instead of going through the relay. The old inline `<WhatsAppScanner />` block at the bottom of the page is gone.
+
+**Locked-down inbound filter** (`main/whatsapp-worker.js`). A message reaches AIOS only when **both** hold: `fromMe === true` (your account sent it) AND `remoteJid` is exactly your own number `@s.whatsapp.net` OR your own LID `@lid`. The old `(isLid && !isContact)` shortcut was catastrophically wrong — on modern WhatsApp every contact has an `@lid`, so outgoing messages to friends were being forwarded to AIOS.
+
+**Locked-down outbound** (`main/whatsapp-worker.js:sendToSelfOnly`). Every `sock.sendMessage` call goes through this single helper, which hardcodes the destination to `<myNumber>@s.whatsapp.net`. The `jid` parameter that used to flow through scanner→worker IPC was deleted entirely. AIOS cannot post to anyone's chat other than your own self-chat, even if a future bug tried to.
+
+**Persistent state files** (in `<userData>/`):
+- `wa-my-lid.txt` — the user's own LID, captured from `creds.update`. Persisted so it survives worker restarts even when Baileys hasn't redelivered it. Loaded at worker boot; saved every time it's seen.
+- `wa-processed-ids.json` — bounded LRU (cap 500) of `msg.key.id` values that have already been processed. Persisted so a WhatsApp post-reconnect history sync can't replay commands that already ran. Loaded at boot.
+
+Both files are deleted on `whatsapp_stop` so a re-pair under a different account starts clean.
+
+**Haiku for replies** (`main/whatsapp-scanner.ts`). Every `run_task` call from WhatsApp passes `model: "haiku"` — Sonnet/Opus felt broken at 5–15 s latency on a phone with no streaming UI. Haiku 4.5 brings casual replies down to 1–3 s.
+
+**PDF delivery for plans/outputs.** When Claude saves a plan or output during a WhatsApp run (detected via `[AIOS_ARTIFACT: plans/foo.md]` marker in the response), `markdownArtifactToPdf` renders the file via an offscreen `BrowserWindow` + `printToPDF`, and the worker sends it via `sendToSelfOnly({ document: { url: pdfPath }, ... })`. The text reply goes first, then the PDF — like a person dropping a file after typing.
+
+### Installer config (Windows)
+
+`package.json` `build` block:
+
+- `compression: "normal"` (was default LZMA/maximum). Makes the `.exe` self-extract noticeably faster when the user double-clicks. ~5–10 % larger file in exchange.
+- `nsis.differentialPackage: false`. Differential block-file generation adds time at both build and install finalization. Disabled until we actually need delta updates.
+
+`INSTALL.md` at the repo root documents the SmartScreen "Click More info → Run anyway" bypass for first-install users — paste-ready for GitHub Release notes.
+
+### Critical files added or rewritten in v0.1.19
+
+```
+renderer/src/components/
+  AutoUpdateBanner.tsx     NEW — Windows-only update banner, three states
+                              + per-version Skip persistence
+
+renderer/src/screens/
+  ConnectorsScreen.tsx     Adds WhatsApp Personal card via `localAuth: "baileys-qr"`,
+                              WhatsAppQrModal, mergeConnections branch, removed
+                              inline WhatsAppScanner block
+  CommandScreen.tsx        Renders attachment chips under assistant bubbles
+  PlansScreen.tsx          New initialOpenPath + onInitialOpenConsumed props
+  OutputsScreen.tsx        Same — deep-linkable file open
+  OnboardingScreen.tsx     Skip on Profile routes through Ready (setStage("finish"))
+  DailyBriefModal.tsx      "Skip for now" button (calls acknowledge → mark seen)
+
+renderer/index.html        Inline boot splash + paper-bg style (no external CSS)
+renderer/src/App.tsx       Boot-splash teardown effect; AutoUpdateBanner mount;
+                              IPC warmup retry; pendingAttachmentOpen state
+
+main/whatsapp-worker.js    sendToSelfOnly helper; processedMessageIds + disk
+                              persistence; captureMyLid via creds.update; tight
+                              fromMe + own-JID filter; document type handler
+main/whatsapp-scanner.ts   No-caption PDF delivery; attachment metadata in
+                              persistToHistory; model: "haiku"; phoneNumber
+                              tracked + broadcast; wa-*.txt cleanup on stop
+main/main.ts               BrowserWindow show:false + ready-to-show;
+                              backfillStarterKit after window shown;
+                              quitAndInstall(true, true) for silent updates
+main/workspace.ts          ensureRuntimeWorkspace fast path; backfillStarterKit
+
+package.json               compression: "normal"; nsis.differentialPackage: false
+INSTALL.md                 NEW — SmartScreen bypass + first-launch notes
+```
+
+### Verification checklist (post-v0.1.19)
+
+- Cold-start the installed app: paper-bg + spinner appears instantly; chat ready within ~3 s
+- Connectors page: WhatsApp Personal card appears alongside WhatsApp Business; both can be Connect / Disconnect independently
+- Send a message to your own WhatsApp self-chat: reply arrives in 1–3 s; agent chat thread shows the same exchange
+- Send a message to a friend on WhatsApp: NO AIOS reply to them, NO leak into the agent chat
+- Settings → Reset onboarding: Profile-stage "Skip for now" lands on the Ready summary, not on chat directly
+- Daily Brief modal: "Skip for now" dismisses; reopen the app today and the modal does NOT reappear; the brief shows up in the Briefs tab as normal

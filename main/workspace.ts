@@ -61,13 +61,32 @@ export function getSourceStarterKit(): string {
 // data, outputs, plans, shares, gtd, imports — those belong to the user).
 const INFRA_DIRS = ["module-installs", ".claude", "reference"];
 
+// FAST path used at startup. Only creates the bare-minimum directories the
+// Python sidecar needs to open the SQLite DB and start logging. The starter-
+// kit copy (which can be a few hundred ms of synchronous file I/O on first
+// launch) is deferred to `backfillStarterKit` and runs after the window has
+// shown so the user isn't staring at a blank window during file copying.
 export function ensureRuntimeWorkspace(): string {
   const workspaceRoot = getWorkspaceRoot();
-  const marker = path.join(workspaceRoot, "CLAUDE.md");
-  const starterKit = getSourceStarterKit();
-  if (!fs.existsSync(marker)) {
-    copyDirClean(starterKit, workspaceRoot);
-  } else {
+  fs.mkdirSync(path.join(workspaceRoot, "data"), { recursive: true });
+  fs.mkdirSync(path.join(workspaceRoot, "logs"), { recursive: true });
+  return workspaceRoot;
+}
+
+// BACKGROUND path called after the BrowserWindow is on screen. Performs the
+// expensive starter-kit copy on first launch and the idempotent infra resync
+// on subsequent launches. Safe to call concurrently with renderer activity —
+// only writes files; never deletes user data. Errors are caught and logged
+// rather than surfaced, since the chat path doesn't depend on these files.
+export function backfillStarterKit(): void {
+  try {
+    const workspaceRoot = getWorkspaceRoot();
+    const marker = path.join(workspaceRoot, "CLAUDE.md");
+    const starterKit = getSourceStarterKit();
+    if (!fs.existsSync(marker)) {
+      copyDirClean(starterKit, workspaceRoot);
+      return;
+    }
     // Idempotent infrastructure resync. Older workspaces (from earlier app
     // versions, or partial first-launch copies) can be missing module-installs/
     // — without this, the Modules page shows every row as "Source missing".
@@ -79,8 +98,11 @@ export function ensureRuntimeWorkspace(): string {
         copyDirClean(source, target);
       }
     }
+  } catch (err) {
+    // Logged, not thrown — the renderer can boot without the starter kit
+    // present; affected screens (Modules / Reference) will just be empty
+    // until the next launch reruns the backfill.
+    // eslint-disable-next-line no-console
+    console.error("backfillStarterKit failed:", err);
   }
-  fs.mkdirSync(path.join(workspaceRoot, "data"), { recursive: true });
-  fs.mkdirSync(path.join(workspaceRoot, "logs"), { recursive: true });
-  return workspaceRoot;
 }

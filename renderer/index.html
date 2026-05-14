@@ -10,8 +10,71 @@
       href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap"
       rel="stylesheet"
     />
+    <!--
+      Boot splash — paints before any JS/CSS bundle has loaded so the user
+      never sees a white frame between the Electron window opening and React
+      mounting. Once App.tsx renders, an effect tears `#aios-boot-splash`
+      down and the in-React splash takes over seamlessly. All styles are
+      inline on purpose; no external stylesheet is loaded by this point.
+    -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #fafaf7;
+        color: #2a2a2a;
+        font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #aios-boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fafaf7;
+        z-index: 9999;
+      }
+      #aios-boot-splash .card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        padding: 38px 48px;
+      }
+      #aios-boot-splash .spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 2.5px solid rgba(61, 90, 74, 0.18);
+        border-top-color: #3d5a4a;
+        animation: aios-boot-spin 0.9s linear infinite;
+      }
+      @keyframes aios-boot-spin {
+        to { transform: rotate(360deg); }
+      }
+      #aios-boot-splash .label {
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        color: #6b7280;
+      }
+      #aios-boot-splash .brand {
+        font-family: "Instrument Serif", Georgia, serif;
+        font-style: italic;
+        font-size: 22px;
+        color: #3d5a4a;
+        line-height: 1;
+      }
+    </style>
   </head>
   <body>
+    <div id="aios-boot-splash" aria-hidden="true">
+      <div class="card">
+        <div class="brand">aios</div>
+        <div class="spinner"></div>
+        <div class="label">Loading your workspace…</div>
+      </div>
+    </div>
     <div id="root"></div>
     <div style="position: fixed; right: 0.002px; bottom: 0.002px; font-size: 6px; font-weight: 300; color: rgba(228, 228, 231, 0.2); z-index: 9999; pointer-events: none; user-select: none; letter-spacing: 0;">VRK</div>
     <script type="module" src="/src/App.tsx"></script>

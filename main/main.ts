@@ -6,7 +6,7 @@ import { findClaude, validateClaude } from "./claude-finder";
 import { initLogger, log } from "./logger";
 import { PythonHost } from "./python-host";
 import { AutoTaskScheduler } from "./scheduler";
-import { ensureRuntimeWorkspace, getSourceStarterKit } from "./workspace";
+import { ensureRuntimeWorkspace, getSourceStarterKit, backfillStarterKit } from "./workspace";
 import { startWhatsApp, stopWhatsApp, getWhatsAppStatus, autoStartWhatsApp } from "./whatsapp-scanner";
 
 let mainWindow: BrowserWindow | null = null;
@@ -56,6 +56,11 @@ function createWindow(): void {
     titleBarStyle: isMac ? "hiddenInset" : "hidden",
     trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     icon,
+    // Hold the window hidden until the renderer is ready to paint. Combined
+    // with the inline boot splash in index.html, this guarantees the user
+    // never sees a flash of white — when the window appears, the sage
+    // paper background + spinner is already on screen.
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -63,6 +68,18 @@ function createWindow(): void {
       sandbox: true
     }
   });
+
+  // Show the window only when the first frame is ready. A 1.5 s safety
+  // timeout ensures we never leave the window invisible if something delays
+  // `ready-to-show` (rare, but worth having).
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible() && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
+  }, 1500);
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) {
@@ -348,6 +365,19 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
 
+  // Run the starter-kit copy / infra resync AFTER the window is on screen.
+  // ensureRuntimeWorkspace() above only set up data/ and logs/ — the heavier
+  // copy work happens here so it can't block the boot critical path.
+  if (mainWindow) {
+    mainWindow.once("ready-to-show", () => {
+      setImmediate(() => backfillStarterKit());
+    });
+    // Fallback in case ready-to-show is somehow not emitted within 2 s.
+    setTimeout(() => backfillStarterKit(), 2000);
+  } else {
+    backfillStarterKit();
+  }
+
   if (host && mainWindow) {
     autoStartWhatsApp(host, mainWindow);
   }
@@ -488,7 +518,13 @@ app.whenReady().then(() => {
       return { ok: false, reason: "manual-only-on-mac" };
     }
     try {
-      autoUpdater.quitAndInstall();
+      // isSilent: pass /S to NSIS to suppress the installer UI on update
+      // installs (only honored when the installed shell supports it; with
+      // assistedInstaller / oneClick:false the wizard may briefly flash, but
+      // the flag is the strongest signal we can pass).
+      // isForceRunAfter: relaunch the app automatically once install finishes
+      // so the user lands back in AIOS without having to double-click again.
+      autoUpdater.quitAndInstall(true, true);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
