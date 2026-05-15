@@ -1937,13 +1937,20 @@ button:active:not(:disabled) { transform: scale(0.98); }
 /* ─── Onboarding v2 — ChatGPT × Sana editorial flow ───────────────────────── */
 .onboarding-v2 {
   position: relative;
-  min-height: 100%;
+  /* Strictly constrain the height to the parent so `overflow-y: auto` can
+     actually trigger a scrollbar. `min-height: 100%` (the old value) let
+     the element grow with the content, which pushed past the parent's clip
+     and made the whole page un-scrollable when the install card + auth
+     picker exceeded the viewport. */
+  height: 100%;
+  max-height: 100%;
   background: var(--paper);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 36px 28px 64px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .onboarding-v2::before {
   content: "";
@@ -2368,6 +2375,169 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .onboarding-v2-copy-btn:hover {
   background: var(--surface-deep);
   color: var(--ink);
+}
+
+/* Live log tail for the in-app Claude Code installer. Sage paper bg, mono
+   text, fixed height with scroll so a chatty installer can't blow out the
+   onboarding card layout. */
+.onboarding-v2-install-log {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--gray-700);
+  max-height: 180px;
+  min-height: 96px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.onboarding-v2-install-log.is-failed {
+  border-color: rgba(184, 80, 64, 0.45);
+  background: rgba(184, 80, 64, 0.05);
+  color: var(--ink);
+}
+
+/* Auth method picker — shown after Claude Code is installed/detected. Three
+   stacked cards (Claude.ai login, API key, Skip). Each card expands into its
+   own form on click; the others stay collapsed so the user always sees the
+   menu without the chosen path overwhelming the layout. */
+.onboarding-v2-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 18px 0 6px;
+}
+.onboarding-v2-auth-head h2 {
+  margin: 4px 0 6px;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+.onboarding-v2-auth-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--gray-700);
+  max-width: 60ch;
+}
+.onboarding-v2-auth-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.onboarding-v2-auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+.onboarding-v2-auth-card.is-active {
+  border-color: var(--sage);
+  background: var(--surface-soft);
+}
+.onboarding-v2-auth-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.onboarding-v2-auth-card-head > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.onboarding-v2-auth-card-head strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.onboarding-v2-auth-card-head span {
+  font-size: 12.5px;
+  color: var(--gray-700);
+  line-height: 1.5;
+}
+.onboarding-v2-auth-card-head code {
+  font-size: 11.5px;
+  background: var(--surface-deep);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.onboarding-v2-auth-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--sage-soft);
+  color: var(--sage);
+  flex-shrink: 0;
+}
+.onboarding-v2-auth-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--sage-line);
+}
+.onboarding-v2-auth-hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--gray-700);
+  line-height: 1.55;
+}
+.onboarding-v2-auth-hint code {
+  font-size: 11.5px;
+  background: var(--surface-deep);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.onboarding-v2-auth-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+.onboarding-v2-auth-input:focus {
+  border-color: var(--sage);
+}
+.onboarding-v2-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-pill-ghost.is-full { width: 100%; justify-content: center; }
+.onboarding-v2-link.is-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--sage);
+  font-weight: 600;
+  cursor: pointer;
+}
+.onboarding-v2-link.is-inline:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 720px) {
@@ -7148,6 +7318,19 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 }
 @media (max-width: 1100px) { .connectors-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px)  { .connectors-grid { grid-template-columns: 1fr; } }
+
+.connectors-section + .connectors-section { margin-top: 28px; }
+.connectors-section-title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  color: var(--sage);
+  margin: 4px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sage-line);
+}
 
 .connector-card {
   display: flex;

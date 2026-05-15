@@ -73,7 +73,10 @@ export type AiosCommand =
   | "delete_task"
   | "whatsapp_status"
   | "whatsapp_start"
-  | "whatsapp_stop";
+  | "whatsapp_stop"
+  | "export_to_pdf"
+  | "install_claude"
+  | "open_claude_login_terminal";
 
 export interface HostRequest {
   id: string;

@@ -1,27 +1,46 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
+  Box,
+  Briefcase,
+  Building2,
   Calendar,
+  CalendarDays,
   Camera,
   Check,
   CheckSquare,
+  Cloud,
   CreditCard,
+  Database,
   ExternalLink,
   Facebook,
+  FileSpreadsheet,
   FileText,
+  Film,
   Github,
+  Globe,
+  HardDrive,
+  Image as ImageIcon,
   Inbox,
   Linkedin,
   Loader2,
   Mail,
+  MapPin,
   MessageCircle,
   MessageSquare,
+  Mic,
+  Palette,
+  Phone,
+  PhoneCall,
   Plug,
   Plus,
   Search,
   Send,
   Sheet,
+  Shield,
+  Table,
   Twitter,
+  Video,
   X,
   Youtube
 } from "lucide-react";
@@ -139,7 +158,7 @@ const CONNECTOR_CATALOG: Connector[] = [
     label: "Outlook",
     description: "Read mail, draft replies, search threads, manage your inbox.",
     Icon: Inbox,
-    logoUrl: "https://api.iconify.design/logos:microsoft-icon.svg"
+    logoUrl: "https://api.iconify.design/vscode-icons:file-type-outlook.svg"
   },
   {
     service: "linkedin",
@@ -190,8 +209,279 @@ const CONNECTOR_CATALOG: Connector[] = [
     description: "Read profile, browse media, surface insights for your account.",
     Icon: Camera,
     logoUrl: "https://api.iconify.design/logos:instagram-icon.svg"
+  },
+  // Productivity, storage, design, dev, voice — v0.1.26 connectors expansion
+  {
+    service: "supabase",
+    label: "Supabase",
+    description: "Run SQL, deploy edge functions, manage projects.",
+    Icon: Database,
+    logoUrl: "https://api.iconify.design/logos:supabase-icon.svg"
+  },
+  {
+    service: "google-drive",
+    label: "Google Drive",
+    description: "Find files, upload outputs, share folders, manage permissions.",
+    Icon: HardDrive,
+    logoUrl: "https://api.iconify.design/logos:google-drive.svg"
+  },
+  {
+    service: "airtable",
+    label: "Airtable",
+    description: "Read and update records across your bases.",
+    Icon: Table,
+    logoUrl: "https://api.iconify.design/logos:airtable.svg"
+  },
+  {
+    service: "firecrawl",
+    label: "Firecrawl",
+    description: "Scrape pages, crawl sites, extract structured data from the web.",
+    Icon: Globe,
+    logoUrl: "https://www.firecrawl.dev/favicon.ico"
+  },
+  {
+    service: "discord",
+    label: "Discord",
+    description: "Read guilds, post messages, manage your servers.",
+    Icon: MessageSquare,
+    logoUrl: "https://api.iconify.design/logos:discord-icon.svg"
+  },
+  {
+    service: "onedrive",
+    label: "OneDrive",
+    description: "Find files, upload outputs, manage folders in your OneDrive.",
+    Icon: Cloud,
+    logoUrl: "https://api.iconify.design/logos:microsoft-onedrive.svg"
+  },
+  {
+    service: "exa",
+    label: "Exa",
+    description: "Deep web search with semantic results, contents, find-similar.",
+    Icon: Search,
+    logoUrl: "https://exa.ai/favicon.ico"
+  },
+  {
+    service: "elevenlabs",
+    label: "ElevenLabs",
+    description: "Text-to-speech, voice cloning, conversational voice agents.",
+    Icon: Mic,
+    logoUrl: "https://api.iconify.design/simple-icons:elevenlabs.svg"
+  },
+  {
+    service: "salesforce",
+    label: "Salesforce",
+    description: "Create accounts, contacts, opportunities, run SOQL queries.",
+    Icon: Building2,
+    logoUrl: "https://upload.wikimedia.org/wikipedia/commons/f/f9/Salesforce.com_logo.svg"
+  },
+  {
+    service: "calendly",
+    label: "Calendly",
+    description: "List bookings, create event types, manage invitees.",
+    Icon: Calendar,
+    logoUrl: "https://api.iconify.design/simple-icons:calendly.svg"
+  },
+  {
+    service: "google-meet",
+    label: "Google Meet",
+    description: "Create meeting spaces, fetch transcripts, list recordings.",
+    Icon: Video,
+    logoUrl: "https://api.iconify.design/logos:google-meet.svg"
+  },
+  {
+    service: "zoho",
+    label: "Zoho",
+    description: "Manage CRM records, leads, contacts, and accounts.",
+    Icon: Briefcase,
+    logoUrl: "https://api.iconify.design/simple-icons:zoho.svg"
+  },
+  {
+    service: "dropbox",
+    label: "Dropbox",
+    description: "Upload, find, share, and manage files in your Dropbox.",
+    Icon: Cloud,
+    logoUrl: "https://api.iconify.design/logos:dropbox.svg"
+  },
+  {
+    service: "heygen",
+    label: "HeyGen",
+    description: "Generate avatar videos and AI voiceovers from a script.",
+    Icon: Film,
+    logoUrl: "https://www.heygen.com/favicon.ico"
+  },
+  {
+    service: "yousearch",
+    label: "You.com",
+    description: "Quick web answers from You.com search.",
+    Icon: Search,
+    logoUrl: "https://you.com/favicon.ico"
+  },
+  {
+    service: "retellai",
+    label: "Retell AI",
+    description: "Build voice agents, place outbound calls, manage knowledge.",
+    Icon: PhoneCall
+    // No reliable hosted logo for Retell AI as of v0.1.26 — the brand site
+    // 403s favicon.ico requests and Retell isn't in iconify's logos /
+    // simple-icons sets. Card falls back to the Lucide PhoneCall icon, which
+    // reads cleanly in the sage color scheme.
+  },
+  {
+    service: "canva",
+    label: "Canva",
+    description: "Create and export designs, manage your assets.",
+    Icon: Palette,
+    logoUrl: "https://www.canva.com/favicon.ico"
+  },
+  {
+    service: "cal-com",
+    label: "Cal.com",
+    description: "List bookings, create event types, cancel and confirm.",
+    Icon: CalendarDays,
+    logoUrl: "https://api.iconify.design/simple-icons:caldotcom.svg"
+  },
+  {
+    service: "telnyx",
+    label: "Telnyx",
+    description: "Send SMS, manage phone numbers, look up carriers.",
+    Icon: Phone,
+    logoUrl: "https://telnyx.com/favicon.ico"
+  },
+  {
+    service: "cloudflare",
+    label: "Cloudflare",
+    description: "Manage DNS records, list zones, configure WAF.",
+    Icon: Shield,
+    logoUrl: "https://api.iconify.design/logos:cloudflare.svg"
+  },
+  {
+    service: "reddit",
+    label: "Reddit",
+    description: "Post, comment, browse subreddits, search threads.",
+    Icon: MessageCircle,
+    logoUrl: "https://api.iconify.design/logos:reddit-icon.svg"
+  },
+  {
+    service: "cloudinary",
+    label: "Cloudinary",
+    description: "Upload media, manage folders, transform images and video.",
+    Icon: ImageIcon,
+    logoUrl: "https://api.iconify.design/simple-icons:cloudinary.svg"
+  },
+  {
+    service: "convex",
+    label: "Convex",
+    description: "Manage Convex projects, deployments, and functions.",
+    Icon: Database,
+    logoUrl: "https://api.iconify.design/simple-icons:convex.svg"
+  },
+  {
+    service: "dockerhub",
+    label: "DockerHub",
+    description: "Manage repos, webhooks, organization members, image tags.",
+    Icon: Box,
+    logoUrl: "https://api.iconify.design/logos:docker-icon.svg"
+  },
+  {
+    service: "excel",
+    label: "Excel",
+    description: "Read ranges, append rows, list tables in Excel Online.",
+    Icon: FileSpreadsheet,
+    logoUrl: "https://api.iconify.design/vscode-icons:file-type-excel.svg"
+  },
+  {
+    service: "google-maps",
+    label: "Google Maps",
+    description: "Search places, geocode addresses, get directions.",
+    Icon: MapPin,
+    logoUrl: "https://api.iconify.design/logos:google-maps.svg"
   }
 ];
+
+// Section-grouped rendering of CONNECTOR_CATALOG. Keeps the page navigable
+// once we passed ~20 connectors — a flat 44-card grid felt random. Service
+// slugs not listed here fall into "Other" so adding a new connector to the
+// catalog doesn't strand it.
+const CATEGORY_ORDER = [
+  "Email & Calendar",
+  "Messaging & Social",
+  "Productivity & Docs",
+  "Storage",
+  "CRM",
+  "Dev & Infra",
+  "Analytics & Payments",
+  "AI & Media",
+  "Web, Search & Tools",
+] as const;
+
+type CategoryName = (typeof CATEGORY_ORDER)[number];
+
+const CATEGORY_OF: Record<string, CategoryName> = {
+  // Email & Calendar
+  gmail: "Email & Calendar",
+  outlook: "Email & Calendar",
+  "google-calendar": "Email & Calendar",
+  calendly: "Email & Calendar",
+  "cal-com": "Email & Calendar",
+  "google-meet": "Email & Calendar",
+  // Messaging & Social
+  slack: "Messaging & Social",
+  discord: "Messaging & Social",
+  whatsapp: "Messaging & Social",
+  "whatsapp-personal": "Messaging & Social",
+  telegram: "Messaging & Social",
+  reddit: "Messaging & Social",
+  linkedin: "Messaging & Social",
+  twitter: "Messaging & Social",
+  facebook: "Messaging & Social",
+  instagram: "Messaging & Social",
+  youtube: "Messaging & Social",
+  // Productivity & Docs
+  notion: "Productivity & Docs",
+  clickup: "Productivity & Docs",
+  airtable: "Productivity & Docs",
+  "google-sheets": "Productivity & Docs",
+  excel: "Productivity & Docs",
+  // Storage
+  "google-drive": "Storage",
+  onedrive: "Storage",
+  dropbox: "Storage",
+  // CRM
+  salesforce: "CRM",
+  zoho: "CRM",
+  // Dev & Infra
+  github: "Dev & Infra",
+  dockerhub: "Dev & Infra",
+  cloudflare: "Dev & Infra",
+  supabase: "Dev & Infra",
+  convex: "Dev & Infra",
+  // Analytics & Payments
+  stripe: "Analytics & Payments",
+  "google-analytics": "Analytics & Payments",
+  // AI & Media
+  elevenlabs: "AI & Media",
+  heygen: "AI & Media",
+  retellai: "AI & Media",
+  cloudinary: "AI & Media",
+  canva: "AI & Media",
+  // Web, Search & Tools
+  firecrawl: "Web, Search & Tools",
+  exa: "Web, Search & Tools",
+  yousearch: "Web, Search & Tools",
+  "google-maps": "Web, Search & Tools",
+  telnyx: "Web, Search & Tools",
+};
+
+// Within a category, connected cards rise to the top so the user sees their
+// active services first, with not-yet-connected ones underneath.
+const STATUS_RANK: Record<ConnectorStatus, number> = {
+  connected: 0,
+  connecting: 1,
+  stalled: 2,
+  expired: 3,
+  error: 4,
+  not_connected: 5,
+};
 
 // Connectors that require extra user-provided fields BEFORE OAuth can start.
 // Composio surfaces these via auth_config.expected_input_fields. The renderer
@@ -239,6 +529,173 @@ const CONNECTOR_FIELD_REQUIREMENTS: Record<string, { authScheme: string; fields:
           "If you already have a bot, send /token to BotFather to retrieve it.",
         helpLink: "https://t.me/BotFather",
         helpLinkLabel: "Open BotFather in Telegram",
+        secret: true,
+      },
+    ],
+  },
+  firecrawl: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Firecrawl API key",
+        placeholder: "fc-...",
+        description: "API key from your Firecrawl dashboard.",
+        helpText: "Sign up at firecrawl.dev, then go to /app → API Keys and create a new key.",
+        helpLink: "https://www.firecrawl.dev/app/api-keys",
+        helpLinkLabel: "Open Firecrawl",
+        secret: true,
+      },
+    ],
+  },
+  exa: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Exa API key",
+        placeholder: "...",
+        description: "API key from your Exa dashboard.",
+        helpText: "Sign in at exa.ai → dashboard → API keys.",
+        helpLink: "https://dashboard.exa.ai/",
+        helpLinkLabel: "Open Exa dashboard",
+        secret: true,
+      },
+    ],
+  },
+  elevenlabs: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "ElevenLabs API key",
+        placeholder: "sk_...",
+        description: "Personal API key from your ElevenLabs profile.",
+        helpText: "Open elevenlabs.io → click your profile → 'Profile + API key' → copy the key.",
+        helpLink: "https://elevenlabs.io/app/settings/api-keys",
+        helpLinkLabel: "Open ElevenLabs",
+        secret: true,
+      },
+    ],
+  },
+  heygen: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "HeyGen API key",
+        placeholder: "...",
+        description: "API key from your HeyGen developer settings.",
+        helpText: "Open app.heygen.com → Space Settings → API → Create / copy your key.",
+        helpLink: "https://app.heygen.com/settings?nav=API",
+        helpLinkLabel: "Open HeyGen",
+        secret: true,
+      },
+    ],
+  },
+  yousearch: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "You.com API key",
+        placeholder: "...",
+        description: "API key from your You.com developer console.",
+        helpText: "Sign in at api.you.com → API Keys → create a new key.",
+        helpLink: "https://api.you.com/",
+        helpLinkLabel: "Open You.com API",
+        secret: true,
+      },
+    ],
+  },
+  retellai: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Retell AI API key",
+        placeholder: "key_...",
+        description: "API key from your Retell AI dashboard.",
+        helpText: "Open retellai.com → dashboard → API Keys → create one.",
+        helpLink: "https://dashboard.retellai.com/apiKeys",
+        helpLinkLabel: "Open Retell AI",
+        secret: true,
+      },
+    ],
+  },
+  telnyx: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Telnyx API key",
+        placeholder: "KEY...",
+        description: "V2 API key from your Telnyx Mission Control portal.",
+        helpText: "Open portal.telnyx.com → API Keys → create a new V2 key.",
+        helpLink: "https://portal.telnyx.com/#/app/api-keys",
+        helpLinkLabel: "Open Telnyx portal",
+        secret: true,
+      },
+    ],
+  },
+  cloudflare: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Cloudflare API token",
+        placeholder: "...",
+        description: "Scoped API token (NOT the global API key).",
+        helpText:
+          "Open dash.cloudflare.com → My Profile → API Tokens → Create Token. " +
+          "Use a scoped template (e.g. 'Edit zone DNS') — never paste your global key.",
+        helpLink: "https://dash.cloudflare.com/profile/api-tokens",
+        helpLinkLabel: "Open Cloudflare tokens",
+        secret: true,
+      },
+    ],
+  },
+  cloudinary: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Cloudinary API environment URL",
+        placeholder: "cloudinary://api_key:api_secret@cloud_name",
+        description: "Full Cloudinary URL with key + secret + cloud name.",
+        helpText: "Open cloudinary.com → Console → Dashboard → 'API environment variable' → copy the cloudinary:// string.",
+        helpLink: "https://console.cloudinary.com/",
+        helpLinkLabel: "Open Cloudinary",
+        secret: true,
+      },
+    ],
+  },
+  convex: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "Convex deploy key",
+        placeholder: "prod:...",
+        description: "Project deploy key from Convex.",
+        helpText: "Open dashboard.convex.dev → your project → Settings → Deploy Keys.",
+        helpLink: "https://dashboard.convex.dev/",
+        helpLinkLabel: "Open Convex",
+        secret: true,
+      },
+    ],
+  },
+  dockerhub: {
+    authScheme: "API_KEY",
+    fields: [
+      {
+        key: "generic_api_key",
+        label: "DockerHub access token",
+        placeholder: "dckr_pat_...",
+        description: "Personal Access Token (NOT your password).",
+        helpText: "Open hub.docker.com → Account Settings → Security → New Access Token.",
+        helpLink: "https://hub.docker.com/settings/security",
+        helpLinkLabel: "Open DockerHub security",
         secret: true,
       },
     ],
@@ -338,7 +795,37 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
         twitter: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TWITTER_USER_LOOKUP_ME" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
         telegram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "TELEGRAM_GET_ME" and arguments {}. Read the bot's "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
         facebook: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "FACEBOOK_GET_USER_PAGES" and arguments {}. Read the first page's "name" field. Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
-        instagram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "INSTAGRAM_GET_USER_INFO" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`
+        instagram: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "INSTAGRAM_GET_USER_INFO" and arguments {}. Read the "username" field. If present, reply with "@" + username, nothing else. If unsure, reply: UNKNOWN.`,
+        // v0.1.26 connectors expansion — identify prompts. For services where
+        // no clean "who am I" call exists, the static label avoids spending
+        // tokens on a non-resolvable identity probe. The card just shows the
+        // service name in those cases.
+        supabase: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SUPABASE_LIST_PROJECTS" and arguments {}. Find the first project's "name" field. Reply with ONLY that name, nothing else. If no projects, reply: UNKNOWN.`,
+        "google-drive": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "GOOGLEDRIVE_GET_ABOUT_ME" and arguments {}. Read the user's emailAddress. Reply with ONLY the bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        airtable: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "AIRTABLE_LIST_BASES" and arguments {}. Find the first base's "name" field. Reply with ONLY that name, nothing else. If no bases, reply: UNKNOWN.`,
+        firecrawl: `Reply with the single word: UNKNOWN`,
+        discord: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "DISCORD_GET_MY_USER" and arguments {}. Read the "username" field. If present, reply with "@" + username. If unsure, reply: UNKNOWN.`,
+        onedrive: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "ONEDRIVE_GET_DRIVE" and arguments {}. Read owner.user.displayName. Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
+        exa: `Reply with the single word: UNKNOWN`,
+        elevenlabs: `Reply with the single word: UNKNOWN`,
+        salesforce: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "SALESFORCE_QUERY_USER" and arguments {}. Read the user's "Email" field. Reply with ONLY the bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        calendly: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CALENDLY_GET_CURRENT_USER" and arguments {}. Read resource.email. Reply with ONLY the bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        "google-meet": `Reply with the single word: UNKNOWN`,
+        zoho: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "ZOHO_GET_USER_INFO" and arguments {}. Read the user's email. Reply with ONLY the bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        dropbox: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "DROPBOX_GET_CURRENT_ACCOUNT" and arguments {}. Read the email field. Reply with ONLY the bare email, nothing else. If unsure, reply: UNKNOWN.`,
+        heygen: `Reply with the single word: UNKNOWN`,
+        yousearch: `Reply with the single word: UNKNOWN`,
+        retellai: `Reply with the single word: UNKNOWN`,
+        canva: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CANVA_GET_CURRENT_USER" and arguments {}. Read the display name. Reply with ONLY that name, nothing else. If unsure, reply: UNKNOWN.`,
+        "cal-com": `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "CAL_GET_ME" and arguments {}. Read the "username" field. If present, reply with "@" + username. If unsure, reply: UNKNOWN.`,
+        telnyx: `Reply with the single word: UNKNOWN`,
+        cloudflare: `Reply with the single word: UNKNOWN`,
+        reddit: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "REDDIT_GET_ME" and arguments {}. Read the "name" field. If present, reply with "u/" + name. If unsure, reply: UNKNOWN.`,
+        cloudinary: `Reply with the single word: UNKNOWN`,
+        convex: `Reply with the single word: UNKNOWN`,
+        dockerhub: `Call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL once with tool_slug "DOCKERHUB_GET_USER" and arguments {}. Read the "username" field. If present, reply with "@" + username. If unsure, reply: UNKNOWN.`,
+        excel: `Reply with the single word: UNKNOWN`,
+        "google-maps": `Reply with the single word: UNKNOWN`
       };
       const prompt = prompts[service] ?? "Reply with: UNKNOWN";
       const res = await invoke<{ response: string }>("run_task", {
@@ -351,9 +838,27 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
       const raw = (res?.response || "").trim();
       const emailMatch = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
       const handleMatch = raw.match(/@[A-Za-z0-9_.-]{2,}/);
+      const redditMatch = raw.match(/\bu\/[A-Za-z0-9_-]{2,}/);
+      // Last-resort fallback: a short, single-line, non-sentence response.
+      // Some toolkits (Supabase project name, OneDrive displayName) return
+      // plain strings that don't match @handle / email patterns. We only
+      // accept up to 60 chars and reject anything that looks like prose
+      // ("the user is", "your account", etc.).
+      const isUnknown = raw.toUpperCase().includes("UNKNOWN");
+      const looksLikeProse = /\b(the |your |this |is |are |was )/i.test(raw);
+      const shortPlain =
+        !isUnknown &&
+        raw.length > 0 &&
+        raw.length <= 60 &&
+        !raw.includes("\n") &&
+        !looksLikeProse
+          ? raw
+          : null;
       const label =
         emailMatch?.[0] ||
-        (handleMatch?.[0] && !raw.toUpperCase().includes("UNKNOWN") ? handleMatch[0] : null);
+        (handleMatch?.[0] && !isUnknown ? handleMatch[0] : null) ||
+        (redditMatch?.[0] && !isUnknown ? redditMatch[0] : null) ||
+        shortPlain;
       if (label) {
         setLocalLabels((cur) => ({ ...cur, [service]: label }));
         await invoke("set_setting", { key: `connector_label_${service}`, value: label }).catch(() => undefined);
@@ -369,29 +874,46 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
     }
   }
 
-  // Hydrate local labels from the settings DB on first mount so we don't
-  // re-spawn a Claude task on every refresh. Parallel batch — 12 sequential
-  // IPC roundtrips would cost ~1-2s on cold open; Promise.all collapses that
-  // into a single round-trip wall time (~150ms).
+  // Hydrate local labels + a synthetic "looks-connected" mirror from the
+  // settings DB on first mount. Uses the single-call `list_connector_status`
+  // IPC (returns every known connector's label in one round-trip) instead of
+  // 44 per-service get_setting fan-outs — that was costing ~500-900ms cold.
+  //
+  // The synthetic mirror is what makes the page feel instant: cards for
+  // services we've previously connected render as "Connected" before the
+  // relay ever responds. The real relay call still runs in parallel and
+  // refines the picture (sets composio_connection_id, refreshes stale labels,
+  // surfaces pending/expired/error states the local cache can't know about).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const services = CONNECTOR_CATALOG.filter((c) => !c.comingSoon).map((c) => c.service);
-        const results = await Promise.all(
-          services.map((service) =>
-            invoke<{ key: string; value: string | null }>("get_setting", { key: `connector_label_${service}` })
-              .then((r) => [service, r?.value] as const)
-              .catch(() => [service, null] as const)
-          )
+        const res = await invoke<{ connectors: Record<string, { connected: boolean; label: string | null }> }>(
+          "list_connector_status"
         );
-        if (cancelled) return;
+        if (cancelled || !res?.connectors) return;
         const stored: Record<string, string> = {};
-        for (const [service, value] of results) {
-          if (value) stored[service] = value;
+        const syntheticRows: RelayConnection[] = [];
+        for (const [service, info] of Object.entries(res.connectors)) {
+          if (info?.label) stored[service] = info.label;
+          if (info?.connected) {
+            syntheticRows.push({
+              id: `local:${service}`,
+              service,
+              composio_connection_id: "",
+              status: "connected",
+              account_label: info.label ?? null,
+              connected_at: null,
+            } as RelayConnection);
+          }
         }
         if (Object.keys(stored).length > 0) {
           setLocalLabels((cur) => ({ ...stored, ...cur }));
+        }
+        // Only seed liveConnections if relay hasn't already responded; once
+        // we have real rows we never want to clobber them with synthetics.
+        if (syntheticRows.length > 0) {
+          setLiveConnections((cur) => (cur.length === 0 ? syntheticRows : cur));
         }
       } catch { /* non-fatal */ }
     })();
@@ -805,8 +1327,9 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
             <span>Syncing with relay…</span>
           </div>
         ) : null}
-        <div className="connectors-grid">
-          {filteredCatalog.map((connector) => (
+        {searchQuery ? (
+          <div className="connectors-grid">
+            {filteredCatalog.map((connector) => (
               <ConnectorCard
                 key={connector.service}
                 connector={connector}
@@ -817,8 +1340,41 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
                 onRetry={() => retry(connector.service, connector.connectionId)}
                 onDisconnect={() => disconnect(connector.service, connector.connectionId)}
               />
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          CATEGORY_ORDER.map((category) => {
+            const rows = filteredCatalog
+              .filter((c) => (CATEGORY_OF[c.service] ?? "Web, Search & Tools") === category)
+              .slice()
+              .sort((a, b) => {
+                const ra = STATUS_RANK[a.status] ?? 99;
+                const rb = STATUS_RANK[b.status] ?? 99;
+                if (ra !== rb) return ra - rb;
+                return a.label.localeCompare(b.label);
+              });
+            if (rows.length === 0) return null;
+            return (
+              <section key={category} className="connectors-section">
+                <h3 className="connectors-section-title">{category}</h3>
+                <div className="connectors-grid">
+                  {rows.map((connector) => (
+                    <ConnectorCard
+                      key={connector.service}
+                      connector={connector}
+                      isBusy={busyService === connector.service}
+                      isIdentifying={identifying.has(connector.service)}
+                      onConnect={() => connect(connector.service)}
+                      onCancel={() => cancel(connector.service, connector.connectionId)}
+                      onRetry={() => retry(connector.service, connector.connectionId)}
+                      onDisconnect={() => disconnect(connector.service, connector.connectionId)}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })
+        )}
       </div>
       {credsModalService && CONNECTOR_FIELD_REQUIREMENTS[credsModalService] && (
         <ConnectorCredsModal
@@ -959,6 +1515,10 @@ function ConnectorCard({
   const isConnecting = status === "connecting";
   const isStalled = status === "stalled";
   const isExpired = status === "expired";
+  // If the hosted logo URL fails (CDN 404, network blip, brand removed
+  // their favicon), fall back to the Lucide icon instead of showing a
+  // broken-image glyph. Resets per card via useState scoped to ConnectorCard.
+  const [logoErrored, setLogoErrored] = useState(false);
 
   return (
     <article
@@ -971,19 +1531,20 @@ function ConnectorCard({
     >
       <div className="connector-card-head">
         <div className="connector-icon" aria-hidden="true">
-          {connector.logoUrl ? (
-            <img 
-              src={connector.logoUrl} 
-              alt="" 
-              style={{ 
-                width: 18, 
-                height: 18, 
-                objectFit: "contain", 
+          {connector.logoUrl && !logoErrored ? (
+            <img
+              src={connector.logoUrl}
+              alt=""
+              style={{
+                width: 18,
+                height: 18,
+                objectFit: "contain",
                 filter: "none",
                 opacity: 1,
                 transition: "all 0.3s ease"
-              }} 
+              }}
               className="connector-logo-img"
+              onError={() => setLogoErrored(true)}
             />
           ) : (
             <Icon size={18} />

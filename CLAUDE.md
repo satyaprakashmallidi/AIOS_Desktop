@@ -124,8 +124,42 @@ Service slug → env var: `service.toUpperCase().replace(/-/g, "_")` → `COMPOS
 | Facebook | `ac_NzprCc18CEWA` | `facebook` | Live (v0.1.17+) | (no module yet) |
 | Instagram | `ac_XzChOFJu_1mf` | `instagram` | Live (v0.1.17+) | (no module yet) |
 | WhatsApp Personal | n/a (local Baileys, not Composio) | `whatsapp-personal` | Live (v0.1.19+) | Self-chat → AIOS task trigger |
+| Supabase | `ac_HznZGRR1Vuyn` | `supabase` | Live (v0.1.26+) | (no module yet) |
+| Google Drive | `ac_1pMu_e_RNyMB` | `google-drive` | Live (v0.1.26+) | (no module yet) |
+| Airtable | `ac_b2B02yFpJsS6` | `airtable` | Live (v0.1.26+) | (no module yet) |
+| Firecrawl | `ac_eqn8uWplxBKQ` | `firecrawl` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Discord | `ac_T-nIlJcsEUzh` | `discord` | Live (v0.1.26+) | (no module yet) |
+| OneDrive | `ac_IkR5jjsaUqYx` | `onedrive` | Live (v0.1.26+) | (no module yet) |
+| Exa | `ac_Sh8CUwFO11v1` | `exa` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| ElevenLabs | `ac_9EmJCrRwRqIZ` | `elevenlabs` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Salesforce | `ac_TLRXfUE077d2` | `salesforce` | Live (v0.1.26+) | (no module yet) |
+| Calendly | `ac_q88bIqQR7O3z` | `calendly` | Live (v0.1.26+) | (no module yet) |
+| Google Meet | `ac_1_TsspWazyZZ` | `google-meet` | Live (v0.1.26+) | (no module yet) |
+| Zoho | `ac_ZD0BE4K4d4_k` | `zoho` | Live (v0.1.26+) | (no module yet) |
+| Dropbox | `ac_TGJed2YNNnDc` | `dropbox` | Live (v0.1.26+) | (no module yet) |
+| HeyGen | `ac_Hijz21nUVjrF` | `heygen` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| You.com | `ac_aWuvnZcjd6tX` | `yousearch` | Live (v0.1.26+) | (no module yet — API key, custom auth, single tool) |
+| Retell AI | `ac_u5d8MI-YyetL` | `retellai` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Canva | `ac_xzCsInRgKjKn` | `canva` | Live (v0.1.26+) | (no module yet) |
+| Cal.com | `ac_cMIUkG5J3LLW` | `cal-com` | Live (v0.1.26+) | (no module yet) |
+| Telnyx | `ac_vZc2Yf4ZUxnF` | `telnyx` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Cloudflare | `ac_BMed_OU09AGb` | `cloudflare` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Reddit | `ac_DRe0X_LmTq1c` | `reddit` | Live (v0.1.26+) | (no module yet) |
+| Cloudinary | `ac_lg2rQeIeQO2w` | `cloudinary` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Convex | `ac_xRSPlxHy0E4t` | `convex` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| DockerHub | `ac_3uM6woNxn7XE` | `dockerhub` | Live (v0.1.26+) | (no module yet — API key, custom auth) |
+| Excel | `ac_ULSRLz3F653I` | `excel` | Live (v0.1.26+) | (no module yet — Excel Online via MS Graph) |
+| Google Maps | `ac_T7MsVHm41uap` | `google-maps` | Live (v0.1.26+) | (no module yet) |
 
-All 15 connectors have `is_enabled_for_tool_router: true` in Composio and corresponding `COMPOSIO_AUTH_<SLUG>` secrets in Supabase. **Auth flow split:** OAuth toolkits open the system browser for authorization; **API-key toolkits (Telegram)** prompt for the key in a modal and complete synchronously — no browser. See `CONNECTOR_FIELD_REQUIREMENTS` in `ConnectorsScreen.tsx`. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
+All 26 v0.1.26 Composio connectors are live, each with `is_enabled_for_tool_router: true` and a matching `COMPOSIO_AUTH_<SLUG>` secret in Supabase. (TikTok was dropped — Composio has no managed app and we don't have a TikTok Developer App to plug in.)
+
+**Composio auth-type split (v0.1.26 lesson):** 15 of 26 are OAuth toolkits with managed Composio credentials → `type: "use_composio_managed_auth"`. 11 are API-key toolkits where Composio doesn't ship managed credentials → `type: "use_custom_auth"` + `authScheme: "API_KEY"` (each user provides their own key in the credential modal). The patch step also differs: managed-auth configs PATCH with `type: "default"`, custom-auth configs PATCH with `type: "custom"`. `scripts/setup-new-connectors.ps1` handles the OAuth managed flow; the 11 API-key configs were created via an inline retry batch in the v0.1.26 commit.
+
+**Workspace gotcha (v0.1.26 lesson):** Composio API keys are scoped to a single workspace. An auth_config created with key `K1` is INVISIBLE to a relay running with key `K2`. The relay's master key lives in Supabase secrets as `COMPOSIO_API_KEY` — use *only that key* when creating new auth_configs, even if you have other Composio keys in your possession. We hit this in v0.1.26: created 26 auth_configs with the wrong key, deployed, every `/initiate` 400'd with "Auth_Config_NotFound" because the relay couldn't see them. Fix: re-create with the relay's key, update the secrets. Sanity check: `npx supabase secrets list` shows SHA-256 of each value — hash your candidate key locally and compare with the `COMPOSIO_API_KEY` line before using. **Auth flow split:** OAuth toolkits open the system browser for authorization; **API-key toolkits (Telegram, Firecrawl, Exa, ElevenLabs, HeyGen, You.com, Retell AI, Telnyx, Cloudflare, Cloudinary, Convex, DockerHub)** prompt for the key in a modal and complete synchronously — no browser. See `CONNECTOR_FIELD_REQUIREMENTS` in `ConnectorsScreen.tsx`. The relay's `handleListConnections` + `handleInitiate` + `handleExecuteTool` work for all of them generically — no per-service code paths.
+
+**Connector-scope-lock (v0.1.26+):** the Composio MCP system prompt now ends with a dynamic "you may ONLY reference these services" block. `python/host.py:_get_composio_system_prompt()` calls `workspace.list_connected_service_slugs()` at every spawn and stitches in (a) the full allow-list of 45 known service display names, (b) the subset currently connected for this user. Tells the agent never to suggest Perplexity / Brave / Make.com / Zapier / etc. — anything outside the allow-list. Costs ~250 tokens per spawn but keeps replies on-rails with what AIOS can actually deliver. To grow the allow-list, add to `KNOWN_CONNECTORS` + `CONNECTOR_DISPLAY_NAMES` in `python/workspace.py` (it stays in sync with `CONNECTOR_CATALOG` in `ConnectorsScreen.tsx`).
+
+**Save-as-PDF marker (v0.1.26+):** the agent can save any chat answer as a PDF by ending its reply with `[AIOS_EXPORT_PDF: outputs/<slug>.pdf]`. The renderer detects the marker, calls `export_to_pdf` IPC (in `main/main.ts` — uses `renderMarkdownStringToPdf` from `main/pdf-export.ts`), strips the marker from the displayed text, and adds a downloadable chip under the assistant bubble. Reuses the same offscreen `BrowserWindow.printToPDF` flow already in production for WhatsApp Remote PDF delivery.
 
 **X (Twitter) note:** Composio doesn't provide managed credentials for X — the auth_config was created with `"type": "use_custom_auth"` using the project owner's X Developer App (OAuth 2.0). All users authorize through that single app. X's free tier severely limits read APIs; for full timeline / search / DM access you need X Basic tier ($200/mo).
 

@@ -1,12 +1,15 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
   ClipboardCopy,
+  Download,
   ExternalLink,
   Loader2,
+  LogIn,
   Search,
   ShieldCheck,
   Terminal,
@@ -16,6 +19,12 @@ import { invoke } from "../lib/api";
 import { onboardingQuestions } from "../lib/onboarding";
 import type { ClaudeStatus } from "../types";
 import type { OnboardingState, Screen } from "../ui";
+
+type ClaudeInstallState = "idle" | "running" | "done" | "failed";
+// Auth method the user picked once the Claude Code binary is detected.
+// Stored in `claude_auth_method` setting so it survives across launches and
+// drives whether the Continue button is enabled.
+type AuthMethod = "claude_login" | "api_key" | "skip";
 
 type StageId = "connect" | "profile" | "finish";
 
@@ -62,10 +71,166 @@ export function OnboardingScreen({
   const isMacOrLinux = !/^Win/i.test(navigator.platform);
   const whereCmd = isMacOrLinux ? "which claude" : "where claude";
 
+  // In-app Claude Code installer state. Streams the official standalone-
+  // installer script via the `install_claude` IPC. The script is the same
+  // one Anthropic ships:
+  //   Mac/Linux: curl -fsSL https://claude.ai/install.sh | bash
+  //   Windows  : irm https://claude.ai/install.ps1 | iex
+  // No npm / Node prerequisite — installer drops a self-contained binary
+  // into the user's local bin dir. After a successful run we auto-detect
+  // so the rest of the onboarding flow can proceed without a manual step.
+  const [installState, setInstallState] = useState<ClaudeInstallState>("idle");
+  const [installLog, setInstallLog] = useState<string>("");
+  const installLogRef = useRef<HTMLPreElement | null>(null);
+  // True once we auto-spawned the `claude` login terminal post-install for
+  // this session — prevents popping a second terminal if the user re-installs
+  // or re-enters onboarding while installState is still "done".
+  const loginTerminalSpawnedRef = useRef(false);
+
+  // Auth method state. Hydrated from `claude_auth_method` setting on mount —
+  // if the user has already picked a method in a prior session we skip the
+  // picker. The picker collapsed in v0.1.26 to a single Claude.ai-via-
+  // terminal path because `claude /login` itself offers the API-key vs
+  // OAuth choice inline; duplicating those in our UI just confused users.
+  const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+
+  // Guard the hydration so a slow SQLite read can't clobber a method the
+  // user already picked. We capture authMethod into a ref so we can compare
+  // current state inside the async block without re-triggering the effect.
+  const authMethodRef = useRef<AuthMethod | null>(null);
+  useEffect(() => { authMethodRef.current = authMethod; }, [authMethod]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await invoke<{ key: string; value: string | null }>(
+          "get_setting",
+          { key: "claude_auth_method" }
+        );
+        const v = res?.value;
+        // Only restore if the user hasn't picked anything since mount.
+        if (authMethodRef.current !== null) return;
+        if (v === "claude_login" || v === "api_key" || v === "skip") {
+          setAuthMethod(v);
+        }
+      } catch { /* non-fatal */ }
+    })();
+  }, []);
+
+  // Subscribe to install-log events from main. Stays mounted across the
+  // whole onboarding flow so log lines that arrive between renders aren't
+  // dropped — but only the active install run appends.
+  useEffect(() => {
+    const off = window.aios?.onHostEvent?.((evt: any) => {
+      if (evt?.event !== "claude_install_log") return;
+      const line = String(evt?.data?.line ?? "");
+      if (!line) return;
+      setInstallLog((prev) => {
+        const next = prev + line;
+        // Cap the buffer so a chatty installer can't bloat React state
+        // without bound. ~32 KB is plenty for a tail UI.
+        return next.length > 32000 ? next.slice(-32000) : next;
+      });
+    });
+    return () => { off?.(); };
+  }, []);
+
+  // Keep the log view pinned to the bottom while streaming.
+  useEffect(() => {
+    if (installState !== "running") return;
+    const el = installLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [installLog, installState]);
+
+  async function persistAuthMethod(method: AuthMethod, message?: string) {
+    try {
+      await invoke("set_setting", { key: "claude_auth_method", value: method });
+    } catch { /* non-fatal — the user can re-pick if persistence failed */ }
+    setAuthMethod(method);
+    if (message) setAuthMessage(message);
+  }
+
+  async function openClaudeLoginTerminal() {
+    setAuthBusy(true);
+    setAuthMessage(null);
+    try {
+      const res = await invoke<{ ok: boolean; error?: string }>("open_claude_login_terminal");
+      if (!res?.ok) {
+        setAuthMessage(res?.error ?? "Couldn't open a terminal — run `claude /login` manually.");
+      } else {
+        setAuthMessage("Sign in inside the terminal that just opened. Click 'I've signed in' when done.");
+      }
+    } catch (err) {
+      setAuthMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function confirmClaudeLogin() {
+    setAuthBusy(true);
+    try {
+      await persistAuthMethod("claude_login", "Signed in with Claude.ai.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function installClaude() {
+    setInstallState("running");
+    setInstallLog("");
+    setSetupMessage(null);
+    try {
+      const res = await invoke<{ ok: boolean; error?: string }>("install_claude");
+      if (res?.ok) {
+        setInstallState("done");
+        // Give the OS a beat to register the new binary in PATH, then
+        // re-run auto-detect so the connect card flips to "Connected".
+        await new Promise((r) => setTimeout(r, 600));
+        const detected = await onClaudeChanged();
+        if (detected.found) {
+          setSetupMessage(`Installed ${detected.version ?? "Claude Code"}. Now sign in to connect your account.`);
+          // Fresh Claude install needs auth before it can run any prompt.
+          // Spawn a terminal with `claude /login` so the user lands directly
+          // in Claude's own login flow (which itself offers API-key vs
+          // Claude.ai). One terminal per session — re-installs reuse it.
+          if (!loginTerminalSpawnedRef.current) {
+            loginTerminalSpawnedRef.current = true;
+            try {
+              await invoke("open_claude_login_terminal");
+              setAuthMessage("A terminal opened with `claude /login` running — sign in there, then click 'I've signed in' below.");
+            } catch {
+              setAuthMessage("Sign in by running `claude /login` in a terminal, then click 'I've signed in' below.");
+            }
+          } else {
+            setAuthMessage("Sign in inside the `claude /login` terminal we already opened, then click 'I've signed in' below.");
+          }
+        } else {
+          setSetupMessage("Installed. Restart AIOS so it picks up the new PATH, or paste the path manually below.");
+        }
+      } else {
+        setInstallState("failed");
+        setSetupMessage(res?.error ?? "Install did not finish — see log below.");
+      }
+    } catch (err) {
+      setInstallState("failed");
+      setSetupMessage(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const question = onboardingQuestions[step];
   const completed = Boolean(state?.completedAt) || step >= onboardingQuestions.length;
   const answeredCount = onboardingQuestions.filter((item) => answers[item.id]?.trim()).length;
   const claudeReady = Boolean(claude?.found && claude.runtimeOk);
+  // `claude === null` means initial detection hasn't completed yet (App.tsx
+  // sets it after find_claude or after reading workspace.claudePath). During
+  // that window we don't yet know whether to show the Install card or the
+  // Auth picker — guessing wrong flashes the wrong UI for ~500-2000ms on
+  // cold start, which reads as a bug to the user ("install steps showing
+  // even though Claude is connected").
+  const claudeDetecting = claude === null;
+  const claudeMissing = !claudeDetecting && !claudeReady;
   const activeLayer = profileLayers.find((item) => item.source === question?.layer) ?? profileLayers[0];
   const activeLayerIndex = profileLayers.findIndex((item) => item.source === activeLayer.source);
   const layerQuestions = onboardingQuestions.filter((item) => item.layer === activeLayer.source);
@@ -103,7 +268,10 @@ export function OnboardingScreen({
   async function continueFromConnect() {
     setSaving(true);
     try {
-      await invoke("set_setting", { key: "claude_auth_mode", value: "claude_code" });
+      // Note: `claude_auth_mode` was a legacy key from an earlier flow that
+      // nothing reads anymore. The new auth picker writes `claude_auth_method`
+      // and the hydration effect reads that. We keep no longer write the
+      // legacy key — it was a no-op and the mismatch made debugging confusing.
       setStage("profile");
     } finally { setSaving(false); }
   }
@@ -152,12 +320,19 @@ export function OnboardingScreen({
     setDraft(answers[onboardingQuestions[last]?.id] ?? "");
   }
 
+  function skipConnect() {
+    // Connect-stage Skip → advance to Profile. Skipping a step should
+    // move forward one stage, not jump straight to Ready (the old
+    // behavior, which surprised users testing the onboarding flow).
+    setSetupMessage(null);
+    setStage("profile");
+  }
+
   function skipProfile() {
-    // Match the Next-button flow: don't immediately bounce into chat, route
-    // through the stage-3 "Ready" summary so the user gets the same
-    // confirmation card and clicks "Start using AIOS" themselves. The
-    // existing finish() handler is what actually persists onboarding state
-    // and navigates, so we don't duplicate that work here.
+    // Profile-stage Skip → jump straight to Ready. The user has already
+    // moved past Connect at this point; bouncing through more questions
+    // they explicitly skipped would be friction. The Ready summary card
+    // gives them a confirmation step before landing in chat.
     setSetupMessage(null);
     setStage("finish");
   }
@@ -249,22 +424,76 @@ export function OnboardingScreen({
 
             {setupMessage ? <p className={`onboarding-v2-msg ${/fail|not|invalid/i.test(setupMessage) ? "is-warn" : "is-ok"}`}>{setupMessage}</p> : null}
 
-            {!claudeReady ? (
+            {claudeDetecting ? (
+              <div className="onboarding-v2-msg">
+                <Loader2 size={12} className="spin" /> Checking for Claude Code on this machine…
+              </div>
+            ) : null}
+
+            {claudeMissing ? (
               <div className="onboarding-v2-help">
                 <div className="onboarding-v2-help-row">
                   <div className="onboarding-v2-help-text">
                     <strong>Don't have Claude Code yet?</strong>
-                    <span>It's a free CLI from Anthropic — install once, AIOS finds it next launch.</span>
+                    <span>
+                      AIOS can install it for you — runs the official Anthropic
+                      installer ({isMacOrLinux ? "curl + bash" : "PowerShell"}).
+                      No Node or npm required.
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    className="onboarding-v2-link"
-                    onClick={() => { void window.aios?.openExternal?.("https://docs.anthropic.com/en/docs/claude-code/setup"); }}
-                  >
-                    Install Claude Code
-                    <ExternalLink size={11} />
-                  </button>
+                  {installState === "idle" || installState === "failed" ? (
+                    <button
+                      type="button"
+                      className="btn-pill"
+                      onClick={installClaude}
+                      disabled={saving}
+                    >
+                      <Download size={14} />
+                      {installState === "failed" ? "Try again" : "Install Claude Code"}
+                    </button>
+                  ) : null}
+                  {installState === "running" ? (
+                    <span className="status-pill is-pending">
+                      <Loader2 size={11} className="spin" /> Installing…
+                    </span>
+                  ) : null}
+                  {installState === "done" ? (
+                    <span className="status-pill is-ok">
+                      <Check size={11} strokeWidth={3} /> Installed
+                    </span>
+                  ) : null}
                 </div>
+
+                {installState === "running" || installState === "failed" || installState === "done" ? (
+                  <>
+                    <div className="hairline" />
+                    <pre
+                      ref={installLogRef}
+                      className={`onboarding-v2-install-log ${installState === "failed" ? "is-failed" : ""}`}
+                      aria-live="polite"
+                    >
+                      {installLog || (installState === "running" ? "Starting installer…" : "")}
+                    </pre>
+                    {installState === "failed" ? (
+                      <div className="onboarding-v2-help-row">
+                        <div className="onboarding-v2-help-text">
+                          <AlertTriangle size={11} /> If the auto-installer keeps
+                          failing, install manually from Anthropic's docs and we'll
+                          pick it up on next launch.
+                        </div>
+                        <button
+                          type="button"
+                          className="onboarding-v2-link"
+                          onClick={() => { void window.aios?.openExternal?.("https://docs.claude.com/en/docs/claude-code/setup"); }}
+                        >
+                          Open install docs
+                          <ExternalLink size={11} />
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+
                 <div className="hairline" />
                 <div className="onboarding-v2-help-row">
                   <div className="onboarding-v2-help-text">
@@ -295,11 +524,93 @@ export function OnboardingScreen({
               </div>
             ) : null}
 
+            {/*
+              Only auto-show the auth picker when AIOS just ran the installer
+              this session (installState === "done"). Users who already had
+              Claude Code installed before AIOS launched almost certainly have
+              it authenticated already (otherwise their existing setup
+              wouldn't work), so making them pick an auth method again is
+              friction without value. If chat later fails with an auth error
+              we can surface the picker reactively.
+            */}
+            {claudeReady && !authMethod && installState === "done" ? (
+              <div className="onboarding-v2-auth">
+                <div className="onboarding-v2-auth-head">
+                  <p className="eyebrow">Sign in to Claude</p>
+                  <h2>Connect your Claude account.</h2>
+                  <p>
+                    We opened a terminal running <code>claude /login</code>. It walks you through
+                    picking your auth method (Claude.ai for Pro/Max, or an API key) and signs you in.
+                    Once you're done, click <em>I've signed in</em>.
+                  </p>
+                </div>
+
+                <div className="onboarding-v2-auth-grid">
+                  <div className="onboarding-v2-auth-card is-active">
+                    <div className="onboarding-v2-auth-card-head">
+                      <div className="onboarding-v2-auth-icon"><LogIn size={16} /></div>
+                      <div>
+                        <strong>Sign in via terminal</strong>
+                        <span>Use the <code>claude /login</code> window we just opened.</span>
+                      </div>
+                    </div>
+                    <div className="onboarding-v2-auth-card-body">
+                      <div className="onboarding-v2-auth-actions">
+                        <button
+                          type="button"
+                          className="btn-pill-ghost"
+                          onClick={openClaudeLoginTerminal}
+                          disabled={authBusy}
+                        >
+                          <Terminal size={14} /> Reopen terminal
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-pill"
+                          onClick={confirmClaudeLogin}
+                          disabled={authBusy}
+                        >
+                          <Check size={14} /> I've signed in
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {authMessage ? (
+                  <p className={`onboarding-v2-msg ${/fail|couldn|error/i.test(authMessage) ? "is-warn" : "is-ok"}`}>
+                    {authMessage}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {claudeReady && authMethod ? (
+              <p className="onboarding-v2-msg is-ok">
+                <Check size={12} /> Auth method set:{" "}
+                {authMethod === "claude_login" ? "Claude.ai account"
+                  : authMethod === "api_key" ? "Anthropic API key"
+                  : "Skipped (configure later)"}.
+                {" "}
+                <button
+                  type="button"
+                  className="onboarding-v2-link is-inline"
+                  onClick={() => { setAuthMethod(null); setAuthMessage(null); }}
+                >
+                  Change
+                </button>
+              </p>
+            ) : null}
+
             <div className="onboarding-v2-foot">
-              <button className="btn-pill-ghost" onClick={skipProfile} disabled={saving}>
+              <button className="btn-pill-ghost" onClick={skipConnect} disabled={saving}>
                 Skip for now
               </button>
-              <button className="btn-pill" onClick={continueFromConnect} disabled={saving || !claudeReady}>
+              <button
+                className="btn-pill"
+                onClick={continueFromConnect}
+                disabled={saving || !claudeReady}
+              >
                 Continue
                 <ArrowRight size={14} />
               </button>

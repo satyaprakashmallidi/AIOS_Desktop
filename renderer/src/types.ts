@@ -73,7 +73,10 @@ export type AiosCommand =
   | "delete_task"
   | "whatsapp_status"
   | "whatsapp_start"
-  | "whatsapp_stop";
+  | "whatsapp_stop"
+  | "export_to_pdf"
+  | "install_claude"
+  | "open_claude_login_terminal";
 
 export interface AgentInfo {
   id: string;
@@ -146,6 +149,7 @@ export interface AiosApi {
   invoke<T = unknown>(cmd: AiosCommand, args?: Record<string, unknown>): Promise<ApiResponse<T>>;
   onHostEvent: (callback: (event: HostEvent) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  cacheTheme: (theme: string) => Promise<{ ok: boolean }>;
   openOauthWindow: (url: string) => Promise<{ ok: boolean; completed?: boolean; error?: string }>;
   getVersion: () => Promise<string>;
   checkForUpdates: () => Promise<{ ok: boolean; reason?: string; error?: string; currentVersion?: string; latestVersion?: string; hasUpdate?: boolean; manualDownloadUrl?: string }>;

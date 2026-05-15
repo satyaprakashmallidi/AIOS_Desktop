@@ -430,6 +430,10 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     try { localStorage.setItem("aios-theme", theme); } catch { /* ignore */ }
+    // Persist to disk so the next cold start's Electron BrowserWindow can
+    // pick the right backgroundColor BEFORE the renderer (and its
+    // localStorage) is loaded — kills the ~100ms light flash for dark users.
+    try { window.aios?.cacheTheme?.(theme); } catch { /* ignore */ }
   }, [theme]);
 
   // Sync theme changes from settings (every 2s for reactive feel across instances)

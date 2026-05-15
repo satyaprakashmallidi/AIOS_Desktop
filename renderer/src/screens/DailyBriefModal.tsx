@@ -161,7 +161,6 @@ export function DailyBriefModal({ status, claude, onAcknowledge, onOpenBriefsPag
                 type="button"
                 className="daily-brief-secondary"
                 onClick={acknowledge}
-                disabled={loading}
                 title="Dismiss the modal — today's brief keeps generating in the background and lands in the Briefs tab"
               >
                 Skip for now

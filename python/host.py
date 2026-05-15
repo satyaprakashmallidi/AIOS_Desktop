@@ -327,7 +327,7 @@ def _mcp_isolation_flags() -> list[str]:
         return []
 
 
-_COMPOSIO_SYSTEM_PROMPT = (
+_COMPOSIO_SYSTEM_PROMPT_BASE = (
     "Tools: COMPOSIO_SEARCH_TOOLS finds a slug, COMPOSIO_MULTI_EXECUTE_TOOL "
     "runs it. Use these — don't assume what's connected.\n"
     "• Local Tasks: To add a mission to the AIOS 'Tasks' page, run from your "
@@ -347,6 +347,11 @@ _COMPOSIO_SYSTEM_PROMPT = (
     "headings. If you find yourself about to write a second outputs/* file for the "
     "same plan, STOP — append to the existing file or rewrite it instead. Users "
     "have hit 20+ files for one /implement run; that is a regression.\n"
+    "• Save as PDF: When the user asks to save, export, or download an answer as a "
+    "PDF, write your full Markdown answer normally, then end your reply with one "
+    "line on its own: `[AIOS_EXPORT_PDF: outputs/<short-slug>.pdf]` "
+    "AIOS will render your answer to a PDF in the workspace's outputs/ folder and "
+    "show a downloadable chip under your message. Pick a 2-4 word slug.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"
 
@@ -364,6 +369,58 @@ _COMPOSIO_SYSTEM_PROMPT = (
     "• Don't invent OAuth URLs or `lk_…` codes.\n"
     "• Don't reference the user's Claude login email or compare with connected accounts."
 )
+
+
+def _build_composio_system_prompt() -> str:
+    """Append a connector-scope-lock to the base prompt that lists the
+    services AIOS knows about and which are currently connected. Without
+    this, the spawned Claude wanders into recommending Perplexity / Brave /
+    Make.com / etc. — services we don't actually support."""
+    try:
+        from workspace import (
+            CONNECTOR_DISPLAY_NAMES,
+            KNOWN_CONNECTORS,
+            list_connected_service_slugs,
+        )
+    except Exception:
+        return _COMPOSIO_SYSTEM_PROMPT_BASE
+    available = ", ".join(
+        CONNECTOR_DISPLAY_NAMES.get(slug, slug) for slug in KNOWN_CONNECTORS
+    )
+    connected_slugs = list_connected_service_slugs()
+    connected_names = [
+        CONNECTOR_DISPLAY_NAMES.get(slug, slug) for slug in connected_slugs
+    ]
+    if connected_names:
+        connected_str = ", ".join(connected_names)
+        scope_block = (
+            "\n• Allowed services (the ONLY ones AIOS supports — never name any "
+            "other external service, even if it exists in the world): "
+            f"{available}.\n"
+            f"• Currently connected for this user: {connected_str}.\n"
+            "• If the user asks for a capability and the right connector is in the "
+            "allowed list but NOT connected, say: 'That's available — open the "
+            "Connectors page and connect <Service> first.' Then stop. Never "
+            "suggest Perplexity, Brave, Make.com, Zapier, n8n, IFTTT, or any "
+            "other service outside the allowed list above."
+        )
+    else:
+        scope_block = (
+            "\n• Allowed services (the ONLY ones AIOS supports — never name any "
+            f"other external service, even if it exists in the world): {available}.\n"
+            "• Nothing is connected yet. If the user asks you to act on a service, "
+            "tell them to open the Connectors page and connect it first. Never "
+            "suggest Perplexity, Brave, Make.com, Zapier, n8n, IFTTT, or any "
+            "other service outside the allowed list above."
+        )
+    return _COMPOSIO_SYSTEM_PROMPT_BASE + scope_block
+
+
+# Backwards-compatible name kept so existing call sites don't have to change.
+# Re-evaluated lazily so toggling a connector at runtime updates the prompt
+# on the next spawn.
+def _get_composio_system_prompt() -> str:
+    return _build_composio_system_prompt()
 
 
 def run_claude(
@@ -393,7 +450,7 @@ def run_claude(
     # about their inbox — we hit this with `tradephani@gmail.com` overriding
     # the legitimately-connected Composio account.
     mcp_isolation = _mcp_isolation_flags()
-    composio_hint = ["--append-system-prompt", _COMPOSIO_SYSTEM_PROMPT] if mcp_isolation else []
+    composio_hint = ["--append-system-prompt", _get_composio_system_prompt()] if mcp_isolation else []
     # Per-call system-prompt overlay — used by chat when an @agent is selected.
     # Stacks on top of the Composio hint, so the agent persona wraps inside the
     # tool-use guardrails. Empty / missing = chat default behavior.

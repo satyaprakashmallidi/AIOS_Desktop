@@ -76,7 +76,10 @@ const allowedCommands = new Set<AiosCommand>([
   "delete_task",
   "whatsapp_status",
   "whatsapp_start",
-  "whatsapp_stop"
+  "whatsapp_stop",
+  "export_to_pdf",
+  "install_claude",
+  "open_claude_login_terminal"
 ]);
 
 contextBridge.exposeInMainWorld("aios", {
@@ -93,6 +96,8 @@ contextBridge.exposeInMainWorld("aios", {
   },
   openExternal: (url: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-external", url),
+  cacheTheme: (theme: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("aios:cache-theme", theme),
   openOauthWindow: (url: string): Promise<{ ok: boolean; completed?: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-oauth-window", url),
   getVersion: (): Promise<string> => ipcRenderer.invoke("aios:get-version"),

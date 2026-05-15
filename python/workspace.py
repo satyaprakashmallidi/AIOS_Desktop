@@ -1329,7 +1329,104 @@ KNOWN_CONNECTORS = [
     "twitter",
     # Messaging via API key (v0.1.16+)
     "telegram",
+    # Social (v0.1.17+)
+    "facebook",
+    "instagram",
+    # Local Baileys-based pairing (v0.1.19+)
+    "whatsapp-personal",
+    # v0.1.26 connectors expansion — productivity, storage, design, dev, voice
+    "supabase",
+    "google-drive",
+    "airtable",
+    "firecrawl",
+    "discord",
+    "onedrive",
+    "exa",
+    "elevenlabs",
+    "salesforce",
+    "calendly",
+    "google-meet",
+    "zoho",
+    "dropbox",
+    "heygen",
+    "yousearch",
+    "retellai",
+    "canva",
+    "cal-com",
+    "telnyx",
+    "cloudflare",
+    "reddit",
+    "cloudinary",
+    "convex",
+    "dockerhub",
+    "excel",
+    "google-maps",
 ]
+
+
+# Pretty display names for the connector-scope-lock string injected into the
+# Composio system prompt. Keep in sync with CONNECTOR_CATALOG.label in
+# renderer/src/screens/ConnectorsScreen.tsx.
+CONNECTOR_DISPLAY_NAMES = {
+    "gmail": "Gmail",
+    "google-calendar": "Google Calendar",
+    "slack": "Slack",
+    "clickup": "ClickUp",
+    "notion": "Notion",
+    "github": "GitHub",
+    "stripe": "Stripe",
+    "youtube": "YouTube",
+    "google-analytics": "Google Analytics",
+    "google-sheets": "Google Sheets",
+    "outlook": "Outlook",
+    "linkedin": "LinkedIn",
+    "whatsapp": "WhatsApp Business",
+    "twitter": "X (Twitter)",
+    "telegram": "Telegram",
+    "facebook": "Facebook",
+    "instagram": "Instagram",
+    "whatsapp-personal": "WhatsApp Personal",
+    "supabase": "Supabase",
+    "google-drive": "Google Drive",
+    "airtable": "Airtable",
+    "firecrawl": "Firecrawl",
+    "discord": "Discord",
+    "onedrive": "OneDrive",
+    "exa": "Exa",
+    "elevenlabs": "ElevenLabs",
+    "salesforce": "Salesforce",
+    "calendly": "Calendly",
+    "google-meet": "Google Meet",
+    "zoho": "Zoho",
+    "dropbox": "Dropbox",
+    "heygen": "HeyGen",
+    "yousearch": "You.com",
+    "retellai": "Retell AI",
+    "canva": "Canva",
+    "cal-com": "Cal.com",
+    "telnyx": "Telnyx",
+    "cloudflare": "Cloudflare",
+    "reddit": "Reddit",
+    "cloudinary": "Cloudinary",
+    "convex": "Convex",
+    "dockerhub": "DockerHub",
+    "excel": "Excel",
+    "google-maps": "Google Maps",
+}
+
+
+def list_connected_service_slugs() -> list[str]:
+    """Return the slugs of connectors that the user has actually authorized
+    (those with a populated `connector_label_<slug>` entry in app_state).
+    Used by the host to inject a connector-scope-lock string into the
+    Composio system prompt — the spawned Claude only references services that
+    are wired AND connected.
+    """
+    connected: list[str] = []
+    for service in KNOWN_CONNECTORS:
+        if get_setting(f"connector_label_{service}"):
+            connected.append(service)
+    return connected
 
 
 def list_connector_status() -> dict[str, Any]:

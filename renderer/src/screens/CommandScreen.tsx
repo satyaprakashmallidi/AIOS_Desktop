@@ -805,6 +805,29 @@ export function CommandScreen({
         taskArgs
       );
       const nextClaudeSessionId = result.sessionId ?? activeSession.claudeSessionId ?? null;
+      // Strip out [AIOS_EXPORT_PDF: outputs/<filename>.pdf] markers (used
+      // by the agent to request a PDF export of its own answer) and kick off
+      // the local renderer. The body of the response BECOMES the PDF; the
+      // marker is just a signal. Markers are removed from the displayed text
+      // so the chat stays clean.
+      const exportMarkerRe = /\[AIOS_EXPORT_PDF:\s*outputs\/([A-Za-z0-9._-]+\.pdf)\s*\]/i;
+      const exportMatch = result.response.match(exportMarkerRe);
+      const cleanedResponse = result.response.replace(/\[AIOS_EXPORT_PDF:[^\]\r\n]+\]/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+      let pdfAttachment: import("../types").ChatAttachment | null = null;
+      if (exportMatch) {
+        const filename = exportMatch[1];
+        try {
+          const exportRes = await invoke<{ ok: boolean; path: string; filename: string }>(
+            "export_to_pdf",
+            { markdown: cleanedResponse, filename }
+          );
+          if (exportRes?.ok && exportRes.path) {
+            pdfAttachment = { kind: "output", path: exportRes.path, filename: exportRes.filename };
+          }
+        } catch {
+          /* PDF rendering is best-effort; chat still shows the text answer */
+        }
+      }
       const saved = {
         ...nextSession,
         messages: nextSession.messages.map((message) =>
@@ -814,7 +837,14 @@ export function CommandScreen({
           // forever — the "Claude is thinking…" indicator gets stuck even
           // though the full response has rendered.
           message.id === assistant.id
-            ? { ...message, content: result.response, streamId: null }
+            ? {
+                ...message,
+                content: cleanedResponse,
+                streamId: null,
+                attachments: pdfAttachment
+                  ? [...(message.attachments ?? []), pdfAttachment]
+                  : message.attachments,
+              }
             : message
         ),
         updatedAt: new Date().toISOString(),
