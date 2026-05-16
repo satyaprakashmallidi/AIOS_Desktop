@@ -57,6 +57,7 @@ _RE_BLOCKED = re.compile(r"^\[BLOCKED:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILI
 _RE_NEEDS_CONNECTOR = re.compile(r"^\[NEEDS_CONNECTOR:\s*([^\]\n]+)\]\s*$", re.IGNORECASE | re.MULTILINE)
 _RE_SPAWN_AGENT = re.compile(r"^\[SPAWN_AGENT:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILINE)
 _RE_ASSIGN_TASK = re.compile(r"^\[ASSIGN_TASK:\s*(.+)\]\s*$", re.IGNORECASE | re.MULTILINE)
+_RE_AWAITING_APPROVAL = re.compile(r"^\[AWAITING_APPROVAL:\s*([^\]\n]+)\]\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 _BroadcastFn = Callable[[str, dict[str, Any]], None]
@@ -182,6 +183,29 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
     task_message = task["message"]
     if is_synthesis_pass:
         task_message = _build_synthesis_message(task)
+    elif _was_last_action_approval(task):
+        # User approved the agent's preview. Re-feed the previous draft so
+        # the fresh subprocess (no Claude session continuity) knows what to
+        # actually execute. Operator may have added a note to the approve
+        # action — surface it too in case they want a small tweak.
+        prior_draft = (task.get("result") or "").strip()
+        approver_note = _last_operator_note(task)
+        approval_block = (
+            "USER APPROVED YOUR PROPOSED ACTION.\n\n"
+            "Here is what you previously drafted and showed them:\n\n"
+            f"{prior_draft if prior_draft else '(no draft captured — re-read the task message)'}\n\n"
+            "Now actually EXECUTE that action via the appropriate tool calls. "
+            "Do NOT emit [AWAITING_APPROVAL:] this time — the user has already "
+            "approved. Perform the action, then report in plain language what "
+            "happened (e.g. message id, status, who received it)."
+        )
+        if approver_note:
+            approval_block += (
+                "\n\nThe user attached this note alongside their approval — "
+                "apply it as a small tweak before executing:\n"
+                f"{approver_note}"
+            )
+        task_message = f"{task_message}\n\n{approval_block}"
     else:
         operator_guidance = _operator_retry_guidance(task)
         if operator_guidance:
@@ -566,8 +590,24 @@ def _run_one_task(task: dict[str, Any], broadcast: _BroadcastFn) -> None:
         broadcast("task_update", {"taskId": task_id, "status": "awaiting_children"})
         return
 
+    approval_match = _RE_AWAITING_APPROVAL.search(final_text_clean)
     needs_match = _RE_NEEDS_CONNECTOR.search(final_text_clean)
     blocked_match = _RE_BLOCKED.search(final_text_clean)
+
+    if approval_match:
+        # Strip the sentinel from the body the UI shows so the user only sees
+        # the draft itself, not the bracketed marker.
+        preview_text = _RE_AWAITING_APPROVAL.sub("", final_text_clean).strip()
+        tasks_store.update_task_status(
+            task_id,
+            "awaiting_approval",
+            blocked_reason=approval_match.group(1).strip(),
+            result=preview_text or final_text_clean,
+            claude_session_id=session_id,
+        )
+        broadcast("task_update", {"taskId": task_id, "status": "awaiting_approval"})
+        _maybe_trigger_parent(task_id, broadcast)
+        return
 
     if needs_match:
         tasks_store.update_task_status(
@@ -653,12 +693,58 @@ def _build_synthesis_message(parent_task: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _was_last_action_approval(task: dict[str, Any]) -> bool:
+    """True if the most recent operator narrative event was an approve.
+
+    Used by the runner to switch from the default retry flow (re-feed the
+    operator's note as guidance) to the approval flow (re-feed the previous
+    draft + an EXECUTE NOW instruction). Without this, an approved task
+    would just re-draft instead of executing."""
+    narrative = task.get("narrative")
+    if not isinstance(narrative, list):
+        return False
+    for event in reversed(narrative):
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") != "operator":
+            continue
+        text = str(event.get("text") or "").strip()
+        # Approve writes "(approved)" or "(approved) <note>"; reject writes
+        # "(rejected)"; retry writes "(retry)" or just the note.
+        return text.startswith("(approved)") or text == "(approved)"
+    return False
+
+
+def _last_operator_note(task: dict[str, Any]) -> str:
+    """Return any free-text note attached to the most recent operator action,
+    stripped of the leading sentinel marker. Empty string when there is none."""
+    narrative = task.get("narrative")
+    if not isinstance(narrative, list):
+        return ""
+    for event in reversed(narrative):
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") != "operator":
+            continue
+        text = str(event.get("text") or "").strip()
+        for marker in ("(approved)", "(rejected)", "(retry)"):
+            if text == marker:
+                return ""
+            if text.startswith(f"{marker} "):
+                return text[len(marker) + 1:].strip()
+        return text
+    return ""
+
+
 def _operator_retry_guidance(task: dict[str, Any]) -> str:
     """Return recent user guidance entered from the task action box.
 
     The UI stores retry notes in narrative_json. Without feeding those notes
     back into the next Claude run, retries see the exact same original prompt
     and can block forever on a question the user already answered.
+
+    Strips the leading action marker (e.g. "(retry) ", "(rejected) ") so the
+    guidance reads like a plain instruction, not a tagged log entry.
     """
     narrative = task.get("narrative")
     if not isinstance(narrative, list):
@@ -670,9 +756,21 @@ def _operator_retry_guidance(task: dict[str, Any]) -> str:
         if event.get("kind") != "operator":
             continue
         text = str(event.get("text") or "").strip()
-        if not text or text in {"(retry)", "(approved)", "(rejected)"}:
+        if not text:
             continue
-        notes.append(text)
+        # Strip leading "(retry) " / "(rejected) " — these are bookkeeping,
+        # not guidance. Skip bare markers entirely.
+        stripped = text
+        for marker in ("(retry)", "(rejected)", "(approved)"):
+            if stripped == marker:
+                stripped = ""
+                break
+            if stripped.startswith(f"{marker} "):
+                stripped = stripped[len(marker) + 1:].strip()
+                break
+        if not stripped:
+            continue
+        notes.append(stripped)
     if not notes:
         return ""
     return "\n".join(f"- {note}" for note in notes[-3:])

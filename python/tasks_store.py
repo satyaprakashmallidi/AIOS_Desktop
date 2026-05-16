@@ -245,23 +245,26 @@ def task_action(
         raise ValueError(f"Unknown task: {task_id}")
     note = (note or "").strip()
     action = action.lower().strip()
+    # All operator actions store the action marker in text so the runner
+    # can tell approvals apart from retries when re-spawning. Format is
+    # always "(<action>)" or "(<action>) <note>" — never just the note.
     if action == "retry":
         # Re-queue: clear blocked/connector reasons and bring back to pending.
         append_narrative_event(
             task_id,
-            {"kind": "operator", "role": "user", "text": note or "(retry)", "agentId": "operator"},
+            {"kind": "operator", "role": "user", "text": f"(retry) {note}".strip() if note else "(retry)", "agentId": "operator"},
         )
         return update_task_status(task_id, "pending", blocked_reason="", needs_connector="")
     if action == "approve":
         append_narrative_event(
             task_id,
-            {"kind": "operator", "role": "user", "text": note or "(approved)", "agentId": "operator"},
+            {"kind": "operator", "role": "user", "text": f"(approved) {note}".strip() if note else "(approved)", "agentId": "operator"},
         )
         return update_task_status(task_id, "pending", blocked_reason="")
     if action == "reject":
         append_narrative_event(
             task_id,
-            {"kind": "operator", "role": "user", "text": note or "(rejected)", "agentId": "operator"},
+            {"kind": "operator", "role": "user", "text": f"(rejected) {note}".strip() if note else "(rejected)", "agentId": "operator"},
         )
         return update_task_status(task_id, "cancelled", blocked_reason="")
     if action == "cancel":

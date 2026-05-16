@@ -26,8 +26,11 @@ const KANBAN_COLUMNS: Array<{ id: Bucket; title: string; statuses: Set<TaskInfo[
 // jargon. "Blocked" sounds like a system error — but in practice it just
 // means the agent has a question for the user and is waiting for guidance.
 // "Needs your input" sets the right expectation: this is on you, not broken.
+// "Awaiting approval" → "Waiting for review" matches the language the user
+// actually thinks in ("review and approve") and reads as a calmer state.
 const STATUS_LABEL_OVERRIDES: Record<string, string> = {
   blocked: "Needs your input",
+  awaiting_approval: "Waiting for review",
 };
 
 function formatStatusLabel(status: string): string {
@@ -541,7 +544,7 @@ function TaskDetailsModal({
 
   const actionPlaceholder =
     task.status === "awaiting_approval"
-      ? "Optional context for the approving agent."
+      ? "Describe any changes the agent should make, or leave blank to approve as-is."
       : task.status === "awaiting_connection"
         ? "Optional update for the next run."
         : task.status === "blocked"
@@ -560,6 +563,7 @@ function TaskDetailsModal({
           : "Retry task";
 
   const blockedRetryNeedsInput = task.status === "blocked" && !actionNote.trim();
+  const changesNeedsInput = task.status === "awaiting_approval" && !actionNote.trim();
   const comments = task.narrative || [];
   const agentName = agentNameById(agents, task.agent_id);
 
@@ -650,10 +654,13 @@ function TaskDetailsModal({
             <section className="tasks-v2-action-box">
               <header>
                 <AlertTriangle size={14} />
-                <strong>Action required</strong>
+                <strong>{task.status === "awaiting_approval" ? "Review required" : "Action required"}</strong>
               </header>
               <p>
-                {task.status === "awaiting_approval" && "This task is waiting on your approval to proceed."}
+                {task.status === "awaiting_approval" &&
+                  (task.blocked_reason
+                    ? `The agent is ready to: ${task.blocked_reason}. Review the draft above, then approve or request changes.`
+                    : "The agent has prepared a draft above and is waiting for your review before executing.")}
                 {task.status === "awaiting_connection" &&
                   `${task.needs_connector ? `${task.needs_connector} isn't connected.` : "A required connector isn't connected."} Retry after connecting it.`}
                 {task.status === "blocked" &&
@@ -674,12 +681,18 @@ function TaskDetailsModal({
                       className="button button-primary compact"
                       disabled={actionLoading}
                       onClick={() => onAction("approve")}
-                    >Approve</button>
+                    >Approve &amp; continue</button>
                     <button
                       className="button button-ghost compact"
+                      disabled={actionLoading || changesNeedsInput}
+                      onClick={() => onAction("retry")}
+                      title={changesNeedsInput ? "Describe what to change in the box above first." : undefined}
+                    >Request changes</button>
+                    <button
+                      className="button button-danger-link compact"
                       disabled={actionLoading}
                       onClick={() => onAction("reject")}
-                    >Reject</button>
+                    >Cancel task</button>
                   </>
                 ) : (
                   <button

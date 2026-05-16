@@ -8733,7 +8733,8 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   border-color: #b45309;
   box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
 }
-.tasks-v2-action-buttons { display: flex; gap: 8px; }
+.tasks-v2-action-buttons { display: flex; gap: 8px; align-items: center; }
+.tasks-v2-action-buttons .button-danger-link { margin-left: auto; }
 
 .tasks-v2-narrative { display: flex; flex-direction: column; gap: 10px; }
 .tasks-v2-narrative > .eyebrow { display: block; }
