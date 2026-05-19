@@ -17,6 +17,7 @@ import {
   Square,
   Sun,
   Trash2,
+  Users,
   X,
   PanelLeft,
   LayoutGrid
@@ -436,16 +437,20 @@ function App() {
     try { window.aios?.cacheTheme?.(theme); } catch { /* ignore */ }
   }, [theme]);
 
-  // Sync theme changes from settings (every 2s for reactive feel across instances)
+  // Sync theme changes across renderer instances. Visibility-gated and slow
+  // because theme is rarely touched at runtime — the prior 2s ungated cadence
+  // was pure IPC churn (Python sidecar round-trip + setState) even with the
+  // window minimized.
   useEffect(() => {
     const timer = window.setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await invoke<{ value: string | null }>("get_setting", { key: "theme" });
         if (res?.value && res.value !== theme) {
           setTheme(res.value);
         }
       } catch { /* ignore */ }
-    }, 2000);
+    }, 10000);
     return () => window.clearInterval(timer);
   }, [theme]);
 
@@ -788,6 +793,7 @@ function App() {
           <NavItem icon={<FileText />} label="Context" active={screen === "context"} onClick={() => setScreen("context")} />
           <NavItem icon={<Inbox />} label="Imports" active={screen === "imports"} onClick={() => setScreen("imports")} />
           <NavItem icon={<Boxes />} label="Modules" active={screen === "modules"} onClick={() => setScreen("modules")} />
+          <NavItem icon={<Users />} label="Agents" active={screen === "agents"} onClick={() => setScreen("agents")} />
           <NavItem icon={<Plug />} label="Connectors" active={screen === "connectors"} onClick={() => setScreen("connectors")} />
           <NavItem icon={<ClipboardList />} label="Plans" active={screen === "plans"} onClick={() => setScreen("plans")} />
           <NavItem icon={<LayoutGrid />} label="Tasks" active={screen === "tasks"} onClick={() => setScreen("tasks")} />
@@ -974,7 +980,7 @@ function App() {
 
         {screen === "agents" && !setupRequired ? (
           <div className="screen-enter">
-          <AgentsScreen onBackToSettings={() => setScreen("settings")} />
+          <AgentsScreen claude={claude} />
           </div>
         ) : null}
 
@@ -1042,7 +1048,6 @@ function App() {
             workspace={workspace}
             onClaudeChanged={detectClaude}
             connections={connections}
-            onOpenAgents={() => setScreen("agents")}
             onOnboardingReset={async () => {
               await refreshWorkspace();
               setScreen("command");

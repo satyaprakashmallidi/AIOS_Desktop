@@ -230,10 +230,12 @@ Reset onboarding from Settings → "Reset onboarding" — calls the `reset_onboa
 
 These were tightened in the recent cleanup pass; preserve the spirit when adding new screens:
 
-- **All polling intervals are visibility-gated.** `if (document.visibilityState !== "visible") return;` at the top of every `setInterval` callback. Rates: workspace 60s, connectors heartbeat 120s, auto-tasks 60s.
+- **All polling intervals are visibility-gated.** `if (document.visibilityState !== "visible") return;` at the top of every `setInterval` callback. Rates: workspace 60s, connectors heartbeat 120s, auto-tasks 60s, theme-sync 10s.
 - **Body class `window-hidden`** is toggled on `visibilitychange`. The CSS rule `body.window-hidden *:after, *:before, * { animation-play-state: paused !important }` pauses every CSS animation when the window isn't visible.
 - **Memoized chat rendering**. `MessageMarkdown` (a memo'd ReactMarkdown wrapper) and `CodeBlock` are both `React.memo`. The `components` and `remarkPlugins` props are module-level constants — passing fresh object references would defeat memoization.
 - **Voice transcription** ticks at 3.5s (down from 2s) and skips when window is hidden.
+- **NO `backdrop-filter: blur(...)` on modal overlays.** Chromium-on-Electron-on-Windows Gaussian-blurs every pixel below the overlay on every frame — over a busy canvas (ReactFlow, chat list) it eats the modal-open frame budget and causes visible stutter. Dim with a slightly higher rgba alpha instead (e.g. `rgba(13,13,13,0.58)`). All existing overlays follow this rule as of v0.1.28 — preserve when adding new ones.
+- **Mount-time layout in one frame.** When a screen needs to compute initial positions then `fitView` (or similar 2-step work), use `requestAnimationFrame` rather than chained `setTimeout`s — see `AgentsScreen.tsx`'s first-mount layout reset.
 
 ---
 
@@ -290,6 +292,7 @@ renderer/src/
   screens/
     CommandScreen.tsx      Chat — voice, attachments, memoized markdown
     ConnectorsScreen.tsx   Connector cards, polling, identifyAccount
+    AgentsScreen.tsx       n8n-style ReactFlow canvas (v0.1.28); CEO + specialists tree, drag, double-click prompt editor
     OnboardingScreen.tsx   v2 welcome flow
     SettingsScreen.tsx     Reset onboarding, Claude path, theme
     HistoryScreen.tsx, AutoTasksScreen.tsx, ContextScreen.tsx, etc.
@@ -550,3 +553,51 @@ INSTALL.md                 NEW — SmartScreen bypass + first-launch notes
 - Send a message to a friend on WhatsApp: NO AIOS reply to them, NO leak into the agent chat
 - Settings → Reset onboarding: Profile-stage "Skip for now" lands on the Ready summary, not on chat directly
 - Daily Brief modal: "Skip for now" dismisses; reopen the app today and the modal does NOT reappear; the brief shows up in the Briefs tab as normal
+
+---
+
+## v0.1.28 — Agents canvas + app-wide perf
+
+### Agents as a top-level screen
+
+`AgentsScreen` (`renderer/src/screens/AgentsScreen.tsx`) was lifted out of Settings into its own sidebar entry (between Modules and Connectors). The old grid was replaced with an **n8n-style ReactFlow canvas** powered by `@xyflow/react`:
+
+- CEO node at the top; built-in specialists laid out in a single horizontal row below, alphabetical; custom agents extend the same row to the right. Edges go straight down from CEO to each child (smoothstep), so no path ever crosses another node.
+- Drag any node to rearrange — positions persist in localStorage (`aios.agents.canvas.positions.v3`) for the in-session experience. Every mount of the screen auto-resets to the canonical layout, so navigating away and back gives a clean slate. Drags are session-temporary.
+- Double-click a node → opens the existing `AgentDetailDrawer` (prompt editor, reset, delete).
+- Top-right floating `+` opens a `CreateAgentModal` (name, role, prompt). The modal includes a **"Generate with Claude" button** that runs the user's rough draft through Claude Haiku to rewrite it as a polished system prompt before saving — uses the existing `run_task` IPC with `model: "haiku"`.
+- Bottom-left fit/reorganize button wipes drag positions, recomputes the default tree, and animates a fit-view in one click.
+- Hover cursor on nodes is `pointer` (not `grab`) — desktop feel.
+
+The renderer calls four agent IPCs: `list_agents`, `update_agent_prompt`, `reset_agent_prompt`, `delete_agent` (all pre-existing), plus a new `create_custom_agent` IPC wired through all four cross-stack places (`main/types.ts`, `main/preload.ts`, `renderer/src/types.ts`, `python/host.py` dispatch around line 911 — the Python function already existed at `python/agents.py:457`, only the IPC plumbing is new).
+
+### App-wide perf cleanup
+
+The Agents canvas surfaced UI-lag issues that turned out to be app-wide, not specific to the new screen. All fixed in v0.1.28:
+
+- **Killed `backdrop-filter: blur(...)` on every modal overlay (7 places).** Chromium-on-Electron-on-Windows was Gaussian-blurring the entire page below every modal on every frame — over a busy canvas, this dominated the modal-open frame budget and caused visible stutter. Replaced with a small rgba alpha bump (0.04-0.08). Touched: `.daily-brief-overlay`, `.briefs-modal-overlay`, `.detail-modal-overlay` (two definitions), `.confirm-modal-overlay`, `.connector-creds-overlay`, `.wa-modal-overlay`, `.agents-drawer-overlay`. **This is now a hard rule — see Performance discipline.**
+- **Theme-sync poll fixed** (`App.tsx:441-451`). Was 2s ungated → 10s + visibility-gated. Eliminates idle IPC churn even when the window is minimized.
+- **Agents drawer animation simplified**: dropped the `translateX(32px) → 0` slide, kept opacity-only fade; duration 200ms → 140ms; box-shadow `-16px 0 48px` → `-8px 0 24px` (smaller blur radius = faster paint).
+- **AgentsScreen mount sequence collapsed.** Was `setTimeout(80) → setNodes → setTimeout(50) → fitView` (three frames of state churn). Now `requestAnimationFrame(reorganize)` runs in one frame, instant settle.
+- **Scoped the global button-press transform.** `button:active { transform: scale(0.98) }` → `.button:active { transform: scale(0.98) }` so it doesn't fire on ReactFlow controls, node action elements, or any non-design-system `<button>`.
+- **Removed a dead duplicate `.screen-enter` keyframes block** — two definitions, the second was winning, the first was unused.
+
+After these, modals snap open with no stutter even over the live ReactFlow canvas, and idle CPU drops noticeably.
+
+### Files changed (v0.1.28)
+
+```
+renderer/src/App.tsx              Sidebar NavItem for Agents; theme poll fix; AgentsScreen prop wiring
+renderer/src/screens/AgentsScreen.tsx
+                                  Full rewrite: ReactFlow canvas, tree layout, drag persistence,
+                                  Create modal with "Generate with Claude", reorganize button
+renderer/src/screens/SettingsScreen.tsx
+                                  Removed the now-redundant Team/Agents section + prop wiring
+renderer/src/styles.css           Removed backdrop-filter from 7 overlays; tightened Agents drawer
+                                  animation; scoped .button:active transform; cleanup
+main/types.ts                     +create_custom_agent in AiosCommand union
+main/preload.ts                   +create_custom_agent in allowlist
+renderer/src/types.ts             +create_custom_agent mirror
+python/host.py                    +create_custom_agent dispatch entry (Python function pre-existed)
+package.json                      +@xyflow/react dependency; version 0.1.27 → 0.1.28
+```

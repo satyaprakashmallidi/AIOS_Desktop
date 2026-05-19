@@ -915,6 +915,12 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         ),
         "reset_agent_prompt": lambda a: agents_mod.reset_agent_prompt(require_str(a, "id")),
         "delete_agent": lambda a: agents_mod.delete_agent(require_str(a, "id")),
+        "create_custom_agent": lambda a: agents_mod.create_custom_agent(
+            name=require_str(a, "name"),
+            role=str(a.get("role") or "").strip() or "Custom agent",
+            prompt=require_str(a, "prompt"),
+            parent_id=str(a.get("parentId") or "").strip() or "ceo",
+        ),
         # Tasks — local Kanban store. The runner that spawns Claude per task
         # lands in Phase 2 (v0.1.17). For now the queue accepts work and
         # persists it; status stays at "pending" until the runner exists.

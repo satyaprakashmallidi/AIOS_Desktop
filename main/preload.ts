@@ -68,6 +68,7 @@ const allowedCommands = new Set<AiosCommand>([
   "update_agent_prompt",
   "reset_agent_prompt",
   "delete_agent",
+  "create_custom_agent",
   "list_tasks",
   "get_task",
   "create_task",
