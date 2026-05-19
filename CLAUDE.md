@@ -601,3 +601,106 @@ renderer/src/types.ts             +create_custom_agent mirror
 python/host.py                    +create_custom_agent dispatch entry (Python function pre-existed)
 package.json                      +@xyflow/react dependency; version 0.1.27 → 0.1.28
 ```
+
+---
+
+## v0.2.0 — Voice Control (speak → Claude sees screen → executes actions)
+
+A TipTour-inspired voice loop that lets the user speak a command and have Claude drive the cursor + keyboard to fulfil it across any app. Mac-first design (eventual Swift sidecar with native AX tree); Windows ships as the production path today via the Python sidecar + UIAutomation.
+
+### How it works
+
+```
+User clicks the Voice button (bottom-left of sidebar) OR presses Ctrl+Alt+V global hotkey
+  → renderer captures mic via existing AudioContext + transcribe_audio IPC
+  → transcript posted to voice_control_start IPC (main/voice-control.ts)
+  → orchestrator loops:
+      capture_screen + screen_ax_tree (parallel)
+      → run_task with screenshot path + AX summary + system prompt
+      → parse one [SENTINEL: ...] action from Claude's reply
+      → execute via voice_click / voice_type / voice_hotkey / voice_open / etc.
+      → repeat until [DONE] / [BLOCKED] / max turns
+  → on [DONE], take a fresh screenshot and run an INDEPENDENT verifier call;
+    only accept DONE if verifier says [VERIFIED: ...]; otherwise convert to BLOCKED
+```
+
+### Critical design choices
+
+- **Universal evidence pattern (no hardcoded task categories).** Claude declares a `SUCCESS_CRITERION:` on turn 1 — a specific, falsifiable, visible-on-screen condition derived from the user's request. Every subsequent turn checks the screen against the criterion. Before [DONE], a server-side verifier independently derives ITS OWN criterion from the user's transcript and rechecks the fresh screenshot. False [DONE] is treated as the worst possible outcome.
+- **Action sentinels** Claude can emit (parsed by `main/voice-control.ts:SENTINEL_RE`):
+  `[OPEN]`, `[CLICK]` (with `target_id` or `x,y`, `button`, `clicks`), `[TYPE]` (with `clear`), `[HOTKEY]`, `[SCROLL]`, `[MOVE]`, `[DRAG]`, `[CLIPBOARD_SET]`, `[CLIPBOARD_GET]`, `[WAIT]`, `[CONTINUE]`, `[DONE]`, `[BLOCKED]`.
+- **AX tree resolution (Windows).** Each turn fetches up to 200 elements from the focused window via the `uiautomation` Python lib, summarises the top 40 by area into the prompt (`[14] ButtonControl "Submit" @ 480,320 200x40`). Claude prefers `[CLICK: target_id=14]` (resolved to bounds-center) over guessing pixel coords. Walked at depth 8 with a 1.5s time budget. **Mac falls back to pure vision** until the Swift sidecar lands.
+- **Smart app launching.** `voice_open` is a layered fallback chain:
+  1. PowerShell `Get-StartApps` (for any app-name target — Spotify, Discord, WhatsApp, anything in the Start menu). AppID may be an AUMID or a file path — script branches on which.
+  2. `cmd /c start "" <target>` (URLs, file paths, `ms-settings:`).
+  3. `os.startfile`, then direct `Popen` as last resorts.
+  On Mac: `open -a <name>` → `open <url>` → `open -b <bundleId>`.
+  After a successful Windows launch, `_win_bring_to_foreground` does the `AttachThreadInput + SetForegroundWindow + BringWindowToTop` dance to bring the new window forward so Claude doesn't burn a turn clicking the taskbar.
+- **Multi-monitor capture.** `screen_capture` defaults to `monitor: "active"` — uses `GetForegroundWindow` + `MonitorFromWindow` to capture the screen the user is actually working on. Other modes: `"primary"`, `"all"`, numeric index. Powered by `mss` (already a transitive dep of pyautogui).
+- **Dynamic turn budget.** Defaults to 16 turns. Claude can emit `[CONTINUE: reason="..."]` for +8 more (hard cap 32). The panel shows current/max.
+- **Repeat-action detection** (orchestrator). Each action is hashed to a normalized fingerprint (CLICK coords bucketed to 40-pixel cells, etc.). Second identical action → ⚠ warning injected into next prompt telling Claude to try a different approach. Third → loop aborts as BLOCKED. Kills the click-thrash failure mode.
+- **Per-action settle.** OPEN waits 1000ms before the next screenshot (apps need time to draw), DRAG 250ms, everything else 120ms.
+- **Hover-reveal UI guidance.** The prompt documents the `MOVE → CLICK` pattern for apps with hover-only action buttons (Spotify rows, YouTube tiles, GitHub PR rows, Linear, Gmail message rows, file-manager inline actions). Claude reaches for MOVE first instead of clicking phantom coords.
+- **Trigger surface.** Bottom-left Voice button in the sidebar footer (`renderer/src/App.tsx`); the same panel also opens via Ctrl+Alt+V global hotkey registered in `main/main.ts` (followed precedent of `Cmd+,` for preferences). Mac uses CommandOrControl+Alt+V; same UX. Panel shows live transcript, thinking/executing state, the action being executed (with target_id or coords), and a Stop button.
+
+### Action sentinel grammar (system prompt teaches all this)
+
+```
+[OPEN: target="<app/URL/path/protocol>"]
+[CLICK: target_id=N, label="..."]     // preferred when AX tree has the element
+[CLICK: x=NUM, y=NUM, label="...", button="left|right|middle", clicks=1|2|3]
+[TYPE: text="...", clear=true]        // clear=true wipes field first (Ctrl+A, Del)
+[HOTKEY: keys="ctrl+shift+t"]
+[SCROLL: dy=NUM]
+[MOVE: x=NUM, y=NUM, duration=0.2]    // hover without clicking
+[DRAG: x1=, y1=, x2=, y2=, button=, duration=]
+[CLIPBOARD_SET: text="..."] + [HOTKEY: keys="ctrl+v"]   // fast paste for long text
+[CLIPBOARD_GET]                       // result fed back into next turn's notes
+[WAIT: seconds=N]                     // ≤ 5s per call
+[CONTINUE: reason="..."]              // grants +8 turns (cap 32)
+[DONE: summary]
+[BLOCKED: reason]
+```
+
+### Release gate (prevents broken sidecar shipping)
+
+After v0.2.0 ran into a "every page shows NameError" incident — caused by editing `host.py` and accidentally deleting a function whose name was still referenced in the `dispatch` dict — the release workflow now runs `npm run check` (full TS build + JS/TS unit tests + Python sidecar tests including `test_dispatch_handlers_all_resolve`) BEFORE PyInstaller starts packaging. A broken `host.py` fails CI before any installer is uploaded. See `.github/workflows/release.yml` + `tests/host_test.py:test_dispatch_handlers_all_resolve`.
+
+### Files (v0.2.0)
+
+```
+main/voice-control.ts              NEW — orchestration loop, sentinel parser, AX-tree
+                                   summariser, action fingerprinting, evidence verifier
+main/main.ts                       +mainHandledCommands for voice_control_*; globalShortcut
+                                   Ctrl+Alt+V; globalShortcut.unregisterAll() on quit
+main/types.ts                      +voice_* IPC commands
+main/preload.ts                    +voice_* + onShortcutVoiceToggle
+renderer/src/types.ts              mirror union
+renderer/src/screens/VoiceControlPanel.tsx
+                                   NEW — bottom-left floating panel: mic capture, transcript
+                                   display, action labels, abort button
+renderer/src/App.tsx               +Voice button in sidebar footer; toggleSignal state;
+                                   Ctrl+Alt+V handler bumps the signal
+renderer/src/styles.css            +.voice-panel-* (bottom-left fixed positioning);
+                                   +.aios-sidebar-voice
+python/host.py                     +screen_capture (with monitor= arg + Win32 active-monitor
+                                   detection); +screen_ax_tree (uiautomation walker);
+                                   +voice_click/type/hotkey/scroll/move/open/drag;
+                                   +voice_clipboard_get/set; +voice_wait;
+                                   +_win_launch_via_start_apps (PS Get-StartApps);
+                                   +_win_bring_to_foreground (post-launch focus);
+                                   run_task accepts imagesBase64 → temp PNG → injected path
+python/requirements.txt            +pyautogui, +Pillow, +uiautomation (Windows-only)
+build/aios-host.spec               +hidden imports for pyautogui, mss, PIL, uiautomation, comtypes
+tests/host_test.py                 +test_dispatch_handlers_all_resolve (catches NameError-on-
+                                   dispatch class of bug before it ships)
+.github/workflows/release.yml      +Release gate step: npm run check BEFORE build:python
+package.json                       version 0.1.28 → 0.2.0
+```
+
+### Out of scope (deferred to v0.3+)
+
+- Mac Swift sidecar with native AX tree (needs a Mac to build/test). Mac users today get pyautogui-only fallback — clicks/types work, AX tree-grounded clicks don't.
+- Set-of-Mark overlay (numbered green boxes drawn on the screenshot from AX bounds). Planned but punted to keep this release focused.
+- Browser CDP integration for richer DOM access on web apps.
+- OCR fallback for apps that expose no UIA tree.

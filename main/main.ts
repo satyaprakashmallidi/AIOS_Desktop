@@ -8,6 +8,7 @@ import { PythonHost } from "./python-host";
 import { AutoTaskScheduler } from "./scheduler";
 import { ensureRuntimeWorkspace, getSourceStarterKit, backfillStarterKit } from "./workspace";
 import { startWhatsApp, stopWhatsApp, getWhatsAppStatus, autoStartWhatsApp } from "./whatsapp-scanner";
+import { startVoiceLoop, abortVoiceLoop, getVoiceState } from "./voice-control";
 
 let mainWindow: BrowserWindow | null = null;
 let host: PythonHost | null = null;
@@ -35,7 +36,11 @@ const mainHandledCommands = new Set<AiosCommand>([
   "whatsapp_stop",
   "export_to_pdf",
   "install_claude",
-  "open_claude_login_terminal"
+  "open_claude_login_terminal",
+  "voice_control_start",
+  "voice_control_stop",
+  "voice_control_abort",
+  "voice_control_state"
 ]);
 
 // Theme cache lives in userData so the main process can pick the right
@@ -272,6 +277,15 @@ function registerIpcHandlers(): void {
       mainWindow.webContents.send("shortcut:preferences");
     }
   });
+
+  // Global shortcut for voice control toggle (v0.2.0+). Works even when AIOS
+  // is in the background so the user can drive their OS without alt-tabbing.
+  // Default: Ctrl+Alt (Win) / Cmd+Option (Mac). Configurable in Settings later.
+  globalShortcut.register("CommandOrControl+Alt+V", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("shortcut:voice-toggle");
+    }
+  });
 }
 
 
@@ -350,6 +364,30 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
   if (cmd === "whatsapp_stop") {
     if (!mainWindow) throw new Error("No main window");
     return await stopWhatsApp(mainWindow);
+  }
+
+  if (cmd === "voice_control_start") {
+    const transcript = String(args.transcript ?? "").trim();
+    const claudePath = String(args.claudePath ?? "");
+    const maxTurnsArg = Number(args.maxTurns);
+    const maxTurns = Number.isFinite(maxTurnsArg) ? maxTurnsArg : undefined;
+    if (!transcript) throw new Error("transcript is required");
+    if (!claudePath) throw new Error("claudePath is required");
+    // Fire and forget — the loop streams state via 'aios:host-event' channel
+    // so the renderer doesn't have to block on this IPC for the full run.
+    startVoiceLoop({ transcript, claudePath, host, mainWindow, maxTurns }).catch((err) => {
+      log("voice", "loop failed", { error: err instanceof Error ? err.message : String(err) });
+    });
+    return { ok: true, accepted: true };
+  }
+
+  if (cmd === "voice_control_stop" || cmd === "voice_control_abort") {
+    await abortVoiceLoop(mainWindow);
+    return { ok: true };
+  }
+
+  if (cmd === "voice_control_state") {
+    return { state: getVoiceState() };
   }
 
   if (cmd === "install_claude") {
@@ -725,6 +763,7 @@ app.on("before-quit", (event) => {
   isCleaningUp = true;
   event.preventDefault();
   scheduler?.stop();
+  globalShortcut.unregisterAll();
   // host.stop() may be async — fire it, then exit on settle. Give it a 1.5s
   // ceiling so a wedged Python sidecar can't keep the app from quitting.
   const stopHost = Promise.resolve(host?.stop()).catch(() => undefined);

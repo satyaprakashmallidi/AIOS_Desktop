@@ -69,6 +69,22 @@ const allowedCommands = new Set<AiosCommand>([
   "reset_agent_prompt",
   "delete_agent",
   "create_custom_agent",
+  "screen_capture",
+  "screen_ax_tree",
+  "voice_click",
+  "voice_type",
+  "voice_hotkey",
+  "voice_scroll",
+  "voice_move",
+  "voice_open",
+  "voice_drag",
+  "voice_clipboard_get",
+  "voice_clipboard_set",
+  "voice_wait",
+  "voice_control_start",
+  "voice_control_stop",
+  "voice_control_abort",
+  "voice_control_state",
   "list_tasks",
   "get_task",
   "create_task",
@@ -120,6 +136,11 @@ contextBridge.exposeInMainWorld("aios", {
     },
     onShortcutPreferences: (callback: () => void) => {
       ipcRenderer.on("shortcut:preferences", () => callback());
+    },
+    onShortcutVoiceToggle: (callback: () => void) => {
+      const wrapped = () => callback();
+      ipcRenderer.on("shortcut:voice-toggle", wrapped);
+      return () => ipcRenderer.removeListener("shortcut:voice-toggle", wrapped);
     }
   }
 });

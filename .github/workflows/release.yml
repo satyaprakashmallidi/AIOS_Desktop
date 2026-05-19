@@ -55,6 +55,15 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      # Release gate. Runs Python sidecar tests + JS/TS unit tests +
+      # full TS build BEFORE we spend ~5 minutes packaging the sidecar
+      # and electron-builder. A broken host.py (e.g. dispatch entry
+      # referencing an undefined function — see test_dispatch_handlers_all_resolve)
+      # fails fast here instead of shipping a "every page is broken" build
+      # to auto-update users.
+      - name: Release gate (build + tests + Python sidecar dispatch check)
+        run: npm run check
+
       - name: Build Python sidecar
         env:
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}

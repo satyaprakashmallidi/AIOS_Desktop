@@ -43,6 +43,24 @@ class HostTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             workspace.read_file("../secret.txt")
 
+    def test_dispatch_handlers_all_resolve(self):
+        """Force the dispatch handlers dict to build and verify every
+        entry resolves to a callable. Catches the class of bug where an
+        edit deletes / renames a referenced function (e.g. voice_click)
+        but leaves the dispatch entry that references it — every IPC then
+        fails with NameError at runtime and the app appears completely
+        broken. Without this test, that bug ships to users."""
+        # Trigger the handlers dict build by calling dispatch with a
+        # sentinel command. The dict is built BEFORE the unknown-command
+        # check, so any NameError on a bound function fires here.
+        with self.assertRaises(HostError) as ctx:
+            dispatch("__validate_handlers__", {})
+        # Should fail with UNKNOWN_COMMAND, not NameError or any other
+        # binding error. If a referenced function doesn't exist, the
+        # dispatch dict construction raises NameError before getting to
+        # this check.
+        self.assertEqual(ctx.exception.code, "UNKNOWN_COMMAND")
+
 
 if __name__ == "__main__":
     unittest.main()

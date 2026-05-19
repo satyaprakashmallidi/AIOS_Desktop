@@ -776,16 +776,58 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
     prompt = str(args.get("prompt") or "").strip()
     if not prompt:
         raise HostError("EMPTY_PROMPT", "Prompt cannot be empty.")
-    return run_claude(
-        prompt,
-        str(args.get("claudePath") or "") or None,
-        timeout=180,
-        request_id=str(args.get("_requestId") or "") or None,
-        stream_id=str(args.get("streamId") or "") or None,
-        session_id=str(args.get("sessionId") or "") or None,
-        model=str(args.get("model") or "") or None,
-        system_prompt=str(args.get("systemPrompt") or "") or None,
-    )
+    # Voice-control loop sends screenshots inline as base64. Write each to a
+    # temp file in workspace/tmp/voice-control/ and reference the path in the
+    # prompt — Claude Code CLI has no --image flag, so the agent uses its
+    # Read tool (vision-capable on Sonnet+) to load the screenshot. One extra
+    # tool-use round trip per turn; cost is acceptable.
+    import base64
+    from uuid import uuid4
+    images_b64 = args.get("imagesBase64")
+    image_paths: list[str] = []
+    if isinstance(images_b64, list) and images_b64:
+        tmp_dir = workspace_root() / "tmp" / "voice-control"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        for b64 in images_b64:
+            if not isinstance(b64, str) or not b64:
+                continue
+            p = tmp_dir / f"{uuid4().hex}.png"
+            try:
+                p.write_bytes(base64.b64decode(b64))
+                image_paths.append(str(p))
+            except Exception:
+                # Skip malformed; do not fail the whole call.
+                pass
+    # Inject image paths at the top of the prompt with an explicit Read
+    # instruction so Claude doesn't ignore them.
+    if image_paths:
+        path_lines = "\n".join(f"  - {p}" for p in image_paths)
+        prompt = (
+            "The user attached the following image(s). Use the Read tool on each "
+            "BEFORE you reply so you can see them:\n"
+            f"{path_lines}\n\n"
+            "After reading the image(s), respond to the request below.\n\n"
+            "---\n\n"
+            f"{prompt}"
+        )
+    try:
+        return run_claude(
+            prompt,
+            str(args.get("claudePath") or "") or None,
+            timeout=180,
+            request_id=str(args.get("_requestId") or "") or None,
+            stream_id=str(args.get("streamId") or "") or None,
+            session_id=str(args.get("sessionId") or "") or None,
+            model=str(args.get("model") or "") or None,
+            system_prompt=str(args.get("systemPrompt") or "") or None,
+        )
+    finally:
+        for p in image_paths:
+            try:
+                from pathlib import Path as _P
+                _P(p).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def generate_daily_brief(args: dict[str, Any]) -> dict[str, Any]:
@@ -829,6 +871,520 @@ def require_str(args: dict[str, Any], key: str) -> str:
     if not isinstance(value, str):
         raise HostError("BAD_REQUEST", f"Missing string argument: {key}")
     return value
+
+
+# ─── Voice Control sidecar (v0.2.0+) ───────────────────────────────────────
+# Screen capture + mouse/keyboard execution for the voice-control action loop.
+# On Windows this is the production path. On macOS this is a fallback used
+# until the native Swift sidecar (with AX-tree resolution + ScreenCaptureKit)
+# is wired in. pyautogui is lazy-imported so the host startup cost stays low
+# for users who never activate voice control.
+
+def _pyautogui():
+    import pyautogui as _g
+    _g.FAILSAFE = True  # mouse to corner aborts — emergency stop
+    return _g
+
+
+def _active_monitor_bounds_win() -> dict[str, int] | None:
+    """Return the bounds of the monitor containing the foreground window on
+    Windows. None on failure or when no foreground window exists."""
+    if not hasattr(__import__("sys"), "getwindowsversion"):
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        MONITOR_DEFAULTTONEAREST = 0x2
+        hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            return None
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        if not user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            return None
+        r = mi.rcMonitor
+        return {"left": r.left, "top": r.top, "width": r.right - r.left, "height": r.bottom - r.top}
+    except Exception:
+        return None
+
+
+def screen_capture(args: dict[str, Any]) -> dict[str, Any]:
+    """Capture a monitor and return base64 PNG. Args:
+       - monitor: int index (0-based across mss's monitor list, where 0 is
+         the union of all monitors) OR 'active' (default; the monitor that
+         contains the focused window) OR 'primary' OR 'all'."""
+    import base64
+    from io import BytesIO
+    monitor = args.get("monitor") if args else None
+    # Default to 'active' so voice control naturally screenshots the monitor
+    # the user is currently working on (most common case).
+    if not monitor:
+        monitor = "active"
+
+    # mss is a transitive dep of pyautogui's pyscreeze; lazy-import.
+    try:
+        from mss import mss
+        from PIL import Image
+    except Exception:
+        # Fallback to single-monitor pyautogui if mss isn't available.
+        g = _pyautogui()
+        img = g.screenshot()
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return {
+            "png": base64.b64encode(buf.getvalue()).decode("ascii"),
+            "width": img.width,
+            "height": img.height,
+            "monitor": "primary",
+        }
+
+    with mss() as sct:
+        # mss().monitors[0] is the virtual union of all monitors; index 1+
+        # are individual monitors. Map our friendlier values to that.
+        bounds: dict[str, int] | None = None
+        chosen = "primary"
+        if monitor == "all":
+            bounds = sct.monitors[0]
+            chosen = "all"
+        elif monitor == "active":
+            active = _active_monitor_bounds_win()
+            if active:
+                bounds = active
+                chosen = "active"
+            else:
+                bounds = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                chosen = "primary"
+        elif monitor == "primary":
+            bounds = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            chosen = "primary"
+        else:
+            try:
+                idx = int(monitor)
+                if 0 <= idx < len(sct.monitors):
+                    bounds = sct.monitors[idx]
+                    chosen = f"index_{idx}"
+                else:
+                    bounds = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                    chosen = "primary"
+            except (TypeError, ValueError):
+                bounds = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                chosen = "primary"
+
+        shot = sct.grab(bounds)
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return {
+            "png": base64.b64encode(buf.getvalue()).decode("ascii"),
+            "width": img.width,
+            "height": img.height,
+            "monitor": chosen,
+            "origin": {"x": bounds["left"], "y": bounds["top"]},
+        }
+
+
+_AX_CLICKABLE_TYPES = {
+    "ButtonControl", "HyperlinkControl", "ListItemControl", "MenuItemControl",
+    "TabItemControl", "RadioButtonControl", "CheckBoxControl", "SplitButtonControl",
+    "ComboBoxControl", "EditControl", "TreeItemControl", "ImageControl",
+    "DataItemControl", "HeaderItemControl",
+}
+
+
+def screen_ax_tree(args: dict[str, Any]) -> dict[str, Any]:
+    """Windows UIAutomation: walk the focused window's accessibility tree and
+    return a flat list of visible elements with bounds, labels, and types.
+    The voice-control agent uses this to target elements by id instead of
+    guessing pixel coordinates. On non-Windows or when UIA is unavailable,
+    returns {available: false, ...} so the orchestrator falls back to vision."""
+    import sys
+    if sys.platform != "win32":
+        return {"available": False, "reason": "ax_tree only implemented on Windows in v0.2.0-beta", "elements": []}
+
+    try:
+        import uiautomation as auto
+    except Exception as exc:
+        return {"available": False, "reason": f"uiautomation not available: {exc}", "elements": []}
+
+    import time
+    max_depth = int(args.get("maxDepth") or 8)
+    max_elements = int(args.get("maxElements") or 200)
+    time_budget = float(args.get("timeBudget") or 1.5)
+    deadline = time.monotonic() + time_budget
+
+    elements: list[dict[str, Any]] = []
+    truncated = False
+
+    try:
+        # Walk the foreground window specifically. Walking the full desktop
+        # is too slow on most machines (3-5s) and adds elements the user
+        # can't interact with anyway. If no foreground window, fall back to
+        # root.
+        target = auto.GetForegroundControl() or auto.GetRootControl()
+        foreground_name = ""
+        try:
+            foreground_name = target.Name or target.ClassName or ""
+        except Exception:
+            pass
+
+        def walk(ctrl: Any, depth: int) -> None:
+            nonlocal truncated
+            if time.monotonic() > deadline:
+                truncated = True
+                return
+            if len(elements) >= max_elements:
+                truncated = True
+                return
+            if depth > max_depth:
+                return
+            try:
+                rect = ctrl.BoundingRectangle
+                w = rect.right - rect.left
+                h = rect.bottom - rect.top
+                if w <= 0 or h <= 0:
+                    pass  # skip but still descend — invisible container may have visible kids
+                else:
+                    is_offscreen = bool(getattr(ctrl, "IsOffscreen", False))
+                    if not is_offscreen:
+                        ctype = ctrl.ControlTypeName or ""
+                        name = (ctrl.Name or "").strip()
+                        if name or ctype in _AX_CLICKABLE_TYPES:
+                            elements.append({
+                                "id": len(elements),
+                                "name": name[:120],
+                                "control_type": ctype,
+                                "automation_id": (getattr(ctrl, "AutomationId", "") or "")[:80],
+                                "class_name": (getattr(ctrl, "ClassName", "") or "")[:60],
+                                "bounds": {"x": rect.left, "y": rect.top, "w": w, "h": h},
+                                "clickable": ctype in _AX_CLICKABLE_TYPES,
+                            })
+                children = ctrl.GetChildren() or []
+                for child in children:
+                    if time.monotonic() > deadline:
+                        truncated = True
+                        return
+                    walk(child, depth + 1)
+            except Exception:
+                # Element threw on access — keep walking.
+                return
+
+        walk(target, 0)
+    except Exception as exc:
+        return {"available": False, "reason": f"AX walk failed: {exc}", "elements": []}
+
+    return {
+        "available": True,
+        "elements": elements,
+        "truncated": truncated,
+        "foreground": foreground_name,
+        "count": len(elements),
+    }
+
+
+def voice_click(args: dict[str, Any]) -> dict[str, Any]:
+    g = _pyautogui()
+    x = int(args.get("x") or 0)
+    y = int(args.get("y") or 0)
+    button = str(args.get("button") or "left").lower()
+    if button not in ("left", "right", "middle"):
+        raise HostError("BAD_BUTTON", "button must be left, right, or middle")
+    clicks = int(args.get("clicks") or 1)
+    g.click(x=x, y=y, button=button, clicks=clicks)
+    return {"ok": True, "x": x, "y": y, "button": button, "clicks": clicks}
+
+
+def voice_type(args: dict[str, Any]) -> dict[str, Any]:
+    g = _pyautogui()
+    text = require_str(args, "text")
+    # Optional clear: select-all then delete before typing. Critical for input
+    # fields that may already have content (e.g. Windows Run remembers the
+    # last command; search bars retain prior queries). Without this, TYPE
+    # concatenates onto whatever's there and downstream commands break.
+    if bool(args.get("clear")):
+        g.hotkey("ctrl", "a")
+        g.press("delete")
+    # 0.02s between keystrokes — fast enough to feel natural, slow enough that
+    # apps with input throttling (Slack, some web inputs) don't drop chars.
+    g.write(text, interval=0.02)
+    return {"ok": True, "length": len(text), "cleared": bool(args.get("clear"))}
+
+
+def _win_bring_to_foreground(matcher: str, attempts: int = 8, gap: float = 0.4) -> bool:
+    """After launching an app, find its window by title-matching and bring
+    it to the foreground. Solves the "Spotify opened in the background"
+    problem where Claude burned a turn clicking the taskbar to focus it.
+    Returns True if a matching window was found and SetForegroundWindow was
+    called, False otherwise. Best-effort — never raises."""
+    import sys
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        import time
+
+        user32 = ctypes.windll.user32
+
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def is_match_window(hwnd: int) -> bool:
+            if not user32.IsWindowVisible(hwnd):
+                return False
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return False
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = (buf.value or "").strip()
+            if not title:
+                return False
+            return matcher.lower() in title.lower()
+
+        found_hwnd: list[int] = []
+
+        @EnumWindowsProc
+        def collect(hwnd, _lparam):
+            if is_match_window(hwnd):
+                found_hwnd.append(hwnd)
+                return False  # stop enumerating
+            return True  # keep going
+
+        for _ in range(attempts):
+            found_hwnd.clear()
+            user32.EnumWindows(collect, 0)
+            if found_hwnd:
+                hwnd = found_hwnd[0]
+                # SetForegroundWindow alone is unreliable when the calling
+                # process isn't the foreground app. AttachThreadInput + the
+                # show/restore dance is the well-known workaround.
+                try:
+                    SW_RESTORE = 9
+                    user32.ShowWindow(hwnd, SW_RESTORE)
+                    fg = user32.GetForegroundWindow()
+                    cur_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+                    new_tid = user32.GetWindowThreadProcessId(hwnd, None)
+                    if cur_tid and new_tid and cur_tid != new_tid:
+                        user32.AttachThreadInput(cur_tid, new_tid, True)
+                        user32.SetForegroundWindow(hwnd)
+                        user32.AttachThreadInput(cur_tid, new_tid, False)
+                    else:
+                        user32.SetForegroundWindow(hwnd)
+                    user32.BringWindowToTop(hwnd)
+                except Exception:
+                    pass
+                return True
+            time.sleep(gap)
+        return False
+    except Exception:
+        return False
+
+
+def _win_launch_via_start_apps(name: str) -> None:
+    """Use PowerShell's Get-StartApps to find a Start-menu app matching `name`
+    (fuzzy, case-insensitive) and launch it via its AUMID. This is what makes
+    Microsoft Store / UWP apps like Spotify, Discord, WhatsApp work — they're
+    not on PATH and aren't in the App Paths registry, but they DO appear in
+    Get-StartApps with a valid AppsFolder AUMID."""
+    import subprocess
+    safe = name.replace("'", "''")
+    # Get-StartApps' AppID is either a Microsoft Store AUMID (e.g.
+    # "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App") OR a full file path
+    # for classic apps (e.g. "C:\Users\me\AppData\Roaming\Spotify\Spotify.exe").
+    # Pick the right Start-Process form based on which it is.
+    ps_script = (
+        f"$ErrorActionPreference='Stop'; "
+        f"$name = '{safe}'; "
+        f"$app = Get-StartApps | "
+        f"Where-Object {{ $_.Name -like \"*$name*\" }} | "
+        f"Select-Object -First 1; "
+        f"if (-not $app) {{ throw 'No Start menu app matching: ' + $name }}; "
+        f"if ($app.AppID -match '\\\\' -or $app.AppID -match '\\.exe$') {{ "
+        f"  Start-Process -FilePath $app.AppID "
+        f"}} else {{ "
+        f"  Start-Process \"shell:AppsFolder\\$($app.AppID)\" "
+        f"}}"
+    )
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+        timeout=12,
+        creationflags=creationflags,
+    )
+    if result.returncode != 0:
+        msg = (result.stderr or result.stdout or "PowerShell Start-Process failed").strip()
+        raise RuntimeError(msg)
+
+
+def voice_open(args: dict[str, Any]) -> dict[str, Any]:
+    """Launch an app, file, or URL via the OS shell. Tries several strategies
+    so it works for: PATH binaries (notepad), Microsoft Store / UWP apps
+    (Spotify, Discord, WhatsApp), apps registered under App Paths (Chrome,
+    VS Code), URLs, file paths, and custom protocols (mailto:, ms-settings:)."""
+    import subprocess
+    import sys
+    target = require_str(args, "target").strip()
+    if not target:
+        raise HostError("BAD_TARGET", "target is required")
+
+    last_err: Exception | None = None
+    strategies: list[Any] = []
+
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        looks_like_app = (
+            ":" not in target
+            and "\\" not in target
+            and "/" not in target
+            and "." not in target.split(":")[0]
+        )
+        # Strategy ORDER MATTERS. `cmd /c start` always returns success
+        # immediately even when the target can't be found (the missing-app
+        # popup is asynchronous), so it swallows what should have been a
+        # fall-through to better strategies. For app-name targets we resolve
+        # via PowerShell Get-StartApps FIRST (synchronous, errors propagate),
+        # then fall back to `start` only for paths / URLs / protocols.
+        if looks_like_app:
+            # 1. PowerShell Get-StartApps fuzzy match. Catches Microsoft Store
+            #    / UWP apps (Spotify, Discord, WhatsApp), classic apps in the
+            #    Start menu (Chrome, VS Code), and anything pinned. Errors
+            #    bubble synchronously so we know if it failed.
+            strategies.append(lambda: _win_launch_via_start_apps(target))
+        # 2. cmd /c start "" <target> — shell launcher for URLs, file paths,
+        #    ms-* protocols, mailto:, and the few PATH-resident binaries.
+        strategies.append(lambda: subprocess.Popen(
+            ["cmd", "/c", "start", "", "/B", target],
+            shell=False,
+            creationflags=creationflags,
+            close_fds=True,
+        ))
+        # 3. os.startfile — Win32 ShellExecute, file associations + URLs.
+        import os as _os
+        strategies.append(lambda: _os.startfile(target))  # type: ignore[attr-defined]
+        # 4. Direct Popen — for explicit .exe paths.
+        strategies.append(lambda: subprocess.Popen([target], close_fds=True))
+    elif sys.platform == "darwin":
+        # 1. open -a APP — launches an installed Mac app by display name
+        #    ("Spotify", "Visual Studio Code") regardless of cwd.
+        strategies.append(lambda: subprocess.Popen(["open", "-a", target]))
+        # 2. open URL / path — fallback for URLs and file paths.
+        strategies.append(lambda: subprocess.Popen(["open", target]))
+        # 3. open -b BUNDLE_ID — if target looks like a bundle identifier.
+        if "." in target and "/" not in target and " " not in target:
+            strategies.append(lambda: subprocess.Popen(["open", "-b", target]))
+    else:
+        strategies.append(lambda: subprocess.Popen(["xdg-open", target]))
+
+    for fn in strategies:
+        try:
+            fn()
+            # Best-effort: bring the newly-launched app's window to the
+            # foreground so Claude doesn't burn the next turn clicking the
+            # taskbar to focus it. Use the target name as a fuzzy title
+            # match — works for most apps whose window title contains the
+            # app name (Notepad, Spotify, Chrome, VS Code, etc.). Skip
+            # for URLs / paths / protocols which target the browser/file
+            # explorer (already focused or system-launched).
+            target_clean = target.split(":")[0].split("\\")[-1].split("/")[-1]
+            if target_clean and not target_clean.lower().startswith(("http", "ms-", "mailto")):
+                focused = _win_bring_to_foreground(target_clean)
+            else:
+                focused = False
+            return {"ok": True, "target": target, "focused": focused}
+        except Exception as exc:
+            last_err = exc
+            continue
+    raise HostError("OPEN_FAILED", f"Couldn't open '{target}': {last_err}")
+
+
+def voice_hotkey(args: dict[str, Any]) -> dict[str, Any]:
+    g = _pyautogui()
+    keys = args.get("keys")
+    if isinstance(keys, str):
+        keys = [k.strip().lower() for k in keys.split("+") if k.strip()]
+    if not isinstance(keys, list) or not keys:
+        raise HostError("BAD_KEYS", "keys must be a list of key names or 'key1+key2' string")
+    g.hotkey(*keys)
+    return {"ok": True, "keys": keys}
+
+
+def voice_scroll(args: dict[str, Any]) -> dict[str, Any]:
+    g = _pyautogui()
+    dy = int(args.get("dy") or 0)
+    g.scroll(dy)
+    return {"ok": True, "dy": dy}
+
+
+def voice_move(args: dict[str, Any]) -> dict[str, Any]:
+    g = _pyautogui()
+    x = int(args.get("x") or 0)
+    y = int(args.get("y") or 0)
+    duration = float(args.get("duration") or 0.2)
+    g.moveTo(x, y, duration=duration)
+    return {"ok": True, "x": x, "y": y}
+
+
+def voice_drag(args: dict[str, Any]) -> dict[str, Any]:
+    """Drag from (x1,y1) to (x2,y2) holding the named button. Used for
+    window resize, slider drags, text selection by drag, drag-and-drop."""
+    g = _pyautogui()
+    x1 = int(args.get("x1") or 0)
+    y1 = int(args.get("y1") or 0)
+    x2 = int(args.get("x2") or 0)
+    y2 = int(args.get("y2") or 0)
+    duration = float(args.get("duration") or 0.35)
+    button = str(args.get("button") or "left").lower()
+    if button not in ("left", "right", "middle"):
+        raise HostError("BAD_BUTTON", "button must be left, right, or middle")
+    g.moveTo(x1, y1, duration=0.1)
+    g.dragTo(x2, y2, duration=duration, button=button)
+    return {"ok": True, "from": [x1, y1], "to": [x2, y2], "button": button}
+
+
+def voice_clipboard_get(_args: dict[str, Any]) -> dict[str, Any]:
+    """Return the current clipboard text. Useful when Claude wants to read
+    what the user copied earlier, or check after a [HOTKEY ctrl+c]."""
+    try:
+        import pyperclip  # ships with pyautogui
+        text = pyperclip.paste()
+        return {"text": text or ""}
+    except Exception as exc:
+        raise HostError("CLIPBOARD_GET_FAILED", f"Failed to read clipboard: {exc}")
+
+
+def voice_clipboard_set(args: dict[str, Any]) -> dict[str, Any]:
+    """Set the clipboard to a given text. Combine with [HOTKEY ctrl+v] for
+    fast paste of long content (way faster than typing key-by-key)."""
+    text = require_str(args, "text")
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        return {"ok": True, "length": len(text)}
+    except Exception as exc:
+        raise HostError("CLIPBOARD_SET_FAILED", f"Failed to write clipboard: {exc}")
+
+
+def voice_wait(args: dict[str, Any]) -> dict[str, Any]:
+    """Pause for N seconds so the UI can settle (app launch, animation,
+    page load) before the next action. Capped at 5s per call."""
+    import time
+    seconds = float(args.get("seconds") or 1)
+    seconds = max(0.0, min(5.0, seconds))
+    time.sleep(seconds)
+    return {"ok": True, "waited": seconds}
 
 
 def dispatch(cmd: str, args: dict[str, Any]) -> Any:
@@ -915,6 +1471,21 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         ),
         "reset_agent_prompt": lambda a: agents_mod.reset_agent_prompt(require_str(a, "id")),
         "delete_agent": lambda a: agents_mod.delete_agent(require_str(a, "id")),
+        # Voice control sidecar (v0.2.0+) — see screen_capture / voice_*
+        # functions above. Mac will get a Swift sidecar later; pyautogui is
+        # the Windows production path and Mac dev fallback.
+        "screen_capture": screen_capture,
+        "screen_ax_tree": screen_ax_tree,
+        "voice_click": voice_click,
+        "voice_type": voice_type,
+        "voice_hotkey": voice_hotkey,
+        "voice_scroll": voice_scroll,
+        "voice_move": voice_move,
+        "voice_open": voice_open,
+        "voice_drag": voice_drag,
+        "voice_clipboard_get": voice_clipboard_get,
+        "voice_clipboard_set": voice_clipboard_set,
+        "voice_wait": voice_wait,
         "create_custom_agent": lambda a: agents_mod.create_custom_agent(
             name=require_str(a, "name"),
             role=str(a.get("role") or "").strip() or "Custom agent",

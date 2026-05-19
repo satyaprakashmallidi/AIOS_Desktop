@@ -64,6 +64,24 @@ a = Analysis(
         # Voice transcription (lazy-imported in workspace.transcribe_audio).
         'speech_recognition',
         *sr_hiddenimports,
+        # Voice control (v0.2.0+) — pyautogui drives screen capture + input.
+        # Lazy-imported in voice_control_*; listed here so PyInstaller finds
+        # the deps for the bundled binary.
+        'pyautogui',
+        'pyscreeze',
+        'pymsgbox',
+        'mouseinfo',
+        'mss',
+        'PIL',
+        'PIL.Image',
+        'PIL.PngImagePlugin',
+        'PIL.ImageDraw',
+        'PIL.ImageFont',
+        # Windows UIAutomation reader (v0.2.0-beta). Bundled Windows-only.
+        'uiautomation',
+        'comtypes',
+        'comtypes.client',
+        'comtypes.gen',
     ],
     hookspath=[],
     hooksconfig={},
@@ -74,7 +92,6 @@ a = Analysis(
         'matplotlib',
         'numpy',
         'pandas',
-        'PIL',
         'pytest',
         'unittest',
     ],

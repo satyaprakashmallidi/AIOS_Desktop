@@ -66,6 +66,22 @@ export type AiosCommand =
   | "reset_agent_prompt"
   | "delete_agent"
   | "create_custom_agent"
+  | "screen_capture"
+  | "screen_ax_tree"
+  | "voice_click"
+  | "voice_type"
+  | "voice_hotkey"
+  | "voice_scroll"
+  | "voice_move"
+  | "voice_open"
+  | "voice_drag"
+  | "voice_clipboard_get"
+  | "voice_clipboard_set"
+  | "voice_wait"
+  | "voice_control_start"
+  | "voice_control_stop"
+  | "voice_control_abort"
+  | "voice_control_state"
   | "list_tasks"
   | "get_task"
   | "create_task"
@@ -162,6 +178,7 @@ export interface AiosApi {
     close: () => void;
     onMaximizedChanged: (callback: (maximized: boolean) => void) => void;
     onShortcutPreferences: (callback: () => void) => void;
+    onShortcutVoiceToggle: (callback: () => void) => () => void;
   };
 }
 

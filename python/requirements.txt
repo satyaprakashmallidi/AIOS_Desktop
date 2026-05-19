@@ -4,3 +4,16 @@
 # Speech-to-text used by transcribe_audio (voice input in the chat composer).
 # Calls Google's free speech endpoint — no API key required.
 SpeechRecognition>=3.10
+
+# Voice control sidecar fallback (v0.2.0+). pyautogui drives the screen
+# capture + mouse/keyboard execution for the voice-control action loop on
+# Windows and as a Mac fallback while the Swift sidecar isn't built yet.
+# Pillow is required by pyautogui for screenshot encoding.
+pyautogui>=0.9.54
+Pillow>=10.0
+
+# Windows UIAutomation reader (v0.2.0-beta). Lets the voice-control agent
+# walk the focused window's accessibility tree and target elements by
+# label/role instead of guessing pixel coords. Windows-only — gracefully
+# absent on Mac/Linux. Lazy-imported in screen_ax_tree.
+uiautomation>=2.0; sys_platform == "win32"

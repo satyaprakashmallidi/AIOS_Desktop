@@ -18,6 +18,7 @@ import {
   Sun,
   Trash2,
   Users,
+  Mic,
   X,
   PanelLeft,
   LayoutGrid
@@ -41,6 +42,7 @@ import { BriefsScreen } from "./screens/BriefsScreen";
 import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
 import { AgentsScreen } from "./screens/AgentsScreen";
+import { VoiceControlPanel } from "./screens/VoiceControlPanel";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
 import type {
   ChatSession,
@@ -186,6 +188,11 @@ function App() {
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  // Bumped on every Ctrl+Alt+V press. VoiceControlPanel reads this — first
+  // bump auto-starts listening, subsequent bumps toggle. Lives at App level
+  // so the hotkey works even when the panel hasn't been opened yet.
+  const [voiceToggleSignal, setVoiceToggleSignal] = useState(0);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Default to "light" on first launch — the inline boot splash in index.html
   // paints the paper background unconditionally, so any other default would
@@ -587,6 +594,16 @@ function App() {
     window.aios?.window?.onMaximizedChanged?.((next) => setMaximized(next));
   }, []);
 
+  // Global Ctrl+Alt+V hotkey for voice control. Open the panel (if not
+  // already) and bump the signal so the panel knows to start/toggle listening.
+  useEffect(() => {
+    const unsub = window.aios?.window?.onShortcutVoiceToggle?.(() => {
+      setVoicePanelOpen(true);
+      setVoiceToggleSignal((n) => n + 1);
+    });
+    return () => { unsub?.(); };
+  }, []);
+
   // Toggle body.window-hidden so all CSS animations pause when the window is
   // not visible (saves compositor work while the user is in another app).
   useEffect(() => {
@@ -847,12 +864,29 @@ function App() {
         </section>
 
         <div className="aios-sidebar-footer">
+          <button
+            className={`aios-sidebar-voice ${voicePanelOpen ? "is-active" : ""}`}
+            type="button"
+            onClick={() => setVoicePanelOpen((open) => !open)}
+            title="Voice control (Ctrl+Alt+V)"
+          >
+            <Mic />
+            <span>Voice</span>
+          </button>
           <button className="aios-sidebar-settings" type="button" onClick={() => setScreen("settings")} title="Settings">
             <Settings />
             <span>Settings</span>
           </button>
         </div>
       </aside>
+      ) : null}
+
+      {voicePanelOpen ? (
+        <VoiceControlPanel
+          claude={claude}
+          toggleSignal={voiceToggleSignal}
+          onClose={() => setVoicePanelOpen(false)}
+        />
       ) : null}
 
       <main className="app-main">
