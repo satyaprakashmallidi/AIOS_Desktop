@@ -19,6 +19,15 @@ const SCREEN_EDGE_MARGIN = 16;
 let bubbleWindow: BrowserWindow | null = null;
 let onSubscribe: ((win: BrowserWindow) => void) | null = null;
 let onUnsubscribe: ((win: BrowserWindow) => void) | null = null;
+// Callbacks fired whenever the user drags the bubble. control-popup.ts
+// subscribes so the panel underneath snaps to follow the bubble's new
+// position — making the bubble the single anchor for the whole UI.
+const moveListeners = new Set<() => void>();
+
+export function onBubbleMove(cb: () => void): () => void {
+  moveListeners.add(cb);
+  return () => { moveListeners.delete(cb); };
+}
 
 export interface ControlBubbleHooks {
   subscribe: (win: BrowserWindow) => void;
@@ -102,6 +111,14 @@ function ensureBubble(): BrowserWindow {
     if (!bubbleQuitting) {
       event.preventDefault();
       win.hide();
+    }
+  });
+
+  // Fires when the user finishes dragging the bubble. Notify subscribers
+  // (the panel uses this to track the bubble's position).
+  win.on("moved", () => {
+    for (const cb of moveListeners) {
+      try { cb(); } catch { /* one subscriber's failure shouldn't break others */ }
     }
   });
 

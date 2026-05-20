@@ -70,6 +70,20 @@ except Exception:
 pil_binaries = pil_datas = pil_hiddenimports = []
 try:
     pil_datas, pil_binaries, pil_hiddenimports = collect_all('PIL')
+    # PIL/Pillow's AVIF plugin ships as a single-architecture binary on
+    # Mac (arm64 wheels do NOT include an x86_64 slice). When PyInstaller
+    # builds a universal2 sidecar, COLLECT errors out with
+    # "_avif.cpython-*.so is not a fat binary!". We don't decode AVIF
+    # anywhere in AIOS — strip it from the collected blobs entirely so
+    # the universal2 build succeeds. Filter applies cross-platform; on
+    # Windows there's no _avif.so so the filter is a no-op.
+    def _strip_avif(items):
+        return [pair for pair in items
+                if '_avif' not in str(pair[0]).lower()
+                and 'avifimageplugin' not in str(pair[0]).lower()]
+    pil_binaries = _strip_avif(pil_binaries)
+    pil_datas = _strip_avif(pil_datas)
+    pil_hiddenimports = [m for m in pil_hiddenimports if 'avif' not in m.lower()]
 except Exception:
     pass
 
@@ -139,11 +153,11 @@ a = Analysis(
         *pil_hiddenimports,
         # Mac pyobjc framework imports (auto-collected on darwin only).
         *pyobjc_hiddenimports,
-        # Windows UIAutomation reader (v0.2.0-beta). Bundled Windows-only.
-        'uiautomation',
-        'comtypes',
-        'comtypes.client',
-        'comtypes.gen',
+        # Windows UIAutomation reader (v0.2.0-beta). Win-only — listing
+        # these on Mac wastes bytes and triggers PyInstaller "module not
+        # found" warnings since uiautomation/comtypes have no Mac wheel.
+        *(['uiautomation', 'comtypes', 'comtypes.client', 'comtypes.gen']
+          if sys.platform == 'win32' else []),
     ],
     hookspath=[],
     hooksconfig={},
@@ -156,6 +170,9 @@ a = Analysis(
         'pandas',
         'pytest',
         'unittest',
+        # Pillow's AVIF plugin — single-arch on Mac wheels, breaks
+        # universal2 COLLECT. We never decode AVIF in AIOS.
+        'PIL.AvifImagePlugin',
     ],
     noarchive=False,
 )

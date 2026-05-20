@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -119,7 +119,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "AIOS uses your microphone for voice input in the chat composer.",
+        "NSMicrophoneUsageDescription": "AIOS uses your microphone for voice input in Computer Control.",
+        "NSAppleEventsUsageDescription": "AIOS uses Apple Events to bring the launched app to the foreground after you say 'open <app>' — so the next screenshot reflects the app you asked for.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false
         }

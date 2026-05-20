@@ -11,7 +11,7 @@
 
 import { BrowserWindow, screen } from "electron";
 import * as path from "node:path";
-import { getBubbleBounds } from "./control-bubble";
+import { getBubbleBounds, onBubbleMove } from "./control-bubble";
 
 // Sized to feel like a chat tooltip drawer beneath the bubble — small
 // enough to read at a glance, scrolls internally for long transcripts.
@@ -30,6 +30,18 @@ let onUnsubscribe: ((win: BrowserWindow) => void) | null = null;
 // on every move in undocked mode so reopen lands where they left it.
 let panelDocked = true;
 let undockedBounds: { x: number; y: number } | null = null;
+
+// When the user drags the bubble, drag the panel along with it (only
+// when the panel is currently visible AND in docked mode — undocked
+// means the user explicitly placed the panel and doesn't want it
+// snapping back). Subscribed once at module load; same callback for
+// the life of the process.
+onBubbleMove(() => {
+  if (!popupWindow || popupWindow.isDestroyed() || !popupWindow.isVisible()) return;
+  if (!panelDocked) return;
+  const origin = topRightOrigin();
+  popupWindow.setPosition(origin.x, origin.y, false);
+});
 
 export function isPanelDocked(): boolean { return panelDocked; }
 export function setPanelDocked(docked: boolean): void {

@@ -9499,10 +9499,16 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
+  cursor: grab;
+  /* Bubble IS the drag handle for the whole control surface — grab it
+     and the panel follows automatically (see main/control-popup.ts
+     onBubbleMove subscription). Electron's drag regions still allow a
+     fast click-without-drag to fire the onClick handler that opens the
+     panel, so the same bubble both drags AND toggles. */
+  -webkit-app-region: drag;
   transition: transform 120ms ease, background 140ms ease;
 }
+.control-bubble:active { cursor: grabbing; }
 .control-bubble:hover {
   background: #1d2026;
   transform: scale(1.05);
@@ -9551,7 +9557,10 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   background: transparent;
   border-bottom: 1px solid #2a2d2c;
   padding: 10px 12px;
-  -webkit-app-region: drag;
+  /* Panel is NOT draggable — it follows the bubble. Drag the bubble
+     instead. Static here so clicks on header buttons (close / pin) are
+     not eaten by a drag region. */
+  -webkit-app-region: no-drag;
   gap: 8px;
 }
 .voice-panel.is-popup .voice-panel-title {

@@ -23,5 +23,12 @@
   <true/>
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- AppleScript foreground-bring: after `open -a Notes`, we run
+       `osascript -e 'tell application "Notes" to activate'` so the
+       launched app actually comes forward on Mac. This entitlement
+       lets us send Apple events to other apps. The matching prompt
+       text is in NSAppleEventsUsageDescription (package.json). -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
 </dict>
 </plist>

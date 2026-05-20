@@ -225,6 +225,14 @@ function createWindow(): void {
   // Register main window as an aios:host-event subscriber so broadcasts
   // reach it the same way they reach the Control popup.
   eventSubscribers.add(mainWindow);
+
+  // Auto-show the Computer Control bubble shortly after the main window
+  // appears. Small delay so it doesn't pop up during the inline boot
+  // splash + before the renderer paints — feels more deliberate. User
+  // can still toggle it off via the sidebar Control button or panel Quit.
+  setTimeout(() => {
+    try { showControlBubble(); } catch { /* non-fatal */ }
+  }, 1500);
 }
 
 function registerIpcHandlers(): void {
