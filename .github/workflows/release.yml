@@ -91,20 +91,29 @@ jobs:
         if: matrix.platform == 'mac' && matrix.arch == 'arm64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Mac builds are unsigned for now. When you have an Apple
-          # Developer ID add CSC_LINK + CSC_KEY_PASSWORD secrets and the
-          # in-app "Check for updates" will switch from manual-download
-          # to ShipIt in-place auto-update on Mac too.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
+          # Code signing (electron-builder reads these automatically):
+          # CSC_LINK = base64-encoded Developer ID Application .p12
+          # CSC_KEY_PASSWORD = .p12 export password
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Notarization (electron-builder also reads these automatically
+          # when mac.notarize is enabled in package.json):
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release -- --mac --arm64
 
       - name: Build + publish (macOS x64 / Intel)
         if: matrix.platform == 'mac' && matrix.arch == 'x64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release -- --mac --x64
 
       - name: Upload installer artifacts (debugging)

@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -115,8 +115,9 @@
         }
       ],
       "icon": "build/icon.png",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "notarize": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
