@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -102,20 +102,19 @@
         {
           "target": "dmg",
           "arch": [
-            "universal"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "universal"
+            "arm64"
           ]
         }
       ],
       "icon": "build/icon.png",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "x64ArchFiles": "Contents/Resources/{aios-host,aios-starter-kit}/**/*",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
