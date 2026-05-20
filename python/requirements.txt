@@ -5,12 +5,24 @@
 # Calls Google's free speech endpoint — no API key required.
 SpeechRecognition>=3.10
 
-# Voice control sidecar fallback (v0.2.0+). pyautogui drives the screen
-# capture + mouse/keyboard execution for the voice-control action loop on
-# Windows and as a Mac fallback while the Swift sidecar isn't built yet.
+# Voice control sidecar (v0.2.0+). pyautogui drives screen capture +
+# mouse/keyboard for the voice-control action loop on Windows and as a
+# Mac fallback (Mac AX-tree support lands in v0.5+).
 # Pillow is required by pyautogui for screenshot encoding.
+# mss is the cross-platform multi-monitor screen capture lib our
+# host.screen_capture uses for primary/active/all-monitor modes.
 pyautogui>=0.9.54
 Pillow>=10.0
+mss>=9.0
+
+# pyautogui on Mac pulls a tree of pyobjc frameworks (Cocoa, Quartz,
+# AppKit, CoreGraphics, ApplicationServices) — pinning explicitly so
+# PyInstaller can collect them and Mac users don't see "No module named
+# 'pyautogui'" / "No module named 'Quartz'" at runtime.
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
 
 # Windows UIAutomation reader (v0.2.0-beta). Lets the voice-control agent
 # walk the focused window's accessibility tree and target elements by

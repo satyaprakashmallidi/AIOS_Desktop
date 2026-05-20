@@ -43,11 +43,67 @@ except Exception:
     # surfaces a clean "missing dependency" error in that case.
     pass
 
+# pyautogui pulls a tree of Mac-only deps (pyobjc-framework-Cocoa,
+# Quartz, AppKit, ApplicationServices, etc) that PyInstaller's static
+# analyzer misses unless we collect the whole package transitively.
+# Without this the packaged Mac binary errors at runtime with
+# "No module named 'pyautogui'" or "No module named 'Quartz'".
+pa_binaries = pa_datas = pa_hiddenimports = []
+try:
+    pa_datas, pa_binaries, pa_hiddenimports = collect_all('pyautogui')
+except Exception:
+    pass
+
+# Same story for pyscreeze (pyautogui's screenshot helper) and mss
+# (multi-monitor screen capture used by screen_capture). Both have native
+# C extensions PyInstaller's analyzer can miss.
+ps_binaries = ps_datas = ps_hiddenimports = []
+try:
+    ps_datas, ps_binaries, ps_hiddenimports = collect_all('pyscreeze')
+except Exception:
+    pass
+mss_binaries = mss_datas = mss_hiddenimports = []
+try:
+    mss_datas, mss_binaries, mss_hiddenimports = collect_all('mss')
+except Exception:
+    pass
+pil_binaries = pil_datas = pil_hiddenimports = []
+try:
+    pil_datas, pil_binaries, pil_hiddenimports = collect_all('PIL')
+except Exception:
+    pass
+
+# On Mac, explicitly collect pyobjc subframeworks that pyautogui touches.
+# pyobjc is split into many sibling packages (Cocoa, Quartz, AppKit,
+# CoreGraphics, ApplicationServices). Each must be collected individually
+# — collect_all('pyobjc') doesn't recursively follow the framework tree.
+pyobjc_datas = []
+pyobjc_binaries = []
+pyobjc_hiddenimports = []
+if sys.platform == 'darwin':
+    for framework in (
+        'objc',
+        'AppKit',
+        'Foundation',
+        'Quartz',
+        'CoreFoundation',
+        'CoreGraphics',
+        'ApplicationServices',
+        'PyObjCTools',
+    ):
+        try:
+            d, b, h = collect_all(framework)
+            pyobjc_datas.extend(d)
+            pyobjc_binaries.extend(b)
+            pyobjc_hiddenimports.extend(h)
+        except Exception:
+            pass
+
 a = Analysis(
     [os.path.join(python_dir, 'host.py')],
     pathex=[python_dir],
-    binaries=sr_binaries,
-    datas=sr_datas,
+    binaries=sr_binaries + pa_binaries + ps_binaries + mss_binaries + pil_binaries + pyobjc_binaries,
+    datas=sr_datas + pa_datas + ps_datas + mss_datas + pil_datas + pyobjc_datas,
     hiddenimports=[
         'workspace',
         'agents',
@@ -77,6 +133,12 @@ a = Analysis(
         'PIL.PngImagePlugin',
         'PIL.ImageDraw',
         'PIL.ImageFont',
+        *pa_hiddenimports,
+        *ps_hiddenimports,
+        *mss_hiddenimports,
+        *pil_hiddenimports,
+        # Mac pyobjc framework imports (auto-collected on darwin only).
+        *pyobjc_hiddenimports,
         # Windows UIAutomation reader (v0.2.0-beta). Bundled Windows-only.
         'uiautomation',
         'comtypes',
