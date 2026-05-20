@@ -24,17 +24,25 @@ jobs:
             platform: win
             arch: x64
             pyinstallerArch: x64
-          # Apple Silicon (arm64) Mac build only. We previously targeted
-          # universal2 here but Pillow doesn't ship universal2 wheels —
-          # _imaging.cpython-darwin.so installs single-arch on each
-          # runner, and PyInstaller's COLLECT step fails ("is not a fat
-          # binary!") when assembling a universal2 sidecar. arm64 covers
-          # ~all modern Macs (M1+); Intel Mac users can source-build
-          # until we add a separate x86_64 matrix entry.
+          # Apple Silicon (arm64) Mac — runs on GitHub's arm64 runner
+          # (macos-latest). Native arch only; PyInstaller bundles the
+          # arm64 PIL / pyautogui / pyobjc wheels directly. No fat-
+          # binary merging needed.
           - os: macos-latest
             platform: mac
             arch: arm64
             pyinstallerArch: arm64
+          # Intel (x86_64) Mac — runs on GitHub's older macos-13 runner
+          # which has Intel hardware. Same flow as arm64 but every dep
+          # installs x86_64-native. Two separate DMGs ship to the same
+          # GitHub Release; users grab the one matching their CPU.
+          # (We previously tried a single universal2 build but Pillow
+          # doesn't publish universal2 wheels, so PyInstaller COLLECT
+          # always errored on _imaging.cpython-darwin.so.)
+          - os: macos-13
+            platform: mac
+            arch: x64
+            pyinstallerArch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +88,7 @@ jobs:
         run: npm run release -- --win
 
       - name: Build + publish (macOS arm64)
-        if: matrix.platform == 'mac'
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Mac builds are unsigned for now. When you have an Apple
@@ -90,6 +98,14 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
         run: npm run release -- --mac --arm64
+
+      - name: Build + publish (macOS x64 / Intel)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
+        run: npm run release -- --mac --x64
 
       - name: Upload installer artifacts (debugging)
         if: always()

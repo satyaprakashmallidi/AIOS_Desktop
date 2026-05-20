@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -102,13 +102,15 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
