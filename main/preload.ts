@@ -82,6 +82,21 @@ const allowedCommands = new Set<AiosCommand>([
   "voice_clipboard_set",
   "voice_wait",
   "voice_check_environment",
+  "voice_get_cursor_type",
+  "control_panel_toggle",
+  "control_panel_open",
+  "control_panel_close",
+  "control_bubble_toggle",
+  "control_bubble_show",
+  "control_bubble_hide",
+  "control_panel_get_docked",
+  "control_panel_set_docked",
+  "cursor_overlay_get_active",
+  "cursor_overlay_set_active",
+  "cursor_overlay_get_color",
+  "cursor_overlay_set_color",
+  "control_close_all",
+  "control_open_settings",
   "voice_control_start",
   "voice_control_stop",
   "voice_control_abort",
@@ -111,6 +126,36 @@ contextBridge.exposeInMainWorld("aios", {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on("aios:host-event", listener);
     return () => ipcRenderer.removeListener("aios:host-event", listener);
+  },
+  onCursorPosition: (callback: (pos: { x: number; y: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { x: number; y: number }) => callback(payload);
+    ipcRenderer.on("aios:cursor-position", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-position", listener);
+  },
+  onCursorColor: (callback: (color: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: string) => callback(payload);
+    ipcRenderer.on("aios:cursor-color", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-color", listener);
+  },
+  onCursorFlyTo: (callback: (target: { x: number; y: number; durationMs: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { x: number; y: number; durationMs: number }) => callback(payload);
+    ipcRenderer.on("aios:cursor-fly-to", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-fly-to", listener);
+  },
+  onCursorMessage: (callback: (msg: { text: string; durationMs: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { text: string; durationMs: number }) => callback(payload);
+    ipcRenderer.on("aios:cursor-message", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-message", listener);
+  },
+  onCursorBusy: (callback: (state: { busy: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { busy: boolean }) => callback(payload);
+    ipcRenderer.on("aios:cursor-busy", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-busy", listener);
+  },
+  onCursorType: (callback: (type: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: string) => callback(payload);
+    ipcRenderer.on("aios:cursor-type", listener);
+    return () => ipcRenderer.removeListener("aios:cursor-type", listener);
   },
   openExternal: (url: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("aios:open-external", url),

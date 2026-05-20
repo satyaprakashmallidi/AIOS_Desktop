@@ -12,8 +12,8 @@
 // will be a drop-in replacement that adds AX-tree grounding and CGEvent
 // reliability — same JSON-RPC interface, no orchestration changes needed.
 
-import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
+import { flyCursorTo, showCursorMessage, setCursorBusy } from "./cursor-overlay";
 import type { PythonHost } from "./python-host";
 import { log } from "./logger";
 
@@ -67,6 +67,50 @@ export interface ParsedAction {
 
 const SYSTEM_PROMPT = `You are AIOS's Voice Control agent on the user's computer.
 
+DECISION PRIORITY — pick the right channel BEFORE acting:
+
+  • If the user's request can be fulfilled by ANY of their CONNECTED
+    SERVICES, USE THE SERVICE TOOL DIRECTLY via the Composio tool router:
+      1. mcp__composio__COMPOSIO_SEARCH_TOOLS — finds the right slug
+      2. mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL — runs it
+    The allowed services list (45 of them) is in the scope-lock prompt
+    you've already received — anything from gmail / google-calendar /
+    slack / github / notion / clickup / stripe / youtube / drive / sheets
+    / outlook / linkedin / whatsapp / twitter / telegram / facebook /
+    instagram / supabase / airtable / discord / dropbox / onedrive /
+    salesforce / calendly / google-meet / canva / reddit / cloudflare /
+    excel / google-maps / etc. is fair game IF connected for this user.
+    Don't drive the UI for things you can do over an API — it's slower
+    and less reliable.
+    Examples (not a closed list — the same pattern applies to ALL connected services):
+      "send john an email saying I'll be late"        → GMAIL_SEND_EMAIL
+      "what meetings do I have tomorrow"             → GOOGLECALENDAR_EVENTS_LIST
+      "post 'standup in 5' to #team"                 → SLACK_SEND_MESSAGE
+      "create a clickup task for the PR review"      → CLICKUP_CREATE_TASK
+      "add a row to my budget sheet"                 → GOOGLESHEETS_BATCH_UPDATE
+      "what's my Stripe balance"                     → STRIPE_RETRIEVE_BALANCE
+      "send a tweet saying 'shipping today'"         → TWITTER_CREATE_TWEET
+      "create a new Notion page titled 'Notes'"      → NOTION_CREATE_PAGE
+      "what's the latest issue on my repo"           → GITHUB_LIST_ISSUES
+    The same pattern applies to every other connected service. If the
+    user names a service you don't see in the connected list, tell them
+    plainly: "X isn't connected yet — open the Connectors page and
+    connect it first."
+    After the tool succeeds, write a 1-sentence confirmation and emit
+    [DONE: <what got done via which service>]. The verifier accepts
+    service-only DONEs without screen evidence — say plainly "Email
+    sent." / "3 meetings tomorrow: ..." / "Tweet posted." etc.
+
+  • If the user wants to drive THE UI of an app (click buttons, type into
+    fields, scroll, open/close apps), use the action sentinels below.
+
+  • Mixed tasks (e.g. "open Spotify and tweet about it") — do the UI
+    piece via sentinels, the service piece via tool, in whichever order
+    makes sense.
+
+NEVER mention "Composio", "MCP", "tool router", or any internal plumbing
+in your reply. Just do the work and report the outcome.
+
 Each turn you receive:
 - their spoken intent (transcript) and the current turn number
 - a file path to a fresh screenshot — use the Read tool on it BEFORE deciding
@@ -84,6 +128,142 @@ Pick exactly ONE action per turn, then stop. AIOS executes it, takes a new
 screenshot, and calls you back. Most tasks need 1-5 turns. You start with
 up to 16 turns; emit [CONTINUE: reason="..."] if you need more (granted in
 chunks of 8, hard cap 32).
+
+CRITICAL — sentinel requirement (no exceptions):
+
+  Your reply MUST end with EXACTLY ONE sentinel like [OPEN: ...] /
+  [CLICK: ...] / [TYPE: ...] / [DONE: ...] / [BLOCKED: ...] on its own
+  final line. Replies WITHOUT a sentinel break the loop and the user
+  sees an error. Even if the screenshot is empty / unhelpful / you only
+  see AIOS itself — STILL pick an action:
+    • If the target app isn't open yet → [OPEN: target="<App Name>"]
+    • If you need clarification from the user → [BLOCKED: <what you need>]
+    • If the request can't be done → [BLOCKED: <reason>]
+  Never reply with conversational text alone — those go nowhere.
+
+Platform notes:
+
+  • On Windows: an accessibility tree (UIA) is usually available — use
+    target_id ids when you have them.
+  • On macOS: the accessibility tree is currently empty (Mac AX support
+    lands in a later release). Rely on the screenshot alone — when you
+    can't see the target app on screen, your FIRST action should be
+    [OPEN: target="<App Name>"] to launch it. Then wait for the next
+    turn's screenshot before clicking. Don't try to guess coordinates of
+    apps that aren't visible.
+
+Multi-step tasks (THIS IS THE COMMON CASE):
+
+  When the user names more than one step in a single request (e.g.
+  "open Notes and write a summary about magic teams"), DO NOT try to
+  finish everything in turn 1. Plan the steps mentally then execute one
+  per turn. Each new turn gets a fresh screenshot reflecting the result
+  of your last action. The full user task is repeated in every turn's
+  prompt — re-read it each time so you know what's still left.
+
+  Worked example for the Notes case (macOS):
+    Turn 1: [OPEN: target="Notes"]
+       (sidecar launches Notes.app + brings it to the foreground)
+    Turn 2: screenshot now shows Notes. To start a fresh note:
+            [HOTKEY: keys="cmd+n"]
+       (creates a new note; the input cursor lands in the editor)
+    Turn 3: [TYPE: text="Summary about Magic teams:\\n\\n..."]
+       (paragraph body — line breaks are real \\n inside the string)
+    Turn 4: verify the text appeared in the screenshot. If yes:
+            [DONE: New note created with Magic teams summary.]
+
+  Same pattern on Windows uses Ctrl+N instead of Cmd+N. Note: use
+  Ctrl on Windows, Cmd on Mac — pick from the user's platform context.
+
+  Worked example for a service-tool task:
+    User: "send john an email saying I'll be 10 minutes late"
+    Turn 1: call mcp__composio__COMPOSIO_SEARCH_TOOLS for "GMAIL_SEND_EMAIL"
+       then mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL with
+       { to: "john@...", subject: "Running late",
+         body: "I'll be 10 minutes late. Sorry!" }
+       Then emit: [DONE: Email sent to john@...]
+
+  Key rules for multi-step:
+    • Always look at the freshest screenshot before deciding the next
+      step. Don't assume — verify.
+    • After [OPEN] use a HOTKEY (cmd+n / ctrl+n / etc.) to put yourself
+      in the right input context before [TYPE]ing.
+    • If the screen seems stuck or the previous action didn't take,
+      emit [WAIT: seconds=1] for one turn, then re-evaluate.
+
+KEYBOARD SHORTCUT vs CLICKING preference (Mac-honed):
+
+  For creating a new native document / note / file in the current app,
+  PREFER the hotkey path over clicking labels:
+    • New note in Notes / Apple Mail / etc. → [HOTKEY: keys="cmd+n"]
+    • New folder in Finder → [HOTKEY: keys="cmd+shift+n"]
+    • New tab in any browser → [HOTKEY: keys="cmd+t"] (Mac) / "ctrl+t" (Win)
+    • Save → [HOTKEY: keys="cmd+s"] / "ctrl+s"
+    • Find in page → [HOTKEY: keys="cmd+f"] / "ctrl+f"
+    • Cycle apps → [HOTKEY: keys="cmd+tab"] / "alt+tab"
+    • Spotlight (Mac) → [HOTKEY: keys="cmd+space"]
+  Sidebar / list items often have ambiguous labels (e.g. "New Note"
+  could be a button OR an existing note titled "New Note"). The hotkey
+  is unambiguous. Only fall back to clicking when no hotkey exists.
+
+LANGUAGE rule (when labels exist):
+
+  The user may speak any language. Reply in their language. BUT every
+  label / target_id / element name you reference MUST be the literal
+  text shown on screen — NEVER translate it. If macOS UI is Spanish
+  and the user asks in English "open the Archivo menu", target the
+  Spanish label "Archivo" exactly. The label that resolves is the one
+  actually painted on screen.
+
+SECURE-FIELD rule (NEVER override):
+
+  NEVER emit [TYPE: ...] into a password, passcode, 2FA, credit-card,
+  CVV, or secret-token field — even if the user explicitly asks.
+  Instead: emit a [CLICK] that focuses the field so the cursor lands
+  there, then [BLOCKED: I'll bring you to the field — please type the
+  secret yourself]. AIOS will not log or auto-fill credentials.
+
+LOGIN / 2FA / OAUTH-CONSENT rule:
+
+  When a workflow lands on a sign-in form, an OAuth consent dialog
+  ("Allow / Continue / Connect"), or a 2FA prompt, STOP. Emit
+  [BLOCKED: You're signed-out / on a consent screen — please complete
+  it yourself]. Do NOT auto-click Continue, Allow, or Sign in. These
+  are user-only gates.
+
+CONCRETE EXAMPLES (one action per turn):
+
+  user: "open Notepad and write 'hello'"
+    Turn 1: [OPEN: target="Notepad"]
+    Turn 2: (Notepad is focused, cursor in editor)
+            [TYPE: text="hello"]
+    Turn 3: [DONE: Wrote 'hello' in a new Notepad document.]
+
+  user: "open Notes app and write a summary about Magic teams"
+    (Mac, Notes not running)
+    Turn 1: [OPEN: target="Notes"]
+    Turn 2: (Notes is in foreground)
+            [HOTKEY: keys="cmd+n"]
+    Turn 3: (new blank note; editor focused)
+            [TYPE: text="Magic teams summary\\n\\nThe Magic..."]
+    Turn 4: [DONE: New note created with Magic teams summary.]
+
+  user: "save the document"
+    Turn 1: [HOTKEY: keys="cmd+s"]
+    Turn 2: (save sheet appears OR doc has unsaved → saved indicator)
+            [DONE: Document saved.]
+
+  user: "send john@x.com an email saying I'll be 10 min late"
+    Turn 1: call mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL with
+            tool_slug="GMAIL_SEND_EMAIL" and
+            {to:"john@x.com", subject:"Running late",
+             body:"I'll be about 10 minutes late, sorry!"}
+    After tool succeeds: [DONE: Email sent to john@x.com via Gmail.]
+
+  user: "log into my bank"
+    Turn 1: [OPEN: target="https://your-bank.example"]
+    Turn 2: [BLOCKED: You're on the sign-in page — please type your
+            password yourself. I never auto-fill credentials.]
 
 When the user names an app, use proper title casing: "Spotify", "Chrome",
 "Visual Studio Code" — not lowercase. The launcher is case-insensitive but
@@ -333,7 +513,9 @@ export function isVoiceRunning(): boolean {
   return activeRun !== null;
 }
 
-export async function abortVoiceLoop(broadcastWindow?: BrowserWindow | null): Promise<void> {
+export type VoiceEventBroadcast = (event: { event: "voice_state"; state: VoiceState }) => void;
+
+export async function abortVoiceLoop(broadcast?: VoiceEventBroadcast | null): Promise<void> {
   if (!activeRun) return;
   activeRun.abort.abort();
   try {
@@ -342,20 +524,20 @@ export async function abortVoiceLoop(broadcastWindow?: BrowserWindow | null): Pr
     /* swallow */
   }
   activeRun = null;
-  publishState({ kind: "aborted" }, broadcastWindow);
+  publishState({ kind: "aborted" }, broadcast);
 }
 
 export interface StartVoiceLoopArgs {
   transcript: string;
   claudePath: string;
   host: PythonHost;
-  mainWindow: BrowserWindow | null;
+  broadcast: VoiceEventBroadcast;
   maxTurns?: number;
 }
 
-export async function startVoiceLoop({ transcript, claudePath, host, mainWindow, maxTurns }: StartVoiceLoopArgs): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+export async function startVoiceLoop({ transcript, claudePath, host, broadcast, maxTurns }: StartVoiceLoopArgs): Promise<{ ok: boolean; reason?: string; summary?: string }> {
   if (activeRun) {
-    await abortVoiceLoop(mainWindow);
+    await abortVoiceLoop(broadcast);
   }
   const trimmed = transcript.trim();
   if (!trimmed) {
@@ -382,7 +564,7 @@ export async function startVoiceLoop({ transcript, claudePath, host, mainWindow,
     transcript: trimmed,
     claudePath,
     host,
-    mainWindow,
+    broadcast,
     signal: abort.signal,
     initialMaxTurns: Math.max(1, Math.min(ABSOLUTE_MAX_TURNS, maxTurns ?? DEFAULT_MAX_TURNS)),
     runId
@@ -401,7 +583,7 @@ async function runLoop({
   transcript,
   claudePath,
   host,
-  mainWindow,
+  broadcast,
   signal,
   initialMaxTurns,
   runId
@@ -409,7 +591,7 @@ async function runLoop({
   transcript: string;
   claudePath: string;
   host: PythonHost;
-  mainWindow: BrowserWindow | null;
+  broadcast: VoiceEventBroadcast;
   signal: AbortSignal;
   initialMaxTurns: number;
   runId: string;
@@ -438,7 +620,7 @@ async function runLoop({
   // the panel for the next run.
   const publish = (state: VoiceState) => {
     if (runId !== currentRunId) return;
-    publishState(state, mainWindow);
+    publishState(state, broadcast);
   };
 
   while (turn < maxTurns) {
@@ -482,6 +664,7 @@ async function runLoop({
     }
 
     publish({ kind: "thinking", turn });
+    setCursorBusy(true);
 
     // Fetch screen + AX tree in parallel — neither needs the other's result,
     // and waiting serially adds ~1.5s per turn for nothing.
@@ -530,11 +713,67 @@ async function runLoop({
 
     if (signal.aborted) return { ok: false, reason: "aborted" };
 
-    const action = parseFirstSentinel(claudeReply);
+    let action = parseFirstSentinel(claudeReply);
     log("voice", "claude reply", { turn, action, replyHead: claudeReply.slice(0, 200) });
 
+    // No-sentinel rescue: Claude sometimes responds with conversational
+    // text (especially on Mac where the AX tree is empty and it leans on
+    // vision-only reasoning) and forgets to emit the [ACTION:...] line.
+    // Retry ONCE with a forceful nudge that includes its own chatty reply.
+    // This catches ~all cases without bailing out to the user.
+    if (!action && !signal.aborted) {
+      publish({ kind: "thinking", turn });
+      const nudge = [
+        `STOP. Your previous reply had NO action sentinel — the voice loop CANNOT proceed.`,
+        ``,
+        `What you wrote (first 400 chars):`,
+        `"${claudeReply.slice(0, 400).replace(/"/g, "'")}"`,
+        ``,
+        `User's task: "${transcript}"`,
+        ``,
+        `Pick exactly ONE concrete next step RIGHT NOW and end your reply with the matching sentinel:`,
+        `  • Need to launch an app? → [OPEN: target="App Name"]`,
+        `  • Click a labeled UI element? → [CLICK: target_id=N, label="..."] OR [CLICK: x=NUM, y=NUM]`,
+        `  • Type text? → [TYPE: text="..."]`,
+        `  • Press a hotkey? → [HOTKEY: keys="cmd+s"]`,
+        `  • Wait for UI to settle? → [WAIT: seconds=1]`,
+        `  • Task complete? → [DONE: summary]`,
+        `  • Task impossible / need user input? → [BLOCKED: reason]`,
+        ``,
+        `Do NOT explain — pick a step. The sentinel MUST be on its own final line.`,
+      ].join("\n");
+      try {
+        const retryRes = await host.invoke<{ response: string }>("run_task", {
+          prompt: nudge,
+          systemPrompt: SYSTEM_PROMPT,
+          claudePath,
+          model: "sonnet",
+          imagesBase64: [screenshotB64]
+        }, 60_000);
+        if (retryRes.ok && retryRes.data?.response) {
+          const retryReply = String(retryRes.data.response).trim();
+          const retryAction = parseFirstSentinel(retryReply);
+          if (retryAction) {
+            action = retryAction;
+            claudeReply = retryReply;
+            log("voice", "no-sentinel rescued on retry", { turn, action: retryAction });
+          }
+        }
+      } catch (err) {
+        log("voice", "no-sentinel retry failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     if (!action) {
-      publish({ kind: "error", message: "Claude didn't emit an action — try a clearer command." });
+      // Even after the nudge Claude still didn't emit a sentinel. Likely it
+      // wants something the loop can't deliver (like the user to clarify).
+      // Surface as BLOCKED with the chatty text so the user can read it
+      // and reply via the clarification-continuation path.
+      const chat = claudeReply.slice(0, 280).trim();
+      publish({
+        kind: "blocked",
+        reason: chat || "Couldn't determine an action. Try rephrasing with the app name first — e.g. 'open Notes and write a summary about Magic teams'."
+      });
       return { ok: false, reason: "no_action" };
     }
 
@@ -559,31 +798,38 @@ async function runLoop({
             `Your job is to be the second pair of eyes. Independently:`,
             ``,
             `1. From the user's request alone, write the SUCCESS_CRITERION —`,
-            `   the specific, falsifiable, visible-on-screen thing(s) that`,
-            `   must be true for this task to genuinely be done. Be strict:`,
-            `   the criterion must match the user's actual intent, not a`,
-            `   weaker proxy. (e.g. "play music" requires audible playback`,
-            `   confirmed by a pause icon or counting-up time, NOT just an`,
-            `   open Spotify window.)`,
+            `   the specific, falsifiable thing(s) that must be true for this`,
+            `   task to genuinely be done. Be strict.`,
             ``,
-            `2. Look at the attached fresh screenshot (taken 1.5s after the`,
-            `   agent's last action).`,
+            `2. Decide whether the criterion is VISIBLE-ON-SCREEN or`,
+            `   SERVICE-ACTION-ONLY:`,
+            `   - Visible-on-screen: "play music", "open Notepad", "scroll`,
+            `     down". You need to see proof in the screenshot.`,
+            `   - Service-action-only: "send email", "create calendar event",`,
+            `     "post to Slack", "create task", "list my meetings". The`,
+            `     agent calls a Composio service tool — no visible UI`,
+            `     change is required. Trust the agent's summary if it`,
+            `     plainly names the service action that succeeded.`,
             ``,
-            `3. Compare. Does the screen RIGHT NOW satisfy every part of`,
-            `   your criterion? Point to the specific visible evidence`,
-            `   (or the specific thing that's missing).`,
+            `3. For VISIBLE-ON-SCREEN tasks: look at the attached fresh`,
+            `   screenshot. Does the screen satisfy every part of your`,
+            `   criterion? Reject if uncertain. A false-positive is much`,
+            `   worse than a false-negative.`,
             ``,
-            `Reject if uncertain. A false-positive (verifying when it's not`,
-            `actually done) is much worse than a false-negative.`,
+            `4. For SERVICE-ACTION-ONLY tasks: accept if the agent's`,
+            `   summary clearly names what was done (e.g. "Email sent to`,
+            `   john@x.com", "Meeting created for 3pm Friday"). Reject if`,
+            `   the summary is vague or hedged ("I tried to send" / "the`,
+            `   email may have been sent").`,
             ``,
             `End your reply with EXACTLY ONE of these on its own final line:`,
-            `  [VERIFIED: 1-sentence citation of the visible evidence]`,
-            `  [NOT_VERIFIED: what's missing — what you'd need to see for done]`
+            `  [VERIFIED: 1-sentence citation — visible evidence or named service action]`,
+            `  [NOT_VERIFIED: what's missing — what you'd need to see / what the agent didn't confirm]`
           ].join("\n");
           const verifyRes = await host.invoke<{ response: string }>("run_task", {
             prompt: verifyPrompt,
             systemPrompt:
-              "You are an independent verifier for an OS-control agent. You receive the user's original request, the agent's summary of what it claims to have done, and a fresh screenshot. Derive the success criterion from the user's REQUEST (not the agent's summary — the summary may be wrong). Then check the screenshot against that criterion strictly. When in doubt, reject. A false [VERIFIED] is the worst outcome you can produce.",
+              "You are an independent verifier for an OS-control agent. The agent can either drive UI (visible changes on screen) or call connected service tools (Gmail, Calendar, Slack, etc — no visible change required). Derive the success criterion from the user's REQUEST. For visible tasks, check the screenshot strictly. For service-only tasks (send email, create event, post message, list items, etc), accept if the agent's summary clearly names the service action that succeeded; reject if the summary is vague or hedged. A false [VERIFIED] is the worst outcome you can produce.",
             claudePath,
             model: "sonnet",
             imagesBase64: [verifyScreen.data.png]
@@ -607,12 +853,16 @@ async function runLoop({
         // rather than blocking on infrastructure issues.
       }
       publish({ kind: "done", summary });
+      setCursorBusy(false);
+      if (summary) showCursorMessage(`✓ ${summary.slice(0, 80)}`, 3000);
       return { ok: true, summary };
     }
 
     if (action.type === "BLOCKED") {
       const reason = action.args.reason || claudeReply.replace(/\[BLOCKED:[\s\S]*$/m, "").trim();
       publish({ kind: "blocked", reason });
+      setCursorBusy(false);
+      if (reason) showCursorMessage(`✕ ${reason.slice(0, 80)}`, 3500);
       return { ok: false, reason: "blocked", summary: reason };
     }
 
@@ -654,6 +904,37 @@ async function runLoop({
 
     const rationale = claudeReply.replace(/\[[A-Z_]+:[\s\S]*?\]\s*$/m, "").trim();
     publish({ kind: "executing", turn, action, rationale });
+    setCursorBusy(false);
+
+    // Cursor companion narration: show what the agent is about to do
+    // as a small bubble next to the user's cursor. Trims aggressively
+    // so the text fits the bubble.
+    const cursorMsg = describeAction(action, axElements);
+    if (cursorMsg) showCursorMessage(cursorMsg.slice(0, 80), 2500);
+
+    // For grounded CLICKs (target_id present), fly the cursor companion
+    // to the target ~250ms BEFORE pyautogui actually fires the click.
+    // Gives the user a visible cue of where the agent is about to act.
+    if (action.type === "CLICK") {
+      const tidRaw = action.args.target_id ?? action.args.targetId;
+      if (tidRaw !== undefined && tidRaw !== "") {
+        const tid = Number(tidRaw);
+        const el = axElements.find((e) => e.id === tid);
+        if (el) {
+          const cx = Math.round(el.bounds.x + el.bounds.w / 2);
+          const cy = Math.round(el.bounds.y + el.bounds.h / 2);
+          flyCursorTo({ x: cx, y: cy, durationMs: 260 });
+          await new Promise((r) => setTimeout(r, 280));
+        }
+      } else {
+        const xn = Number(action.args.x);
+        const yn = Number(action.args.y);
+        if (Number.isFinite(xn) && Number.isFinite(yn)) {
+          flyCursorTo({ x: xn, y: yn, durationMs: 260 });
+          await new Promise((r) => setTimeout(r, 280));
+        }
+      }
+    }
 
     let actionNote: string | undefined;
     try {
@@ -662,6 +943,7 @@ async function runLoop({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       publish({ kind: "error", message: `Action failed: ${message}` });
+      setCursorBusy(false);
       return { ok: false, reason: "action_failed" };
     }
 
@@ -695,6 +977,7 @@ async function runLoop({
   }
 
   publish({ kind: "error", message: `Stopped after ${maxTurns} turns.` });
+  setCursorBusy(false);
   return { ok: false, reason: "max_turns" };
 }
 
@@ -951,9 +1234,9 @@ function parseKwargs(body: string, type: ActionType): Record<string, string> {
   return out;
 }
 
-function publishState(state: VoiceState, window: BrowserWindow | null | undefined): void {
+function publishState(state: VoiceState, broadcast: VoiceEventBroadcast | null | undefined): void {
   lastState = state;
-  if (window && !window.isDestroyed()) {
-    window.webContents.send("aios:host-event", { event: "voice_state", state });
+  if (broadcast) {
+    try { broadcast({ event: "voice_state", state }); } catch { /* renderer disconnected */ }
   }
 }

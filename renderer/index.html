@@ -23,7 +23,27 @@
         var t = localStorage.getItem("aios-theme") || "light";
         document.documentElement.setAttribute("data-theme", t);
       } catch (e) { /* ignore — fall back to default sheet */ }
+      // Computer Control popup (BrowserWindow opened by main/control-popup.ts)
+      // loads this same index.html with ?aios-control=1. Two things differ:
+      //   1. The body must be transparent so the dark rounded panel inside
+      //      can paint with a transparent margin around the rounded corners.
+      //   2. The full-window paper boot splash would look broken (small
+      //      offset, sage italic mark in a 360x520 frame) — hide it.
+      try {
+        if (/[?&]aios-control=1\b/.test(window.location.search) ||
+            /[?&]aios-control-bubble=1\b/.test(window.location.search) ||
+            /[?&]aios-cursor-overlay=1\b/.test(window.location.search)) {
+          document.documentElement.setAttribute("data-control-popup", "1");
+        }
+      } catch (e) {}
     </script>
+    <style>
+      [data-control-popup="1"] html,
+      [data-control-popup="1"] body,
+      html[data-control-popup="1"],
+      html[data-control-popup="1"] body { background: transparent !important; }
+      html[data-control-popup="1"] #aios-boot-splash { display: none !important; }
+    </style>
     <!--
       Boot splash — paints before any JS/CSS bundle has loaded so the user
       never sees a white frame between the Electron window opening and React

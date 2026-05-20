@@ -19,6 +19,7 @@ import {
   Trash2,
   Users,
   Mic,
+  Bot,
   X,
   PanelLeft,
   LayoutGrid
@@ -43,7 +44,9 @@ import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
 import { AgentsScreen } from "./screens/AgentsScreen";
 import { VoiceControlPanel } from "./screens/VoiceControlPanel";
-import { VoiceFAB } from "./components/VoiceFAB";
+import { ControlApp } from "./screens/ControlApp";
+import { BubbleApp } from "./screens/BubbleApp";
+import { CursorOverlayApp } from "./screens/CursorOverlayApp";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
 import type {
   ChatSession,
@@ -189,11 +192,6 @@ function App() {
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
-  // Bumped on every Ctrl+Alt+V press. VoiceControlPanel reads this — first
-  // bump auto-starts listening, subsequent bumps toggle. Lives at App level
-  // so the hotkey works even when the panel hasn't been opened yet.
-  const [voiceToggleSignal, setVoiceToggleSignal] = useState(0);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Default to "light" on first launch — the inline boot splash in index.html
   // paints the paper background unconditionally, so any other default would
@@ -595,14 +593,12 @@ function App() {
     window.aios?.window?.onMaximizedChanged?.((next) => setMaximized(next));
   }, []);
 
-  // Global Ctrl+Alt+V hotkey for voice control. Open the panel (if not
-  // already) and bump the signal so the panel knows to start/toggle listening.
+  // Listen for the shortcut:preferences IPC event. Fires from two sources:
+  //   - Cmd+, hotkey (Mac) registered in main/main.ts
+  //   - control_open_settings IPC (Control popup's Settings button)
+  // Both want to land the user on the Settings screen in the main window.
   useEffect(() => {
-    const unsub = window.aios?.window?.onShortcutVoiceToggle?.(() => {
-      setVoicePanelOpen(true);
-      setVoiceToggleSignal((n) => n + 1);
-    });
-    return () => { unsub?.(); };
+    window.aios?.window?.onShortcutPreferences?.(() => setScreen("settings"));
   }, []);
 
   // Toggle body.window-hidden so all CSS animations pause when the window is
@@ -865,25 +861,21 @@ function App() {
         </section>
 
         <div className="aios-sidebar-footer">
+          <button
+            className="aios-sidebar-voice"
+            type="button"
+            onClick={() => { void invoke("control_bubble_toggle"); }}
+            title="Toggle Computer Control bubble (Ctrl+Alt+V opens it)"
+          >
+            <Bot />
+            <span>Control</span>
+          </button>
           <button className="aios-sidebar-settings" type="button" onClick={() => setScreen("settings")} title="Settings">
             <Settings />
             <span>Settings</span>
           </button>
         </div>
       </aside>
-      ) : null}
-
-      <VoiceFAB
-        active={voicePanelOpen}
-        onToggle={() => setVoicePanelOpen((open) => !open)}
-      />
-
-      {voicePanelOpen ? (
-        <VoiceControlPanel
-          claude={claude}
-          toggleSignal={voiceToggleSignal}
-          onClose={() => setVoicePanelOpen(false)}
-        />
       ) : null}
 
       <main className="app-main">
@@ -1111,4 +1103,15 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+// One renderer bundle, four surfaces selected by URL flag:
+//   ?aios-cursor-overlay=1 → CursorOverlayApp (fullscreen click-through follower)
+//   ?aios-control-bubble=1 → BubbleApp (small circular button window)
+//   ?aios-control=1        → ControlApp (small panel window)
+//   no flag                → full App (main AIOS window)
+const search = new URLSearchParams(window.location.search);
+const RootComponent =
+  search.has("aios-cursor-overlay") ? <CursorOverlayApp /> :
+  search.has("aios-control-bubble") ? <BubbleApp /> :
+  search.has("aios-control") ? <ControlApp /> :
+  <App />;
+createRoot(document.getElementById("root")!).render(RootComponent);

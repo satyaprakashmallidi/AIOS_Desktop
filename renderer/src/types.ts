@@ -79,6 +79,21 @@ export type AiosCommand =
   | "voice_clipboard_set"
   | "voice_wait"
   | "voice_check_environment"
+  | "voice_get_cursor_type"
+  | "control_panel_toggle"
+  | "control_panel_open"
+  | "control_panel_close"
+  | "control_bubble_toggle"
+  | "control_bubble_show"
+  | "control_bubble_hide"
+  | "control_panel_get_docked"
+  | "control_panel_set_docked"
+  | "cursor_overlay_get_active"
+  | "cursor_overlay_set_active"
+  | "cursor_overlay_get_color"
+  | "cursor_overlay_set_color"
+  | "control_close_all"
+  | "control_open_settings"
   | "voice_control_start"
   | "voice_control_stop"
   | "voice_control_abort"
@@ -166,6 +181,12 @@ export interface ApiResponse<T> {
 export interface AiosApi {
   invoke<T = unknown>(cmd: AiosCommand, args?: Record<string, unknown>): Promise<ApiResponse<T>>;
   onHostEvent: (callback: (event: HostEvent) => void) => () => void;
+  onCursorPosition: (callback: (pos: { x: number; y: number }) => void) => () => void;
+  onCursorColor: (callback: (color: string) => void) => () => void;
+  onCursorFlyTo: (callback: (target: { x: number; y: number; durationMs: number }) => void) => () => void;
+  onCursorMessage: (callback: (msg: { text: string; durationMs: number }) => void) => () => void;
+  onCursorBusy: (callback: (state: { busy: boolean }) => void) => () => void;
+  onCursorType: (callback: (type: string) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
   cacheTheme: (theme: string) => Promise<{ ok: boolean }>;
   openOauthWindow: (url: string) => Promise<{ ok: boolean; completed?: boolean; error?: string }>;

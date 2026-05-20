@@ -9,10 +9,50 @@ import { AutoTaskScheduler } from "./scheduler";
 import { ensureRuntimeWorkspace, getSourceStarterKit, backfillStarterKit } from "./workspace";
 import { startWhatsApp, stopWhatsApp, getWhatsAppStatus, autoStartWhatsApp } from "./whatsapp-scanner";
 import { startVoiceLoop, abortVoiceLoop, getVoiceState } from "./voice-control";
+import {
+  installControlPopupHooks,
+  toggleControlPopup,
+  openControlPopup,
+  closeControlPopup,
+  destroyControlPopup,
+  isPanelDocked,
+  setPanelDocked,
+} from "./control-popup";
+import {
+  installControlBubbleHooks,
+  showControlBubble,
+  hideControlBubble,
+  toggleControlBubble,
+  destroyControlBubble,
+  isBubbleVisible,
+} from "./control-bubble";
+import {
+  isCursorOverlayActive,
+  setCursorOverlayActive,
+  destroyCursorOverlay,
+  getCursorColor,
+  setCursorColor,
+  flyCursorTo,
+  showCursorMessage,
+  setCursorBusy,
+  setCursorOverlayHost,
+} from "./cursor-overlay";
 
 let mainWindow: BrowserWindow | null = null;
 let host: PythonHost | null = null;
 let scheduler: AutoTaskScheduler | null = null;
+
+// Every BrowserWindow that should receive 'aios:host-event' broadcasts.
+// Today: the main window + (lazily) the Control popup window. Adding
+// new event-listening windows just registers them here.
+const eventSubscribers = new Set<BrowserWindow>();
+function broadcastHostEvent(event: unknown): void {
+  for (const win of eventSubscribers) {
+    if (!win.isDestroyed()) {
+      try { win.webContents.send("aios:host-event", event); } catch { /* renderer might be reloading */ }
+    }
+  }
+}
 
 app.setName("aios-desktop");
 app.setAppUserModelId("com.aios.desktop");
@@ -40,7 +80,21 @@ const mainHandledCommands = new Set<AiosCommand>([
   "voice_control_start",
   "voice_control_stop",
   "voice_control_abort",
-  "voice_control_state"
+  "voice_control_state",
+  "control_panel_toggle",
+  "control_panel_open",
+  "control_panel_close",
+  "control_bubble_toggle",
+  "control_bubble_show",
+  "control_bubble_hide",
+  "control_panel_get_docked",
+  "control_panel_set_docked",
+  "cursor_overlay_get_active",
+  "cursor_overlay_set_active",
+  "cursor_overlay_get_color",
+  "cursor_overlay_set_color",
+  "control_close_all",
+  "control_open_settings"
 ]);
 
 // Theme cache lives in userData so the main process can pick the right
@@ -164,8 +218,13 @@ function createWindow(): void {
     if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send("window:maximized-changed", false);
   });
   mainWindow.on("closed", () => {
+    if (mainWindow) eventSubscribers.delete(mainWindow);
     mainWindow = null;
   });
+
+  // Register main window as an aios:host-event subscriber so broadcasts
+  // reach it the same way they reach the Control popup.
+  eventSubscribers.add(mainWindow);
 }
 
 function registerIpcHandlers(): void {
@@ -278,13 +337,13 @@ function registerIpcHandlers(): void {
     }
   });
 
-  // Global shortcut for voice control toggle (v0.2.0+). Works even when AIOS
-  // is in the background so the user can drive their OS without alt-tabbing.
-  // Default: Ctrl+Alt (Win) / Cmd+Option (Mac). Configurable in Settings later.
+  // Global shortcut for Computer Control (v0.2.2+). Ensures the bubble is
+  // visible so the user has a persistent anchor, then toggles the panel
+  // attached to it. Works even when AIOS is in the background so the
+  // user can drive their OS without alt-tabbing into AIOS first.
   globalShortcut.register("CommandOrControl+Alt+V", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("shortcut:voice-toggle");
-    }
+    if (!isBubbleVisible()) showControlBubble();
+    toggleControlPopup();
   });
 }
 
@@ -375,19 +434,96 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     if (!claudePath) throw new Error("claudePath is required");
     // Fire and forget — the loop streams state via 'aios:host-event' channel
     // so the renderer doesn't have to block on this IPC for the full run.
-    startVoiceLoop({ transcript, claudePath, host, mainWindow, maxTurns }).catch((err) => {
+    startVoiceLoop({ transcript, claudePath, host, broadcast: broadcastHostEvent, maxTurns }).catch((err) => {
       log("voice", "loop failed", { error: err instanceof Error ? err.message : String(err) });
     });
     return { ok: true, accepted: true };
   }
 
   if (cmd === "voice_control_stop" || cmd === "voice_control_abort") {
-    await abortVoiceLoop(mainWindow);
+    await abortVoiceLoop(broadcastHostEvent);
     return { ok: true };
   }
 
   if (cmd === "voice_control_state") {
     return { state: getVoiceState() };
+  }
+
+  if (cmd === "control_panel_toggle") {
+    toggleControlPopup();
+    return { ok: true };
+  }
+  if (cmd === "control_panel_open") {
+    openControlPopup();
+    return { ok: true };
+  }
+  if (cmd === "control_panel_close") {
+    closeControlPopup();
+    return { ok: true };
+  }
+  if (cmd === "control_bubble_toggle") {
+    // Toggling the bubble off should also hide the panel — the panel is
+    // a popover anchored to the bubble; without the bubble it would be
+    // orphaned.
+    const wasVisible = isBubbleVisible();
+    toggleControlBubble();
+    if (wasVisible) closeControlPopup();
+    return { ok: true };
+  }
+  if (cmd === "control_bubble_show") {
+    showControlBubble();
+    return { ok: true };
+  }
+  if (cmd === "control_bubble_hide") {
+    hideControlBubble();
+    closeControlPopup();
+    return { ok: true };
+  }
+  if (cmd === "control_panel_get_docked") {
+    return { docked: isPanelDocked() };
+  }
+  if (cmd === "control_panel_set_docked") {
+    const docked = !!args.docked;
+    setPanelDocked(docked);
+    return { ok: true, docked };
+  }
+  if (cmd === "cursor_overlay_get_active") {
+    return { active: isCursorOverlayActive() };
+  }
+  if (cmd === "cursor_overlay_set_active") {
+    const next = !!args.active;
+    setCursorOverlayActive(next);
+    return { ok: true, active: next };
+  }
+  if (cmd === "cursor_overlay_get_color") {
+    return { color: getCursorColor() };
+  }
+  if (cmd === "cursor_overlay_set_color") {
+    const color = typeof args.color === "string" ? args.color : "#9caf9b";
+    setCursorColor(color);
+    return { ok: true, color };
+  }
+  if (cmd === "control_close_all") {
+    // "Quit Control" — full exit from Computer Control mode. Aborts any
+    // in-flight voice loop, closes the panel, hides the bubble, turns off
+    // the cursor companion. Doesn't quit AIOS itself; user re-enters via
+    // the sidebar Control button.
+    await abortVoiceLoop(broadcastHostEvent);
+    closeControlPopup();
+    hideControlBubble();
+    setCursorOverlayActive(false);
+    return { ok: true };
+  }
+  if (cmd === "control_open_settings") {
+    // Focus the main AIOS window and route it to the Settings screen so
+    // the user can configure Claude / theme / etc.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("shortcut:preferences");
+    }
+    return { ok: true };
   }
 
   if (cmd === "install_claude") {
@@ -548,9 +684,21 @@ app.whenReady().then(() => {
   initLogger(workspaceRoot);
   host = new PythonHost(workspaceRoot, starterKitRoot);
   host.onEvent((event) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("aios:host-event", event);
-    }
+    broadcastHostEvent(event);
+  });
+  setCursorOverlayHost(host);
+
+  // Register the Control popup + Control bubble as event subscribers the
+  // moment each is created. Both hide instead of destroying on close, but
+  // if they do get destroyed (app quit, force-close) we drop them from
+  // the set.
+  installControlPopupHooks({
+    subscribe: (win) => { eventSubscribers.add(win); },
+    unsubscribe: (win) => { eventSubscribers.delete(win); },
+  });
+  installControlBubbleHooks({
+    subscribe: (win) => { eventSubscribers.add(win); },
+    unsubscribe: (win) => { eventSubscribers.delete(win); },
   });
   let hostStarted = false;
   try {
@@ -764,6 +912,9 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   scheduler?.stop();
   globalShortcut.unregisterAll();
+  destroyControlBubble();
+  destroyControlPopup();
+  destroyCursorOverlay();
   // host.stop() may be async — fire it, then exit on settle. Give it a 1.5s
   // ceiling so a wedged Python sidecar can't keep the app from quitting.
   const stopHost = Promise.resolve(host?.stop()).catch(() => undefined);

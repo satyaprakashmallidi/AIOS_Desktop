@@ -1144,6 +1144,44 @@ def voice_type(args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "length": len(text), "cleared": bool(args.get("clear"))}
 
 
+def _mac_bring_to_foreground(app_name: str, attempts: int = 6, gap: float = 0.4) -> bool:
+    """macOS: bring the just-launched app to the foreground. After `open -a`,
+    the app may launch behind AIOS (especially when AIOS itself was front-
+    most). Without this, the next screenshot still shows AIOS and Claude
+    can't find the target app to interact with.
+
+    Uses AppleScript's `tell application "X" to activate` — works for any
+    app whose user-facing display name was passed to `open -a`. Retries a
+    few times because the app's process can take a moment to register."""
+    import sys
+    if sys.platform != "darwin":
+        return False
+    import subprocess
+    import time
+    clean = (app_name or "").strip()
+    if not clean:
+        return False
+    # Strip a trailing ".app" if the user passed it that way.
+    if clean.lower().endswith(".app"):
+        clean = clean[:-4]
+    for _ in range(attempts):
+        try:
+            # AppleScript handles names with spaces fine when wrapped in quotes.
+            script = f'tell application "{clean}" to activate'
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=2.5,
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
+        time.sleep(gap)
+    return False
+
+
 def _win_bring_to_foreground(matcher: str, attempts: int = 8, gap: float = 0.4) -> bool:
     """After launching an app, find its window by title-matching and bring
     it to the foreground. Solves the "Spotify opened in the background"
@@ -1323,7 +1361,12 @@ def voice_open(args: dict[str, Any]) -> dict[str, Any]:
             # explorer (already focused or system-launched).
             target_clean = target.split(":")[0].split("\\")[-1].split("/")[-1]
             if target_clean and not target_clean.lower().startswith(("http", "ms-", "mailto")):
-                focused = _win_bring_to_foreground(target_clean)
+                if sys.platform == "win32":
+                    focused = _win_bring_to_foreground(target_clean)
+                elif sys.platform == "darwin":
+                    focused = _mac_bring_to_foreground(target_clean)
+                else:
+                    focused = False
             else:
                 focused = False
             return {"ok": True, "target": target, "focused": focused}
@@ -1408,6 +1451,87 @@ def voice_wait(args: dict[str, Any]) -> dict[str, Any]:
     seconds = max(0.0, min(5.0, seconds))
     time.sleep(seconds)
     return {"ok": True, "waited": seconds}
+
+
+_WIN_CURSOR_HANDLES: dict[int, str] = {}
+def _ensure_win_cursor_handles() -> dict[int, str]:
+    """Resolve and cache the hCursor handle for each well-known system
+    cursor so we can compare GetCursorInfo()'s active handle against them.
+    Cheap one-time lookup; LoadCursorW(NULL, ...) returns a shared system
+    handle that doesn't need to be freed."""
+    global _WIN_CURSOR_HANDLES
+    if _WIN_CURSOR_HANDLES:
+        return _WIN_CURSOR_HANDLES
+    try:
+        import sys
+        if sys.platform != "win32":
+            return {}
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        u.LoadCursorW.restype = wintypes.HANDLE
+        u.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+        # IDC_* constants from WinUser.h. Cast int → LPCWSTR via MAKEINTRESOURCE.
+        defs: list[tuple[int, str]] = [
+            (32512, "arrow"),       # IDC_ARROW
+            (32513, "ibeam"),       # IDC_IBEAM
+            (32514, "wait"),        # IDC_WAIT
+            (32515, "cross"),       # IDC_CROSS
+            (32516, "up_arrow"),    # IDC_UPARROW
+            (32642, "size_nwse"),   # IDC_SIZENWSE
+            (32643, "size_nesw"),   # IDC_SIZENESW
+            (32644, "size_we"),     # IDC_SIZEWE
+            (32645, "size_ns"),     # IDC_SIZENS
+            (32646, "size_all"),    # IDC_SIZEALL
+            (32648, "no"),          # IDC_NO (forbidden)
+            (32649, "hand"),        # IDC_HAND (link)
+            (32650, "app_starting"),# IDC_APPSTARTING
+            (32651, "help"),        # IDC_HELP
+        ]
+        out: dict[int, str] = {}
+        for resource_id, name in defs:
+            handle = u.LoadCursorW(0, ctypes.c_wchar_p(resource_id))
+            if handle:
+                out[int(handle)] = name
+        _WIN_CURSOR_HANDLES = out
+    except Exception:
+        _WIN_CURSOR_HANDLES = {}
+    return _WIN_CURSOR_HANDLES
+
+
+def voice_get_cursor_type(_args: dict[str, Any]) -> dict[str, Any]:
+    """Return the OS cursor's current shape (arrow / ibeam / hand / etc).
+    Used by the cursor companion overlay to swap its sprite so it matches
+    what the user is doing — typing → I-beam, hovering link → hand, etc.
+
+    Cheap call: one GetCursorInfo + a dict lookup. Polled at ~10Hz by main."""
+    import sys
+    if sys.platform != "win32":
+        return {"available": False, "type": "arrow"}
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+        class CURSORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("hCursor", wintypes.HANDLE),
+                ("ptScreenPos", POINT),
+            ]
+
+        info = CURSORINFO()
+        info.cbSize = ctypes.sizeof(CURSORINFO)
+        if not ctypes.windll.user32.GetCursorInfo(ctypes.byref(info)):
+            return {"available": True, "type": "arrow"}
+        handles = _ensure_win_cursor_handles()
+        name = handles.get(int(info.hCursor), "arrow")
+        return {"available": True, "type": name}
+    except Exception:
+        return {"available": False, "type": "arrow"}
 
 
 def voice_check_environment(_args: dict[str, Any]) -> dict[str, Any]:
@@ -1598,6 +1722,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "voice_clipboard_set": voice_clipboard_set,
         "voice_wait": voice_wait,
         "voice_check_environment": voice_check_environment,
+        "voice_get_cursor_type": voice_get_cursor_type,
         "create_custom_agent": lambda a: agents_mod.create_custom_agent(
             name=require_str(a, "name"),
             role=str(a.get("role") or "").strip() or "Custom agent",
