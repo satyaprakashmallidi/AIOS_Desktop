@@ -43,6 +43,7 @@ import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
 import { AgentsScreen } from "./screens/AgentsScreen";
 import { VoiceControlPanel } from "./screens/VoiceControlPanel";
+import { VoiceFAB } from "./components/VoiceFAB";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
 import type {
   ChatSession,
@@ -864,15 +865,6 @@ function App() {
         </section>
 
         <div className="aios-sidebar-footer">
-          <button
-            className={`aios-sidebar-voice ${voicePanelOpen ? "is-active" : ""}`}
-            type="button"
-            onClick={() => setVoicePanelOpen((open) => !open)}
-            title="Voice control (Ctrl+Alt+V)"
-          >
-            <Mic />
-            <span>Voice</span>
-          </button>
           <button className="aios-sidebar-settings" type="button" onClick={() => setScreen("settings")} title="Settings">
             <Settings />
             <span>Settings</span>
@@ -880,6 +872,11 @@ function App() {
         </div>
       </aside>
       ) : null}
+
+      <VoiceFAB
+        active={voicePanelOpen}
+        onToggle={() => setVoicePanelOpen((open) => !open)}
+      />
 
       {voicePanelOpen ? (
         <VoiceControlPanel

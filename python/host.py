@@ -1003,12 +1003,20 @@ _AX_CLICKABLE_TYPES = {
 }
 
 
+_AX_TREE_CACHE: dict[str, Any] = {"at": 0.0, "args_key": "", "result": None}
+_AX_TREE_CACHE_TTL_S = 2.0
+
+
 def screen_ax_tree(args: dict[str, Any]) -> dict[str, Any]:
     """Windows UIAutomation: walk the focused window's accessibility tree and
     return a flat list of visible elements with bounds, labels, and types.
     The voice-control agent uses this to target elements by id instead of
     guessing pixel coordinates. On non-Windows or when UIA is unavailable,
-    returns {available: false, ...} so the orchestrator falls back to vision."""
+    returns {available: false, ...} so the orchestrator falls back to vision.
+
+    Includes a 2s TTL cache keyed by the call args so a prewarm fired from
+    the renderer the moment the user opens the panel pays off — the first
+    real turn reuses the warm result instead of re-walking from cold."""
     import sys
     if sys.platform != "win32":
         return {"available": False, "reason": "ax_tree only implemented on Windows in v0.2.0-beta", "elements": []}
@@ -1023,6 +1031,17 @@ def screen_ax_tree(args: dict[str, Any]) -> dict[str, Any]:
     max_elements = int(args.get("maxElements") or 200)
     time_budget = float(args.get("timeBudget") or 1.5)
     deadline = time.monotonic() + time_budget
+
+    args_key = f"{max_depth}|{max_elements}|{time_budget}"
+    now = time.monotonic()
+    if (
+        _AX_TREE_CACHE["result"] is not None
+        and _AX_TREE_CACHE["args_key"] == args_key
+        and now - _AX_TREE_CACHE["at"] < _AX_TREE_CACHE_TTL_S
+    ):
+        cached = dict(_AX_TREE_CACHE["result"])
+        cached["from_cache"] = True
+        return cached
 
     elements: list[dict[str, Any]] = []
     truncated = False
@@ -1084,13 +1103,17 @@ def screen_ax_tree(args: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         return {"available": False, "reason": f"AX walk failed: {exc}", "elements": []}
 
-    return {
+    result = {
         "available": True,
         "elements": elements,
         "truncated": truncated,
         "foreground": foreground_name,
         "count": len(elements),
     }
+    _AX_TREE_CACHE["at"] = now
+    _AX_TREE_CACHE["args_key"] = args_key
+    _AX_TREE_CACHE["result"] = result
+    return result
 
 
 def voice_click(args: dict[str, Any]) -> dict[str, Any]:
@@ -1387,6 +1410,94 @@ def voice_wait(args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "waited": seconds}
 
 
+def voice_check_environment(_args: dict[str, Any]) -> dict[str, Any]:
+    """Cheap probe used between voice-loop turns to detect when the user
+    Cmd-Tabs away mid-workflow OR when a modal dialog has popped up that
+    needs human attention. Both cases pause the loop so the agent doesn't
+    blindly click into the wrong app or behind a modal.
+
+    Returns:
+        available: false on non-Windows (Mac equivalent in v0.5.0).
+        foreground_app: process name (e.g. "chrome.exe", "Notepad.exe").
+        foreground_title: window title.
+        foreground_pid: process ID (for unique app instance tracking).
+        modal_present: true if a Window control marked IsModal is on top
+            of the foreground window."""
+    import sys
+    if sys.platform != "win32":
+        return {"available": False, "reason": "win32 only"}
+
+    try:
+        import uiautomation as auto
+    except Exception as exc:
+        return {"available": False, "reason": f"uiautomation not available: {exc}"}
+
+    try:
+        fg = auto.GetForegroundControl()
+        if fg is None:
+            return {"available": True, "foreground_app": "", "foreground_title": "", "foreground_pid": 0, "modal_present": False}
+        title = ""
+        try:
+            title = (fg.Name or "")[:200]
+        except Exception:
+            pass
+        pid = 0
+        try:
+            pid = int(getattr(fg, "ProcessId", 0) or 0)
+        except Exception:
+            pass
+        # Process name from PID via psutil if available; fall back to
+        # WMIC-free lookup using ctypes if not. We avoid spawning a
+        # subprocess in the polling path.
+        app_name = ""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            PROCESS_QUERY_LIMITED = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED, False, pid)
+            if handle:
+                try:
+                    buf = ctypes.create_unicode_buffer(260)
+                    size = wintypes.DWORD(260)
+                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                        full = buf.value
+                        app_name = full.rsplit("\\", 1)[-1]
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+
+        # Modal detection: look at the foreground window's siblings (windows
+        # owned by the same process) for one whose ControlType is Window AND
+        # whose WindowPattern reports IsModal. Cheap — children of root
+        # filtered by pid.
+        modal_present = False
+        try:
+            root = auto.GetRootControl()
+            for child in (root.GetChildren() or []):
+                try:
+                    if int(getattr(child, "ProcessId", 0) or 0) != pid:
+                        continue
+                    pat = child.GetWindowPattern() if hasattr(child, "GetWindowPattern") else None
+                    if pat and getattr(pat, "IsModal", False):
+                        modal_present = True
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return {
+            "available": True,
+            "foreground_app": app_name,
+            "foreground_title": title,
+            "foreground_pid": pid,
+            "modal_present": modal_present,
+        }
+    except Exception as exc:
+        return {"available": False, "reason": f"probe failed: {exc}"}
+
+
 def dispatch(cmd: str, args: dict[str, Any]) -> Any:
     handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
         "get_workspace_info": lambda _args: get_workspace_info(),
@@ -1486,6 +1597,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "voice_clipboard_get": voice_clipboard_get,
         "voice_clipboard_set": voice_clipboard_set,
         "voice_wait": voice_wait,
+        "voice_check_environment": voice_check_environment,
         "create_custom_agent": lambda a: agents_mod.create_custom_agent(
             name=require_str(a, "name"),
             role=str(a.get("role") or "").strip() or "Custom agent",

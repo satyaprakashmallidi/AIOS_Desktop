@@ -13,6 +13,7 @@
 // reliability — same JSON-RPC interface, no orchestration changes needed.
 
 import type { BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 import type { PythonHost } from "./python-host";
 import { log } from "./logger";
 
@@ -313,10 +314,16 @@ screenshot. If you declared DONE prematurely the verifier will reject it.`;
 interface VoiceRun {
   abort: AbortController;
   promise: Promise<unknown>;
+  runId: string;
 }
 
 let activeRun: VoiceRun | null = null;
 let lastState: VoiceState = { kind: "idle" };
+// Bumped at startVoiceLoop entry. publishState below ignores any update
+// whose runId doesn't match — this is the operation-token safety: stale
+// callbacks from a prior run (sentinel handlers still in-flight, settle
+// timers etc.) can't mutate the panel state for the new run.
+let currentRunId: string = "";
 
 export function getVoiceState(): VoiceState {
   return lastState;
@@ -358,6 +365,18 @@ export async function startVoiceLoop({ transcript, claudePath, host, mainWindow,
     return { ok: false, reason: "claude_not_configured" };
   }
 
+  // Fresh UUID for this run. Threaded into runLoop and checked before
+  // every publishState so stale callbacks from the prior run (now aborted)
+  // can't paint the panel for the new run.
+  const runId = randomUUID();
+  currentRunId = runId;
+
+  // AX prewarm: kick off a tree walk the moment we start. Python caches
+  // the result for 2s, so the first turn's parallel screen_ax_tree call
+  // reuses the warm walk instead of paying ~1.5s of cold COM init. Fire
+  // and forget — failures are silent (the first turn will retry anyway).
+  host.invoke("screen_ax_tree", { maxElements: 120, timeBudget: 1.5 }).catch(() => undefined);
+
   const abort = new AbortController();
   const promise = runLoop({
     transcript: trimmed,
@@ -365,9 +384,10 @@ export async function startVoiceLoop({ transcript, claudePath, host, mainWindow,
     host,
     mainWindow,
     signal: abort.signal,
-    initialMaxTurns: Math.max(1, Math.min(ABSOLUTE_MAX_TURNS, maxTurns ?? DEFAULT_MAX_TURNS))
+    initialMaxTurns: Math.max(1, Math.min(ABSOLUTE_MAX_TURNS, maxTurns ?? DEFAULT_MAX_TURNS)),
+    runId
   });
-  activeRun = { abort, promise };
+  activeRun = { abort, promise, runId };
 
   try {
     const result = await promise;
@@ -383,7 +403,8 @@ async function runLoop({
   host,
   mainWindow,
   signal,
-  initialMaxTurns
+  initialMaxTurns,
+  runId
 }: {
   transcript: string;
   claudePath: string;
@@ -391,6 +412,7 @@ async function runLoop({
   mainWindow: BrowserWindow | null;
   signal: AbortSignal;
   initialMaxTurns: number;
+  runId: string;
 }): Promise<{ ok: boolean; reason?: string; summary?: string }> {
   const actionLog: string[] = [];
   let turn = 0;
@@ -404,12 +426,62 @@ async function runLoop({
   let lastFingerprint: string | null = null;
   let consecutiveDuplicates = 0;
   let duplicateWarning: string | null = null;
+  // Foreground-window baseline captured on first turn. We compare against
+  // it each subsequent turn to detect "user Cmd-Tabbed away mid-workflow"
+  // (debounced 2 polls to avoid flickering on transient background windows
+  // like notification toasts).
+  let foregroundBaseline: { pid: number; app: string } | null = null;
+  let foregroundDeviationCount = 0;
+
+  // Publish wrapper: silently drops if this run is no longer the current
+  // one. Stale settle-timer callbacks or in-flight async work can't paint
+  // the panel for the next run.
+  const publish = (state: VoiceState) => {
+    if (runId !== currentRunId) return;
+    publishState(state, mainWindow);
+  };
 
   while (turn < maxTurns) {
     if (signal.aborted) return { ok: false, reason: "aborted" };
     turn += 1;
 
-    publishState({ kind: "thinking", turn }, mainWindow);
+    // Between-turn safety probe: did the user switch apps, or did a modal
+    // pop up? Skip on the very first turn (no baseline yet).
+    if (foregroundBaseline) {
+      try {
+        const probe = await host.invoke<{ available: boolean; foreground_app?: string; foreground_pid?: number; modal_present?: boolean }>("voice_check_environment", {});
+        if (probe.ok && probe.data?.available) {
+          if (probe.data.modal_present) {
+            publish({ kind: "blocked", reason: "A modal dialog appeared — pausing so you can handle it. Re-run when ready." });
+            return { ok: false, reason: "modal_appeared" };
+          }
+          const fgPid = probe.data.foreground_pid || 0;
+          const fgApp = (probe.data.foreground_app || "").toLowerCase();
+          const sameProcess = fgPid === foregroundBaseline.pid;
+          const sameApp = fgApp === foregroundBaseline.app;
+          if (!sameProcess && !sameApp) {
+            foregroundDeviationCount += 1;
+            // Debounce: require 2 consecutive different-app polls before
+            // pausing. Background services briefly grabbing focus (e.g.
+            // notification toast, UAC prompt about to appear) shouldn't
+            // abort a long workflow.
+            if (foregroundDeviationCount >= 2) {
+              publish({
+                kind: "blocked",
+                reason: `Paused — you switched to ${probe.data.foreground_app || "another app"}. AIOS won't keep clicking inside a different app. Re-run when ready.`
+              });
+              return { ok: false, reason: "user_switched_app" };
+            }
+          } else {
+            foregroundDeviationCount = 0;
+          }
+        }
+      } catch {
+        // Probe failures are non-fatal — fall through to the regular turn.
+      }
+    }
+
+    publish({ kind: "thinking", turn });
 
     // Fetch screen + AX tree in parallel — neither needs the other's result,
     // and waiting serially adds ~1.5s per turn for nothing.
@@ -431,7 +503,7 @@ async function runLoop({
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      publishState({ kind: "error", message: `Couldn't capture screen: ${message}` }, mainWindow);
+      publish({ kind: "error", message: `Couldn't capture screen: ${message}` });
       return { ok: false, reason: "screen_capture_failed" };
     }
 
@@ -452,7 +524,7 @@ async function runLoop({
       claudeReply = String(res.data.response || "").trim();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      publishState({ kind: "error", message: `Claude error: ${message}` }, mainWindow);
+      publish({ kind: "error", message: `Claude error: ${message}` });
       return { ok: false, reason: "claude_failed" };
     }
 
@@ -462,7 +534,7 @@ async function runLoop({
     log("voice", "claude reply", { turn, action, replyHead: claudeReply.slice(0, 200) });
 
     if (!action) {
-      publishState({ kind: "error", message: "Claude didn't emit an action — try a clearer command." }, mainWindow);
+      publish({ kind: "error", message: "Claude didn't emit an action — try a clearer command." });
       return { ok: false, reason: "no_action" };
     }
 
@@ -473,7 +545,7 @@ async function runLoop({
       // happened. Take a fresh screenshot 1.5s later and run a strict
       // verify call. If the verifier rejects, convert to BLOCKED instead
       // of accepting a false DONE.
-      publishState({ kind: "thinking", turn }, mainWindow);
+      publish({ kind: "thinking", turn });
       await new Promise((r) => setTimeout(r, 1500));
       try {
         const verifyScreen = await host.invoke<{ png: string }>("screen_capture", { monitor: "active" });
@@ -521,10 +593,10 @@ async function runLoop({
           const notVerifiedMatch = reply.match(/\[NOT_VERIFIED:\s*([\s\S]*?)\]/);
           if (notVerifiedMatch && !verifiedMatch) {
             const why = notVerifiedMatch[1].trim();
-            publishState({
+            publish({
               kind: "blocked",
               reason: `Claimed done, but verification failed: ${why}`
-            }, mainWindow);
+            });
             return { ok: false, reason: "not_verified", summary: why };
           }
           // VERIFIED (or ambiguous reply) — accept the DONE.
@@ -534,13 +606,13 @@ async function runLoop({
         // If verification itself errors, fall through to accepting DONE
         // rather than blocking on infrastructure issues.
       }
-      publishState({ kind: "done", summary }, mainWindow);
+      publish({ kind: "done", summary });
       return { ok: true, summary };
     }
 
     if (action.type === "BLOCKED") {
       const reason = action.args.reason || claudeReply.replace(/\[BLOCKED:[\s\S]*$/m, "").trim();
-      publishState({ kind: "blocked", reason }, mainWindow);
+      publish({ kind: "blocked", reason });
       return { ok: false, reason: "blocked", summary: reason };
     }
 
@@ -564,10 +636,10 @@ async function runLoop({
       if (consecutiveDuplicates >= 2) {
         // Third identical action in a row — abort. Claude is stuck and
         // burning turns. The user can re-issue with a different phrasing.
-        publishState({
+        publish({
           kind: "blocked",
           reason: `Stopped after the same action [${action.type}] was tried 3 times in a row without progress. The current approach isn't working — try restating your request more specifically.`
-        }, mainWindow);
+        });
         return { ok: false, reason: "duplicate_loop" };
       }
       // Second identical — warn Claude in the NEXT prompt so it changes tack.
@@ -581,7 +653,7 @@ async function runLoop({
     lastFingerprint = fingerprint;
 
     const rationale = claudeReply.replace(/\[[A-Z_]+:[\s\S]*?\]\s*$/m, "").trim();
-    publishState({ kind: "executing", turn, action, rationale }, mainWindow);
+    publish({ kind: "executing", turn, action, rationale });
 
     let actionNote: string | undefined;
     try {
@@ -589,7 +661,7 @@ async function runLoop({
       actionNote = result.note;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      publishState({ kind: "error", message: `Action failed: ${message}` }, mainWindow);
+      publish({ kind: "error", message: `Action failed: ${message}` });
       return { ok: false, reason: "action_failed" };
     }
 
@@ -603,9 +675,26 @@ async function runLoop({
     await new Promise((r) => setTimeout(r, settle));
     const summary = describeAction(action, axElements);
     actionLog.push(actionNote ? `${summary} — ${actionNote}` : summary);
+
+    // Update the foreground baseline so legitimate app-switches Claude
+    // just performed (e.g. OPEN Chrome) become the new expected state.
+    // Without this re-baseline, the next-turn check would flag the
+    // intentional switch as "user took over". Quiet, best-effort.
+    try {
+      const refresh = await host.invoke<{ available: boolean; foreground_app?: string; foreground_pid?: number }>("voice_check_environment", {});
+      if (refresh.ok && refresh.data?.available) {
+        foregroundBaseline = {
+          pid: refresh.data.foreground_pid || 0,
+          app: (refresh.data.foreground_app || "").toLowerCase()
+        };
+        foregroundDeviationCount = 0;
+      }
+    } catch {
+      /* probe failure non-fatal */
+    }
   }
 
-  publishState({ kind: "error", message: `Stopped after ${maxTurns} turns.` }, mainWindow);
+  publish({ kind: "error", message: `Stopped after ${maxTurns} turns.` });
   return { ok: false, reason: "max_turns" };
 }
 

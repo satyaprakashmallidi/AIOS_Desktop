@@ -704,3 +704,41 @@ package.json                       version 0.1.28 → 0.2.0
 - Set-of-Mark overlay (numbered green boxes drawn on the screenshot from AX bounds). Planned but punted to keep this release focused.
 - Browser CDP integration for richer DOM access on web apps.
 - OCR fallback for apps that expose no UIA tree.
+
+---
+
+## v0.2.1 — Floating FAB + safety hardening
+
+First phase of the TipTour-parity roadmap. Small, focused release.
+
+**Ships:**
+- **Right-edge floating FAB** (`renderer/src/components/VoiceFAB.tsx`) — single always-visible entry point for Computer Control. Sidebar "Control" button removed; only Settings remains in the sidebar footer. Hotkey Ctrl+Alt+V still opens the same panel.
+- **Operation tokens** in the voice loop. Every `startVoiceLoop` mints a fresh UUID; `publishState` calls are wrapped in a `publish` closure that drops if `runId !== currentRunId`. Stale callbacks from a prior run (settle-timer fires, in-flight async) can't paint the panel for the next run.
+- **Pause on user app-switch.** Between every turn, `voice_check_environment` probes the foreground process. If it's not the baseline app for 2 consecutive polls (debounced — kills toast/notification false positives), the loop blocks with "Paused — you switched to <app>." Baseline re-captured at end of each turn so Claude's own intentional `[OPEN: ...]` doesn't trigger the safety net.
+- **Modal detection.** Same probe checks for `WindowPattern.IsModal` on top-level windows owned by the foreground process. If a modal dialog appears mid-workflow, the loop blocks with "A modal dialog appeared — pausing so you can handle it."
+- **AX prewarm + 2s cache.** `startVoiceLoop` fires a fire-and-forget `screen_ax_tree` call before `runLoop` starts. Python caches the result for 2s keyed by walk args, so the first turn's parallel ax call reuses the warm walk instead of paying cold COM init.
+
+**New IPC: `voice_check_environment`** (Win-only; Mac returns `{available: false}` until v0.5.0 lands Mac AX). Returns `{foreground_app, foreground_title, foreground_pid, modal_present}`. Process name resolved via `OpenProcess` + `QueryFullProcessImageNameW` (ctypes, no subprocess). Modal detection iterates root children matching pid + checks `GetWindowPattern().IsModal`.
+
+**Files changed:**
+```
+renderer/src/components/VoiceFAB.tsx    NEW — right-edge floating FAB (~30 lines)
+renderer/src/App.tsx                    Removed sidebar Control button block; mount <VoiceFAB/>;
+                                        dropped Bot import (FAB owns it now)
+renderer/src/styles.css                 .aios-sidebar-voice → .voice-fab (fixed right-mid, circular)
+main/voice-control.ts                   randomUUID runId + currentRunId guard; publish() wrapper;
+                                        foreground/modal probe between turns; baseline re-capture
+                                        at end of each turn; prewarm screen_ax_tree at run start
+main/types.ts / preload.ts              +voice_check_environment in AiosCommand union + allowlist
+renderer/src/types.ts                   mirror
+python/host.py                          +voice_check_environment (Win UIA + ctypes process name +
+                                        WindowPattern IsModal scan); +2s TTL cache on screen_ax_tree
+package.json                            version 0.2.0 → 0.2.1
+```
+
+**Verification:**
+- FAB visible from every screen (chat, connectors, agents, settings, etc.). Click toggles panel.
+- Sidebar footer now only has Settings.
+- Start a long voice task (e.g. *"Open Notepad, write a haiku, save it"*). Cmd-Tab to Chrome mid-execution → after ~2 turn polls, panel shows "Paused — you switched to chrome.exe."
+- Trigger a modal mid-task (e.g. say *"Quit Notepad without saving"* with unsaved changes) → panel pauses with "A modal dialog appeared".
+- Open the panel quickly while a prior task is mid-loop → no stale state from old run leaks into the new panel state.

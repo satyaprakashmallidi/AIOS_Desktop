@@ -1030,8 +1030,19 @@ export function ConnectorsScreen({ deviceUserId, claude }: { deviceUserId: strin
       if (document.visibilityState !== "visible") return;
       refresh();
     }, 120_000);
+    // Refresh the moment the app becomes visible again. The common path:
+    // user clicks Connect → switches to browser → completes OAuth → Alt-Tabs
+    // back. Without this, the card waits up to 1.5s (poll) or 120s (heartbeat)
+    // to flip to "connected", which looks broken.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     return () => {
       window.clearInterval(heartbeat);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
       for (const guard of activePollsRef.current.values()) guard.aborted = true;
       activePollsRef.current.clear();
     };

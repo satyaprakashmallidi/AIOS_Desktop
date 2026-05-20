@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, CheckCircle2, Loader2, Mic, MicOff, MousePointer2, Square, X } from "lucide-react";
+import { Activity, AlertCircle, ArrowUp, Bot, CheckCircle2, Loader2, Mic, MicOff, MousePointer2, Square, X } from "lucide-react";
 import { invoke } from "../lib/api";
 import type { ClaudeStatus } from "../types";
 
@@ -43,9 +43,10 @@ export function VoiceControlPanel({
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [transcript, setTranscript] = useState("");
+  const [inputText, setInputText] = useState("");
   const recorderRef = useRef<{ stop: () => Promise<void> } | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
-  const initialisedRef = useRef(false);
+  const baselineSignalRef = useRef<number | null>(null);
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
@@ -66,15 +67,17 @@ export function VoiceControlPanel({
     return () => unsub?.();
   }, []);
 
-  // React to the App-level hotkey signal. First mount with signal>0 = start.
-  // Subsequent bumps toggle current state.
+  // Capture the signal value on first mount as a baseline; only act when a
+  // subsequent bump pushes it past the baseline. This means opening the panel
+  // (sidebar click or hotkey-while-closed) never auto-starts the mic — user
+  // chooses voice vs text. Pressing Ctrl+Alt+V again while the panel is open
+  // still toggles the mic, which is the useful power-user gesture.
   useEffect(() => {
-    if (toggleSignal === 0) return;
-    if (!initialisedRef.current) {
-      initialisedRef.current = true;
-      startListening();
+    if (baselineSignalRef.current === null) {
+      baselineSignalRef.current = toggleSignal;
       return;
     }
+    if (toggleSignal === baselineSignalRef.current) return;
     const k = phaseRef.current.kind;
     if (k === "listening") stopListening();
     else if (k === "idle" || k === "done" || k === "error" || k === "blocked") startListening();
@@ -177,6 +180,29 @@ export function VoiceControlPanel({
     }
   }
 
+  async function submitText() {
+    const text = inputText.trim();
+    if (!text) return;
+    if (!claude?.path) {
+      setPhase({ kind: "error", message: "Claude CLI isn't configured. Set it up in Settings → Claude CLI." });
+      return;
+    }
+    setTranscript(text);
+    setInputText("");
+    setPhase({ kind: "thinking", turn: 1 });
+    try {
+      const start = await invoke<{ ok: boolean; accepted?: boolean }>("voice_control_start", {
+        transcript: text,
+        claudePath: claude.path
+      });
+      if (!start?.ok) {
+        setPhase({ kind: "error", message: "Couldn't start the voice loop." });
+      }
+    } catch (err) {
+      setPhase({ kind: "error", message: err instanceof Error ? err.message : "Failed to start." });
+    }
+  }
+
   async function abortLoop() {
     await invoke("voice_control_abort", {});
     setPhase({ kind: "idle" });
@@ -190,11 +216,11 @@ export function VoiceControlPanel({
     phase.kind === "executing";
 
   return (
-    <div className="voice-panel" role="dialog" aria-label="Voice Control">
+    <div className="voice-panel" role="dialog" aria-label="Computer Control">
       <header className="voice-panel-head">
         <div className="voice-panel-title">
-          <Mic size={13} />
-          Voice control
+          <Bot size={13} />
+          Computer control
         </div>
         <button
           type="button"
@@ -212,7 +238,7 @@ export function VoiceControlPanel({
       <div className="voice-panel-body">
         {phase.kind === "idle" && (
           <p className="voice-panel-hint">
-            Tap the mic and tell AIOS what to do on your screen. Hotkey: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>.
+            Type a command or tap the mic — AIOS will drive your screen. Hotkey: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>.
           </p>
         )}
         {phase.kind === "listening" && (
@@ -283,17 +309,43 @@ export function VoiceControlPanel({
             Stop
           </button>
         ) : (
-          <button
-            type="button"
-            className="voice-mic-btn"
-            onClick={startListening}
-            disabled={!claude?.path}
-            aria-label="Start listening"
-            title={!claude?.path ? "Claude CLI not configured" : "Hold to talk (Ctrl+Alt+V)"}
-          >
-            {claude?.path ? <Mic size={14} /> : <MicOff size={14} />}
-            Talk
-          </button>
+          <div className="voice-panel-input-row">
+            <input
+              type="text"
+              className="voice-panel-input"
+              placeholder={claude?.path ? "Type a command…" : "Configure Claude CLI first"}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitText();
+                }
+              }}
+              disabled={!claude?.path}
+              aria-label="Type a command"
+            />
+            <button
+              type="button"
+              className="voice-mic-icon-btn"
+              onClick={startListening}
+              disabled={!claude?.path}
+              aria-label="Start listening"
+              title={!claude?.path ? "Claude CLI not configured" : "Talk (Ctrl+Alt+V)"}
+            >
+              {claude?.path ? <Mic size={14} /> : <MicOff size={14} />}
+            </button>
+            <button
+              type="button"
+              className="voice-send-btn"
+              onClick={submitText}
+              disabled={!claude?.path || inputText.trim().length === 0}
+              aria-label="Send command"
+              title="Send"
+            >
+              <ArrowUp size={14} />
+            </button>
+          </div>
         )}
       </footer>
     </div>

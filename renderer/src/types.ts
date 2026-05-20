@@ -78,6 +78,7 @@ export type AiosCommand =
   | "voice_clipboard_get"
   | "voice_clipboard_set"
   | "voice_wait"
+  | "voice_check_environment"
   | "voice_control_start"
   | "voice_control_stop"
   | "voice_control_abort"
