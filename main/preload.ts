@@ -83,6 +83,8 @@ const allowedCommands = new Set<AiosCommand>([
   "voice_wait",
   "voice_check_environment",
   "voice_get_cursor_type",
+  "mac_check_permissions",
+  "mac_request_permission",
   "control_panel_toggle",
   "control_panel_open",
   "control_panel_close",

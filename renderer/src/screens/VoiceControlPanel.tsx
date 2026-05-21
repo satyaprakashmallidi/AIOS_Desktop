@@ -25,6 +25,12 @@ interface HistoryEntry {
 
 const HISTORY_KEY = "aios.controlHistory";
 const HISTORY_CAP = 20;
+
+// True on macOS — switches the displayed shortcut hint to Mac chords
+// and the title-attribute tooltip on the mic button. navigator.platform
+// is deprecated for spec purposes but still the only reliable way to
+// tell Mac apart inside an Electron renderer with no Node access.
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || "");
 // How long after a clarifying [BLOCKED] question the next user input is
 // treated as a CONTINUATION instead of a fresh task. Two minutes covers
 // people reading + typing without trapping them in continuation mode if
@@ -436,14 +442,23 @@ export function VoiceControlPanel({
       <div className="voice-panel-body">
         {phase.kind === "idle" && !popupMode && (
           <p className="voice-panel-hint">
-            Type a command or tap the mic — AIOS will drive your screen. Hotkey: <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>.
+            Type a command or tap the mic — AIOS will drive your screen. Hotkey:{" "}
+            {IS_MAC ? (
+              <><kbd>⌘</kbd>+<kbd>⌥</kbd></>
+            ) : (
+              <><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd></>
+            )}.
           </p>
         )}
 
         {popupMode && phase.kind === "idle" && (
           <div className="hotkey-hint">
             <Keyboard size={12} />
-            <span>Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> from any app</span>
+            {IS_MAC ? (
+              <span>Press <kbd>⌘</kbd>+<kbd>⌥</kbd> from any app</span>
+            ) : (
+              <span>Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> from any app</span>
+            )}
           </div>
         )}
 
@@ -608,7 +623,7 @@ export function VoiceControlPanel({
               onClick={startListening}
               disabled={!claude?.path}
               aria-label="Start listening"
-              title={!claude?.path ? "Claude CLI not configured" : "Talk (Ctrl+Alt+V)"}
+              title={!claude?.path ? "Claude CLI not configured" : `Talk (${IS_MAC ? "⌘+⌥" : "Ctrl+Alt+V"})`}
             >
               {claude?.path ? <Mic size={14} /> : <MicOff size={14} />}
             </button>

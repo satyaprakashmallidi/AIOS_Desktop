@@ -293,12 +293,13 @@ function GeneralPanel({
             </button>
           }
         />
-        {/* Auto-update is Windows-only — Mac builds are unsigned, so ShipIt
-            can't swap the .app bundle in place. On Mac we hide this row
-            entirely; users update by downloading a fresh DMG from GitHub
-            Releases. The in-app popup (AutoUpdateBanner) is already
-            Windows-only via its own platform guard. */}
-        {workspace?.platform === "win32" ? (
+        {/* App version + Check for updates is shown on every desktop
+            platform we ship signed installers for. Mac builds have been
+            Developer-ID signed + notarized since v0.2.7 and v0.2.17
+            enabled real in-place auto-update via electron-updater, so
+            the "manual download" fallback (state === "manual-available")
+            is only used if the API call errors. */}
+        {(workspace?.platform === "win32" || workspace?.platform === "darwin") ? (
           <SettingsRow
             title="App version"
             description={updateLabel()}

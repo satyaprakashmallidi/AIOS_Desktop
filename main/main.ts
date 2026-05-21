@@ -352,21 +352,21 @@ function registerIpcHandlers(): void {
   });
 
   // Global shortcut for Computer Control mic — works from any app on
-  // the desktop. Different chord per OS because the modifier
-  // ergonomics differ:
-  //   Windows: Ctrl + Alt + V         (left hand thumb + index)
-  //   macOS:   Cmd + Ctrl + V         (TipTour parity, doesn't clash
-  //                                    with Cmd+Option+V "paste-as-
-  //                                    plain-text" Mac shortcut)
-  // Pressing the chord:
+  // the desktop. Per-OS chord because modifier ergonomics differ:
+  //   Windows: Ctrl + Alt + V
+  //   macOS:   Cmd + Option + V (with V — fallback keyboard shortcut)
+  //                              The modifier-only Cmd+Option chord
+  //                              is implemented separately in the
+  //                              Python sidecar via CGEventTap (see
+  //                              _start_mac_voice_shortcut_listener
+  //                              in python/host.py).
+  // Pressing this Electron-registered chord:
   //   1. Shows the bubble if it isn't already
   //   2. Opens the popup (or focuses if open)
   //   3. Fires `shortcut:voice-toggle` into the popup so the panel
   //      starts mic capture immediately (or stops it if listening).
-  // End result: user can press the chord from any app and start
-  // talking right away.
   const voiceShortcut = process.platform === "darwin"
-    ? "Command+Control+V"
+    ? "Command+Alt+V"
     : "Control+Alt+V";
   const voiceShortcutRegistered = globalShortcut.register(voiceShortcut, () => {
     if (!isBubbleVisible()) showControlBubble();

@@ -1539,6 +1539,156 @@ def voice_get_cursor_type(_args: dict[str, Any]) -> dict[str, Any]:
         return {"available": False, "type": "arrow"}
 
 
+def mac_check_permissions(_args: dict[str, Any]) -> dict[str, Any]:
+    """Return current status of the 4 macOS permissions AIOS needs.
+    Each is one of: "granted" | "denied" | "not-determined" | "unknown".
+    On non-Mac platforms returns {available: False}.
+
+    Permissions:
+      microphone     — voice transcription
+      screenRecording— screen_capture for voice control vision
+      accessibility  — pyautogui clicks/typing + the Cmd+Option CGEventTap
+      automation     — AppleScript "tell application X to activate" for
+                       bringing launched apps to foreground
+
+    `automation` always reports "auto" — there's no public API to
+    inspect Apple Events permission status; the system prompts on
+    first use per target app and remembers the answer."""
+    import sys
+    if sys.platform != "darwin":
+        return {"available": False}
+
+    result: dict[str, str] = {
+        "microphone": "unknown",
+        "screenRecording": "unknown",
+        "accessibility": "unknown",
+        "automation": "auto",
+    }
+
+    # 1. Microphone — AVCaptureDevice.authorizationStatusForMediaType
+    # 0=notDetermined, 1=restricted, 2=denied, 3=authorized
+    try:
+        from AVFoundation import AVCaptureDevice
+        AVMediaTypeAudio = "soun"  # constant value; importing the symbol can be flaky
+        status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeAudio)
+        result["microphone"] = (
+            "granted" if status == 3
+            else "denied" if status in (1, 2)
+            else "not-determined"
+        )
+    except Exception as exc:
+        result["microphone"] = "unknown"
+        print(f"[permissions] mic check failed: {exc}", file=sys.stderr, flush=True)
+
+    # 2. Screen Recording — CGPreflightScreenCaptureAccess (10.15+)
+    try:
+        from Quartz import CGPreflightScreenCaptureAccess
+        result["screenRecording"] = "granted" if CGPreflightScreenCaptureAccess() else "denied"
+    except Exception as exc:
+        result["screenRecording"] = "unknown"
+        print(f"[permissions] screen check failed: {exc}", file=sys.stderr, flush=True)
+
+    # 3. Accessibility — AXIsProcessTrusted
+    try:
+        from ApplicationServices import AXIsProcessTrusted
+        result["accessibility"] = "granted" if AXIsProcessTrusted() else "denied"
+    except Exception as exc:
+        result["accessibility"] = "unknown"
+        print(f"[permissions] ax check failed: {exc}", file=sys.stderr, flush=True)
+
+    return {"available": True, **result}
+
+
+def mac_request_permission(args: dict[str, Any]) -> dict[str, Any]:
+    """Trigger the appropriate Mac permission grant flow:
+      microphone     — fires CGRequestScreenCaptureAccess-equivalent via
+                       AVCaptureDevice.requestAccess (auto-prompts user)
+      screenRecording— opens System Settings → Privacy → Screen Recording
+                       (manual grant required; macOS never auto-prompts)
+      accessibility  — opens System Settings → Privacy → Accessibility
+      automation     — runs a no-op AppleScript so macOS shows the
+                       Apple Events permission prompt for Finder
+
+    Returns {ok: True} after kicking off the flow. The renderer should
+    poll mac_check_permissions every ~2s to detect when the user
+    completes the grant."""
+    import sys
+    import subprocess
+    if sys.platform != "darwin":
+        return {"ok": False, "reason": "darwin only"}
+
+    kind = str(args.get("kind") or "")
+    if kind == "microphone":
+        try:
+            from AVFoundation import AVCaptureDevice
+            AVMediaTypeAudio = "soun"
+            # requestAccessForMediaType_completionHandler_ is async; the
+            # completion handler is fire-and-forget here. The system
+            # dialog appears immediately for the user. Polling
+            # mac_check_permissions afterwards catches the response.
+            AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+                AVMediaTypeAudio, lambda granted: None
+            )
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    if kind == "screenRecording":
+        # First call CGRequestScreenCaptureAccess — on first launch this
+        # adds AIOS to the Privacy pane list (otherwise the user has to
+        # find the app via "+" themselves). Then open the Settings pane.
+        try:
+            from Quartz import CGRequestScreenCaptureAccess
+            CGRequestScreenCaptureAccess()
+        except Exception:
+            pass
+        try:
+            subprocess.run(
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"],
+                check=False,
+            )
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    if kind == "accessibility":
+        # AXIsProcessTrustedWithOptions with prompt=True adds AIOS to
+        # the list and shows the system "Open System Settings" dialog.
+        try:
+            from ApplicationServices import AXIsProcessTrustedWithOptions
+            from CoreFoundation import CFDictionaryCreate, kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks
+            from ApplicationServices import kAXTrustedCheckOptionPrompt
+            options = {kAXTrustedCheckOptionPrompt: True}
+            AXIsProcessTrustedWithOptions(options)
+        except Exception:
+            pass
+        try:
+            subprocess.run(
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+                check=False,
+            )
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    if kind == "automation":
+        # Fire a harmless AppleScript that targets Finder so macOS shows
+        # the Apple Events permission dialog. Once granted, future
+        # AppleScripts to ANY app fire the same dialog per-target the
+        # first time (no way to batch-grant ahead of time).
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "Finder" to activate'],
+                check=False,
+                timeout=4,
+            )
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    return {"ok": False, "reason": f"unknown kind: {kind}"}
+
+
 def voice_check_environment(_args: dict[str, Any]) -> dict[str, Any]:
     """Cheap probe used between voice-loop turns to detect when the user
     Cmd-Tabs away mid-workflow OR when a modal dialog has popped up that
@@ -1728,6 +1878,8 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "voice_wait": voice_wait,
         "voice_check_environment": voice_check_environment,
         "voice_get_cursor_type": voice_get_cursor_type,
+        "mac_check_permissions": mac_check_permissions,
+        "mac_request_permission": mac_request_permission,
         "create_custom_agent": lambda a: agents_mod.create_custom_agent(
             name=require_str(a, "name"),
             role=str(a.get("role") or "").strip() or "Custom agent",
@@ -2068,10 +2220,10 @@ def _start_mac_voice_shortcut_listener() -> None:
 
         # State machine across flagsChanged + keyDown events.
         # idle    : no relevant keys held
-        # holding : Cmd+Ctrl both held with no Shift/Option and no
+        # holding : Cmd+Option both held with no Ctrl/Shift and no
         #           non-modifier keypresses observed yet
         # aborted : was holding but a non-modifier key got pressed —
-        #           release will NOT fire (so Cmd+Ctrl+C still copies
+        #           release will NOT fire (so Cmd+Option+C still copies
         #           cleanly without our listener intercepting)
         state = {"name": "idle"}
 
@@ -2089,10 +2241,11 @@ def _start_mac_voice_shortcut_listener() -> None:
                     if state["name"] == "holding":
                         state["name"] = "aborted"
                 elif type_ == kCGEventFlagsChanged:
-                    pure_chord = cmd and ctrl and not shift and not alt
+                    # Cmd+Option only — no Ctrl or Shift mixed in.
+                    pure_chord = cmd and alt and not ctrl and not shift
                     if pure_chord and state["name"] == "idle":
                         state["name"] = "holding"
-                    elif not (cmd and ctrl):
+                    elif not (cmd and alt):
                         # One or both modifiers released.
                         if state["name"] == "holding":
                             try:
