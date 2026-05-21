@@ -18,6 +18,8 @@ import {
   isPanelDocked,
   setPanelDocked,
   getControlPopup,
+  prepareControlPopupForMic,
+  releaseControlPopupAfterMic,
 } from "./control-popup";
 import {
   installControlBubbleHooks,
@@ -59,6 +61,39 @@ function broadcastHostEvent(event: unknown): void {
 
 app.setName("aios-desktop");
 app.setAppUserModelId("com.aios.desktop");
+
+// Single-instance lock. Without this, on Mac:
+//   - `open -a "AIOS Desktop"` from terminal or another launcher spawns
+//     a second instance
+//   - Spotlight launching while already running can do the same
+//   - electron-updater's quitAndInstall on Mac sometimes briefly
+//     overlaps old + new instances during the swap
+// Two instances = two Python sidecars writing to one SQLite file
+// (corruption risk), two globalShortcut registrations fighting each
+// other, duplicate WhatsApp Baileys session lock collision, two
+// bubble + popup windows on screen.
+//
+// We acquire the lock BEFORE app.whenReady(). If we don't get it,
+// quit immediately and let the existing instance handle the launch
+// — the second-instance handler in the existing process focuses its
+// main window so the user sees AIOS come forward.
+//
+// Mac-only: this also covers the "double-clicking dock icon launches
+// a duplicate" edge case on some macOS versions. Production builds
+// of electron apps normally rely on the OS to dedup, but third-party
+// launchers (Raycast, Alfred) can bypass that.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 if (!app.isPackaged) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disable-gpu");
@@ -100,7 +135,9 @@ const mainHandledCommands = new Set<AiosCommand>([
   "cursor_overlay_get_color",
   "cursor_overlay_set_color",
   "control_close_all",
-  "control_open_settings"
+  "control_open_settings",
+  "control_panel_prepare_mic",
+  "control_panel_release_mic"
 ]);
 
 // Theme cache lives in userData so the main process can pick the right
@@ -232,13 +269,30 @@ function createWindow(): void {
   // reach it the same way they reach the Control popup.
   eventSubscribers.add(mainWindow);
 
-  // Auto-show the Computer Control bubble shortly after the main window
-  // appears. Small delay so it doesn't pop up during the inline boot
-  // splash + before the renderer paints — feels more deliberate. User
-  // can still toggle it off via the sidebar Control button or panel Quit.
-  setTimeout(() => {
-    try { showControlBubble(); } catch { /* non-fatal */ }
-  }, 1500);
+  // Auto-show the Computer Control bubble only AFTER the renderer's
+  // first frame has actually painted. Earlier we used a flat
+  // setTimeout(1500) but on a cold first launch (Mac Gatekeeper /
+  // Windows Defender scanning the PyInstaller sidecar) the renderer
+  // can still be warming up at 1.5 s — the bubble would pop up first
+  // and create an "is the app stuck?" perception when the main window
+  // was actually still loading underneath it.
+  //
+  // Listening for `did-finish-load` and adding a small extra delay
+  // (so the React shell actually mounts past its splash) keeps the
+  // bubble's appearance tied to the user-visible app state. A 6 s
+  // watchdog acts as the safety net in case `did-finish-load` somehow
+  // doesn't fire — we'd rather show the bubble than silently swallow
+  // it.
+  let bubbleShown = false;
+  const showOnceWhenReady = () => {
+    if (bubbleShown) return;
+    bubbleShown = true;
+    setTimeout(() => {
+      try { showControlBubble(); } catch { /* non-fatal */ }
+    }, 600);
+  };
+  mainWindow.webContents.once("did-finish-load", showOnceWhenReady);
+  setTimeout(showOnceWhenReady, 6000);
 }
 
 function registerIpcHandlers(): void {
@@ -374,25 +428,59 @@ function registerIpcHandlers(): void {
     // the panel to start listening — otherwise we'd start a voice
     // session in a hidden popup.
     openControlPopup();
-    const popup = getControlPopup();
-    if (popup && !popup.isDestroyed()) {
-      // Tiny defer so the popup's renderer is mounted + subscribed to
-      // the voice-toggle event when it arrives. Without this the
-      // first press after-launch sometimes misses the listener.
-      setTimeout(() => {
-        if (!popup.isDestroyed()) popup.webContents.send("shortcut:voice-toggle");
-      }, 80);
-    }
+    sendVoiceToggleWhenReady();
   });
   if (!voiceShortcutRegistered) {
     log("shortcut", "voice-register-failed", { chord: voiceShortcut });
   }
 }
 
+// Dispatch a `shortcut:voice-toggle` event to the popup, waiting for the
+// renderer to finish loading + mount its listener on the FIRST open.
+//
+// Originally this was a flat `setTimeout(80)` — fine on Windows where
+// the popup renderer mounts fast, but on Mac the cold-open path takes
+// 200-500 ms (HTML parse → bundle load → React mount → useEffect
+// subscribe). The 80 ms timeout fired before ControlApp.tsx's
+// `window.aios.window.onShortcutVoiceToggle` listener was attached, so
+// the very first Cmd+Option (or Command+Alt+V) press of a session
+// silently lost the toggle and mic capture never started.
+//
+// We now branch on `webContents.isLoading()`: if loading, hook
+// `did-finish-load` and add a 220 ms react-mount buffer; if already
+// loaded, fall back to the original 80 ms defer (still useful for
+// micro-races during rapid re-presses).
+function sendVoiceToggleWhenReady(): void {
+  const popup = getControlPopup();
+  if (!popup || popup.isDestroyed()) return;
+  const send = () => {
+    if (!popup.isDestroyed()) popup.webContents.send("shortcut:voice-toggle");
+  };
+  if (popup.webContents.isLoading()) {
+    popup.webContents.once("did-finish-load", () => {
+      setTimeout(send, 220);
+    });
+  } else {
+    setTimeout(send, 80);
+  }
+}
+
 
 async function getSavedClaudePath(): Promise<string | null> {
-  const response = await host?.invoke<{ value: string | null }>("get_setting", { key: "claude_path" });
-  return response?.ok ? response.data?.value ?? null : null;
+  // Tolerant of host-not-ready failures. The Python sidecar may not be
+  // up yet on a cold start when the popup fires find_claude, and our
+  // post-v0.2.19 fast-fail stdin guard rejects host.invoke immediately
+  // when stdin isn't writable. Without this catch, the whole find_claude
+  // IPC would propagate the rejection — but find_claude only NEEDS the
+  // saved path as a hint; missing it just means we do a fresh
+  // filesystem probe instead of validating a cached value. Return null
+  // and let findClaude() proceed.
+  try {
+    const response = await host?.invoke<{ value: string | null }>("get_setting", { key: "claude_path" });
+    return response?.ok ? response.data?.value ?? null : null;
+  } catch {
+    return null;
+  }
 }
 
 async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>) {
@@ -402,8 +490,15 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     const savedPath = await getSavedClaudePath();
     const result = await findClaude(savedPath);
     if (result.found && result.path) {
-      await host.invoke("set_setting", { key: "claude_path", value: result.path });
-      await host.invoke("set_setting", { key: "claude_version", value: result.version ?? "" });
+      // Best-effort cache write. If the sidecar isn't ready yet (popup
+      // called find_claude before Python had warmed up), don't propagate
+      // the rejection — the caller still gets a valid detection result.
+      // A subsequent find_claude call after the sidecar is up will
+      // re-detect and cache then.
+      try {
+        await host.invoke("set_setting", { key: "claude_path", value: result.path });
+        await host.invoke("set_setting", { key: "claude_version", value: result.version ?? "" });
+      } catch { /* sidecar not ready — cache opportunistically next time */ }
     }
     return result;
   }
@@ -575,6 +670,14 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     closeControlPopup();
     hideControlBubble();
     setCursorOverlayActive(false);
+    return { ok: true };
+  }
+  if (cmd === "control_panel_prepare_mic") {
+    prepareControlPopupForMic();
+    return { ok: true };
+  }
+  if (cmd === "control_panel_release_mic") {
+    releaseControlPopupAfterMic();
     return { ok: true };
   }
   if (cmd === "control_open_settings") {
@@ -760,12 +863,7 @@ app.whenReady().then(() => {
     if (evtName === "voice_shortcut_triggered") {
       if (!isBubbleVisible()) showControlBubble();
       openControlPopup();
-      const popup = getControlPopup();
-      if (popup && !popup.isDestroyed()) {
-        setTimeout(() => {
-          if (!popup.isDestroyed()) popup.webContents.send("shortcut:voice-toggle");
-        }, 80);
-      }
+      sendVoiceToggleWhenReady();
     }
   });
   setCursorOverlayHost(host);
@@ -978,6 +1076,23 @@ app.whenReady().then(() => {
   });
 
   app.on("activate", () => {
+    // Mac dock-icon click handler.
+    //
+    // The default Electron pattern is `if (getAllWindows().length === 0)
+    // createWindow()`, but we always have at least the bubble + cursor
+    // overlay alive, so the count is never zero — clicking the dock icon
+    // did nothing. Users on Mac expect dock click to restore the main
+    // window if it was minimized or hidden.
+    //
+    // We deliberately don't focus the bubble/popup/overlay here: those
+    // are always-on-top peripheral windows that should follow the main
+    // window's app lifecycle, not become focus targets themselves.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });

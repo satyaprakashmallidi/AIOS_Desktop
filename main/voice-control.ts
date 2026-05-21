@@ -290,9 +290,11 @@ around string values. Available actions:
     physical screen pixels.
 
   [TYPE: text="hello world", clear=true]
-    Type into the focused field. clear=true does Ctrl+A + Delete FIRST,
-    so the new text replaces whatever was there. ALWAYS use clear=true for
-    address bars, search boxes, Run dialogs — they often have residual text.
+    Type into the focused field. clear=true selects-all + Delete FIRST
+    (Cmd+A on Mac, Ctrl+A elsewhere — handled per-platform inside the
+    runtime, you don't need to think about it), so the new text replaces
+    whatever was there. ALWAYS use clear=true for address bars, search
+    boxes, Run dialogs — they often have residual text.
 
   [HOTKEY: keys="ctrl+shift+t"]
     Press a keyboard shortcut. Combine with "+". Use ctrl/alt/shift/win

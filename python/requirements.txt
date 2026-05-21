@@ -23,6 +23,14 @@ pyobjc-core>=10.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
 pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
+# AVFoundation — required for mic permission status + request via
+# AVCaptureDevice.authorizationStatusForMediaType_ and
+# AVCaptureDevice.requestAccessForMediaType_completionHandler_ in
+# mac_check_permissions / mac_request_permission. Without this, the
+# first-launch Mac permission chain silently skips mic (ImportError
+# caught), the user never gets the TCC dialog, and the popup mic
+# button is broken until they manually grant in System Settings.
+pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
 
 # Windows UIAutomation reader (v0.2.0-beta). Lets the voice-control agent
 # walk the focused window's accessibility tree and target elements by

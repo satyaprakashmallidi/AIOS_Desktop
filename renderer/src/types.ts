@@ -99,6 +99,8 @@ export type AiosCommand =
   | "cursor_overlay_set_color"
   | "control_close_all"
   | "control_open_settings"
+  | "control_panel_prepare_mic"
+  | "control_panel_release_mic"
   | "voice_control_start"
   | "voice_control_stop"
   | "voice_control_abort"

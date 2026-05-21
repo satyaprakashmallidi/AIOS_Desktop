@@ -57,9 +57,14 @@ export async function validateClaude(candidate: string): Promise<{ ok: boolean; 
 }
 
 async function commandCandidates(command: string, args: string[]): Promise<string[]> {
+  // Bumped from 5s → 12s because some Mac users have slow shell init
+  // (~/.zshrc with nvm + pyenv + rbenv etc. can easily exceed 5s on a
+  // cold launch). When the shell probe times out we miss the user's
+  // configured PATH and detection falls back to hardcoded candidates —
+  // which may not contain wherever the user installed claude.
   try {
     const { stdout } = await execFileAsync(command, args, {
-      timeout: 5000,
+      timeout: 12000,
       windowsHide: true,
       env: executionEnv()
     });
@@ -106,6 +111,13 @@ export async function findClaude(savedPath?: string | null, platform: NodeJS.Pla
   } else {
     pathCandidates.push(...(await commandCandidates("which", ["claude"])));
     pathCandidates.push(
+      // Official Claude standalone installer (curl https://claude.ai/install.sh).
+      // Drops the binary in ~/.claude/local/claude on Mac. This is the
+      // recommended install path in our onboarding, so it's the FIRST
+      // place we look — short-circuits before the slower shell + npm
+      // probes if the user followed the happy path.
+      path.join(home, ".claude", "local", "claude"),
+      path.join(home, ".claude", "bin", "claude"),
       // Standard system + Homebrew locations
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
@@ -116,6 +128,12 @@ export async function findClaude(savedPath?: string | null, platform: NodeJS.Pla
       "/usr/local/lib/node_modules/.bin/claude",
       "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude",
       "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude",
+      // pnpm global store (default Mac location)
+      path.join(home, ".local", "share", "pnpm", "claude"),
+      path.join(home, "Library", "pnpm", "claude"),
+      // Yarn global
+      path.join(home, ".yarn", "bin", "claude"),
+      path.join(home, ".config", "yarn", "global", "node_modules", ".bin", "claude"),
       // Node version managers
       path.join(home, ".volta", "bin", "claude"),
       path.join(home, ".fnm", "aliases", "default", "bin", "claude"),

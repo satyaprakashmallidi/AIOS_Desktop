@@ -726,6 +726,27 @@ export function startWhatsApp(host: any, mainWindow: BrowserWindow) {
     handleWorkerMessage(msg, host, mainWindow);
   });
 
+  // Mirror of the python-host fix: fork() can fail asynchronously on
+  // 'error' with no exit event. Common failure modes on Mac:
+  //   - ENOENT if the worker script path resolved wrong (packaged vs
+  //     dev path mismatch)
+  //   - EACCES if the worker script lost its exec bit during DMG copy
+  //   - ELECTRON_RUN_AS_NODE not honored on some Electron versions
+  // Without this listener the error bubbles up as an uncaughtException
+  // and crashes the main process — taking the whole app down on Mac
+  // anytime WhatsApp auto-start ran into trouble.
+  workerProcess.on("error", (err) => {
+    log("whatsapp", "Worker process error", { error: err.message });
+    workerProcess = null;
+    clientStatus = "disconnected";
+    connectedPhoneNumber = null;
+    for (const [, pending] of pendingDocumentSends) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(`WhatsApp worker error: ${err.message}`));
+    }
+    pendingDocumentSends.clear();
+    broadcastStatus(mainWindow);
+  });
 
   workerProcess.on("exit", (code) => {
     log("whatsapp", "Worker process exited", { code });

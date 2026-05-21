@@ -925,6 +925,42 @@ def _active_monitor_bounds_win() -> dict[str, int] | None:
         return None
 
 
+def _active_monitor_bounds_mac() -> dict[str, int] | None:
+    """Return bounds of the monitor containing the mouse cursor on Mac.
+    None on failure.
+
+    Without this, screen_capture(monitor="active") on multi-display Mac
+    silently falls back to capturing the primary display — the voice
+    loop screenshots the WRONG monitor when the user is working on a
+    secondary display. The agent then can't see what it's supposed to
+    act on and burns turns confused.
+
+    We use pyautogui.position() (top-left coords on Mac via Quartz,
+    matching mss's coordinate system) and find the mss monitor whose
+    bounds contain the cursor. mss.monitors[0] is the virtual union,
+    indices 1+ are individual monitors."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import pyautogui  # type: ignore
+        from mss import mss  # type: ignore
+        x, y = pyautogui.position()
+        with mss() as sct:
+            for i in range(1, len(sct.monitors)):
+                m = sct.monitors[i]
+                if (m["left"] <= x < m["left"] + m["width"] and
+                        m["top"] <= y < m["top"] + m["height"]):
+                    return {
+                        "left": int(m["left"]),
+                        "top": int(m["top"]),
+                        "width": int(m["width"]),
+                        "height": int(m["height"]),
+                    }
+        return None
+    except Exception:
+        return None
+
+
 def screen_capture(args: dict[str, Any]) -> dict[str, Any]:
     """Capture a monitor and return base64 PNG. Args:
        - monitor: int index (0-based across mss's monitor list, where 0 is
@@ -964,7 +1000,15 @@ def screen_capture(args: dict[str, Any]) -> dict[str, Any]:
             bounds = sct.monitors[0]
             chosen = "all"
         elif monitor == "active":
-            active = _active_monitor_bounds_win()
+            # Platform-specific active monitor detection. On Windows we
+            # use the foreground window's containing monitor; on Mac we
+            # use the cursor's containing monitor (no equivalent of
+            # GetForegroundWindow that gives us screen coords cheaply).
+            # Both fall back to primary if detection fails.
+            if sys.platform == "darwin":
+                active = _active_monitor_bounds_mac()
+            else:
+                active = _active_monitor_bounds_win()
             if active:
                 bounds = active
                 chosen = "active"
@@ -1140,8 +1184,18 @@ def voice_type(args: dict[str, Any]) -> dict[str, Any]:
     # fields that may already have content (e.g. Windows Run remembers the
     # last command; search bars retain prior queries). Without this, TYPE
     # concatenates onto whatever's there and downstream commands break.
+    #
+    # Platform-correct select-all: Mac uses Cmd+A, every other OS uses
+    # Ctrl+A. Before this fix the Mac path pressed Ctrl+A which most
+    # Mac apps interpret as "move cursor to start of line" (or no-op),
+    # so the field was never cleared — every TYPE with clear=true on
+    # Mac appended to existing content instead of replacing it. Caught
+    # in the seventh Mac audit pass.
     if bool(args.get("clear")):
-        g.hotkey("ctrl", "a")
+        if sys.platform == "darwin":
+            g.hotkey("command", "a")
+        else:
+            g.hotkey("ctrl", "a")
         g.press("delete")
     # 0.02s between keystrokes — fast enough to feel natural, slow enough that
     # apps with input throttling (Slack, some web inputs) don't drop chars.
@@ -1992,6 +2046,11 @@ def _smoke_import() -> int:
             ("Foundation", None),
             ("Quartz", None),
             ("ApplicationServices", None),
+            # AVFoundation — used by mac_check_permissions and
+            # mac_request_permission for AVCaptureDevice mic auth.
+            # Bundle regression here = first-launch permission chain
+            # silently skips mic, popup mic never works.
+            ("AVFoundation", "AVCaptureDevice"),
         ])
     if is_win:
         packages.extend([
@@ -2165,7 +2224,27 @@ def _smoke_import() -> int:
                 file=sys.stderr,
             )
 
-    total = len(packages) + 6 + (1 if is_win else 0) + (2 if is_mac else 0)
+        # AVFoundation runtime probe — bare import passes even when
+        # framework data files were stripped, but
+        # AVCaptureDevice.authorizationStatusForMediaType_("soun") only
+        # returns a valid status if the framework is fully wired up.
+        # On a stripped bundle this raises AttributeError (the bridge
+        # never built the method). Catches the v0.2.19 class of bug
+        # where pyobjc-framework-AVFoundation wasn't even in
+        # requirements.txt — first-launch permission chain silently
+        # skipped mic, popup mic never worked.
+        try:
+            from AVFoundation import AVCaptureDevice  # type: ignore
+            status = AVCaptureDevice.authorizationStatusForMediaType_("soun")
+            print(f"OK  AVFoundation.AVCaptureDevice auth check -> {status}")
+        except Exception as exc:
+            rt_fail += 1
+            print(
+                f"FAIL AVFoundation runtime: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+
+    total = len(packages) + 6 + (1 if is_win else 0) + (3 if is_mac else 0)
     print(f"\nphase 2 (runtime): {rt_fail} failure(s)")
     print(f"smoke-import: {total - fail - rt_fail}/{total} ok, {fail + rt_fail} failed")
     return 1 if (fail + rt_fail) else 0

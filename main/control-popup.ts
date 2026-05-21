@@ -282,3 +282,48 @@ export function destroyControlPopup(): void {
   }
   popupWindow = null;
 }
+
+// Mic-capture prep / release.
+//
+// macOS-specific issue: when the popup is at the screen-saver always-on-top
+// level, the TCC microphone permission dialog can appear UNDERNEATH the
+// popup the first time the user clicks mic — they never see it, mic
+// silently fails. Lowering the popup's level to "floating" while a mic
+// request is in flight lets the system dialog appear on top, then we
+// restore screen-saver level so the popup stays above other apps for the
+// rest of the session.
+//
+// Also: on Mac the popup is a `type: "panel"` (non-activating). Chromium's
+// getUserMedia permission policy on some macOS versions requires the
+// requesting window to be the focused webContents. We call
+// `webContents.focus()` here too — focus is window-internal, doesn't
+// activate the popup as a Mac app or steal focus from the underlying app.
+export function prepareControlPopupForMic(): void {
+  if (!popupWindow || popupWindow.isDestroyed()) return;
+  try {
+    popupWindow.setAlwaysOnTop(true, "floating");
+  } catch { /* non-fatal — level swap not strictly required on Windows */ }
+  try {
+    // Mac NSPanel non-activating windows are SHOWN via showInactive(),
+    // which means the window isn't the "key window" — and Chromium's
+    // getUserMedia permission policy needs the requesting webContents
+    // to live in the focused window of the focused app on Mac.
+    //
+    // BrowserWindow.focus() bridges to [NSWindow makeKeyAndOrderFront:]
+    // on Mac which makes a non-activating NSPanel key WITHOUT
+    // activating AIOS as the foreground app. webContents.focus() alone
+    // doesn't bridge to that AppKit call — it only sets the renderer's
+    // internal focus state, which isn't sufficient for TCC. We call
+    // both here: BrowserWindow.focus() for the OS-level key state,
+    // then webContents.focus() for the renderer.
+    popupWindow.focus();
+    popupWindow.webContents.focus();
+  } catch { /* non-fatal */ }
+}
+
+export function releaseControlPopupAfterMic(): void {
+  if (!popupWindow || popupWindow.isDestroyed()) return;
+  try {
+    popupWindow.setAlwaysOnTop(true, "screen-saver");
+  } catch { /* non-fatal */ }
+}

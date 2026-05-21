@@ -110,6 +110,14 @@ if sys.platform == 'darwin':
         'CoreFoundation',
         'CoreGraphics',
         'ApplicationServices',
+        # AVFoundation — needed for mac_check_permissions /
+        # mac_request_permission (AVCaptureDevice authorization).
+        # Without this collect_all sweep, even with the pyobjc-
+        # framework-AVFoundation pip dep installed, PyInstaller's
+        # auto-collection often misses the framework's data files
+        # and the runtime `from AVFoundation import AVCaptureDevice`
+        # fails — silently skipping the entire mic-permission flow.
+        'AVFoundation',
         'PyObjCTools',
     ):
         try:

@@ -69,6 +69,37 @@ export class PythonHost {
 
     this.child.stdout.on("data", (chunk: Buffer) => this.handleStdout(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => log("python.stderr", chunk.toString("utf8")));
+
+    // Catch spawn errors. Without this listener Node would either crash
+    // the process on the next tick (uncaught 'error') OR — depending on
+    // the failure mode — silently leave us with a broken ChildProcess
+    // and every IPC call would hang for the full 700 s timeout before
+    // rejecting. On Mac the most common spawn failures are:
+    //   - PyInstaller binary missing from the bundle (build regression)
+    //   - Binary's exec bit dropped (codesign or DMG copy stripped it)
+    //   - Quarantine attribute on a fresh download that Gatekeeper
+    //     hasn't cleared yet
+    //   - ENOENT on the resolved path (broken symlink, etc.)
+    // We reject every pending IPC immediately so the renderer's
+    // warmup retry can stop spinning, and we null out `this.child`
+    // so the next .invoke() call respawns cleanly.
+    this.child.on("error", (err) => {
+      log("python", "host spawn error", { error: err.message });
+      this.child = null;
+      for (const [id, pending] of this.pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error(`Python host failed to start: ${err.message}`));
+      }
+      this.pending.clear();
+    });
+
+    // EPIPE / write errors when the sidecar has died but Node hasn't
+    // observed the exit yet. Without this listener the error would
+    // surface as an uncaughtException and crash the main process.
+    this.child.stdin.on("error", (err) => {
+      log("python", "stdin error", { error: err.message });
+    });
+
     this.child.on("exit", (code) => {
       log("python", "host exited", { code });
       this.child = null;
@@ -151,7 +182,27 @@ export class PythonHost {
       }, timeoutMs);
 
       this.pending.set(id, { resolve: resolve as (value: HostResponse) => void, reject, timeout });
-      this.child?.stdin.write(`${payload}\n`);
+
+      // Guard the write. If the sidecar died but Node hasn't observed
+      // the exit yet, stdin may be unwritable (.writable === false) or
+      // .write() may throw EPIPE synchronously. Without this guard the
+      // IPC would sit in the pending map for the full 700 s timeout
+      // before rejecting — the renderer would freeze that long. Reject
+      // fast with a specific reason instead.
+      const child = this.child;
+      if (!child || child.killed || !child.stdin || !child.stdin.writable) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(new Error(`Python host stdin is not writable for ${cmd}`));
+        return;
+      }
+      try {
+        child.stdin.write(`${payload}\n`);
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

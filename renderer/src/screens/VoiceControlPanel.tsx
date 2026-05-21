@@ -305,10 +305,27 @@ export function VoiceControlPanel({
     setTranscript("");
     setPhase({ kind: "listening" });
 
+    // Popup-mode prep (Mac-critical, no-op on Windows):
+    //   1. Lower the popup's alwaysOnTop level from "screen-saver" to
+    //      "floating" so macOS's TCC mic permission dialog appears
+    //      above the popup the first time we request the mic. Without
+    //      this the user never sees the dialog and the request silently
+    //      fails.
+    //   2. Focus the popup's webContents so Chromium's permission
+    //      policy considers the popup the active requesting frame —
+    //      `type: "panel"` non-activating windows can otherwise have
+    //      getUserMedia rejected by some macOS versions.
+    if (popupMode) {
+      try { await invoke("control_panel_prepare_mic", {}); } catch { /* non-fatal */ }
+    }
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
+      if (popupMode) {
+        try { await invoke("control_panel_release_mic", {}); } catch { /* non-fatal */ }
+      }
       setPhase({ kind: "error", message: err instanceof Error ? err.message : "Microphone permission denied." });
       return;
     }
@@ -345,6 +362,13 @@ export function VoiceControlPanel({
       audioStreamRef.current?.getTracks().forEach((t) => t.stop());
       audioStreamRef.current = null;
 
+      // Restore the popup's always-on-top level now that the TCC dialog
+      // (if it was going to show) has come and gone. Mirrors the
+      // prep call in startListening.
+      if (popupMode) {
+        try { await invoke("control_panel_release_mic", {}); } catch { /* non-fatal */ }
+      }
+
       if (totalLen === 0) {
         setPhase({ kind: "idle" });
         return;
@@ -354,6 +378,32 @@ export function VoiceControlPanel({
         const merged = new Float32Array(totalLen);
         let off = 0;
         for (const arr of collected) { merged.set(arr, off); off += arr.length; }
+
+        // Audio level guard. If the captured buffer is below the noise
+        // floor across its entire length, the mic captured silence —
+        // commonly because Chromium-on-Electron-on-Mac didn't refresh
+        // its audio pipeline after the user granted Mic permission for
+        // the first time, or because the system default input device
+        // is wrong (e.g. "Aggregate Device" with no real source).
+        // Surfacing an actionable error here is far more useful than
+        // shipping silence to Google STT and getting "Didn't catch
+        // that — try again." as the generic UnknownValueError fallback.
+        let peak = 0;
+        for (let i = 0; i < merged.length; i++) {
+          const a = Math.abs(merged[i]);
+          if (a > peak) peak = a;
+        }
+        if (peak < 0.01) {
+          const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || "");
+          setPhase({
+            kind: "error",
+            message: isMac
+              ? "Microphone captured silence. Open System Settings → Privacy & Security → Microphone, make sure AIOS Desktop is enabled, then quit AIOS (Cmd+Q) and reopen it so the audio pipeline picks up the permission."
+              : "Microphone captured silence. Check your input device in system sound settings and try again."
+          });
+          return;
+        }
+
         const wavB64 = samplesToWavBase64(merged, audioCtx.sampleRate);
         const res = await invoke<{ text: string }>("transcribe_audio", {
           audio: wavB64,
