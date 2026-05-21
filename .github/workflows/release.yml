@@ -163,6 +163,52 @@ jobs:
           AIOS_PYINSTALLER_TARGET_ARCH: x86_64
         run: arch -x86_64 "$AIOS_X64_PYTHON" -m PyInstaller --noconfirm --clean build/aios-host.spec
 
+      # Bundle modern flac into Mac sidecar. SpeechRecognition's
+      # recognize_google shells to a `flac` binary to convert WAV →
+      # FLAC before posting to Google's Speech API. SR ships its own
+      # flac-mac compiled against the pre-10.9 macOS SDK, which Apple
+      # notary rejects — so build/aios-host.spec strips it. Without a
+      # replacement, transcription works at import time (smoke passes)
+      # but fails the moment users press the mic with "FLAC conversion
+      # utility not available".
+      #
+      # Fix: install Homebrew's flac (modern SDK, notarization-clean)
+      # and drop it into the bundle as speech_recognition/flac-mac.
+      # arm64 runner: native /opt/homebrew/bin/flac.
+      # x64 cross-build: install x86_64 flac under Rosetta Homebrew at
+      # /usr/local/bin/flac and copy that into the x86_64 sidecar.
+      - name: Bundle modern flac into Mac sidecar (arm64)
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        run: |
+          set -euo pipefail
+          brew install flac
+          SRC=$(brew --prefix flac)/bin/flac
+          DEST=./dist/aios-host/_internal/speech_recognition/flac-mac
+          file "$SRC"
+          file "$SRC" | grep -q arm64 || { echo "Homebrew flac is not arm64"; exit 1; }
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST"
+          file "$DEST"
+
+      - name: Bundle modern flac into Mac sidecar (Intel)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          # Install Rosetta Homebrew at /usr/local if it isn't already.
+          # macos-latest arm64 runners ship arm64 brew at /opt/homebrew
+          # and Rosetta-compatible brew at /usr/local when bootstrapped.
+          if [ ! -x /usr/local/bin/brew ]; then
+            arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          arch -x86_64 /usr/local/bin/brew install flac
+          SRC=/usr/local/bin/flac
+          DEST=./dist/aios-host/_internal/speech_recognition/flac-mac
+          file "$SRC"
+          file "$SRC" | grep -q x86_64 || { echo "Rosetta Homebrew flac is not x86_64"; exit 1; }
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST"
+          file "$DEST"
+
       # Bundle smoke test. Boots the freshly-built sidecar with
       # `--smoke-import` and confirms every runtime-required package
       # (SpeechRecognition, pyautogui, PIL, pyobjc-*, uiautomation,

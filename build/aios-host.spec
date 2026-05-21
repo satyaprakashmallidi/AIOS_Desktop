@@ -184,36 +184,33 @@ a = Analysis(
     noarchive=False,
 )
 
-# Filter out the ancient FLAC encoder binaries that PyInstaller's
-# bundled `hook-speech_recognition.py` contrib hook injects directly
-# into `a.binaries` / `a.datas` during Analysis — outside the
-# `collect_all('speech_recognition')` we did at the top of this file,
-# so the earlier `_strip_flac` filter never saw them.
+# Filter out the ancient flac-mac binary that PyInstaller's bundled
+# `hook-speech_recognition.py` contrib hook injects via Analysis.
 #
-# The binaries (flac-mac, flac-linux-x86_64, flac-win32.exe) ship
-# inside the SpeechRecognition wheel compiled against a pre-10.9
-# macOS SDK, which Apple's notary service rejects with
-# "binary uses an SDK older than the 10.9 SDK", failing the whole
-# Mac notarization. transcribe_audio uses recognize_google with a
-# WAV AudioData object — the FLAC binary is never invoked on any
-# platform — so dropping it is safe.
-#
-# TOC entries here are 3-tuples (name, src_path, typecode); flag on
-# either name or src so we catch both the "speech_recognition/flac-mac"
-# name and the absolute source path the hook records.
-def _drop_flac_toc(toc):
+# Earlier note (v0.2.8 → v0.2.13): we stripped ALL three flac binaries
+# (flac-mac, flac-linux-x86_64, flac-win32.exe) thinking SR's
+# recognize_google didn't need them. WRONG — recognize_google actually
+# shells to flac to convert WAV → FLAC before posting to Google's
+# Speech API. Dropping flac-win32.exe broke transcription on Windows
+# too. From v0.2.16 onward we ONLY strip flac-mac (the binary Apple's
+# notary rejected for pre-10.9 SDK) and a modern Homebrew-built flac
+# is copied into the bundle post-PyInstaller by the release workflow
+# (see .github/workflows/release.yml "Bundle modern flac into Mac
+# sidecar" step). Windows + Linux keep the SR-bundled flac because
+# their platforms don't notarize.
+def _drop_old_mac_flac(toc):
     keep = []
     for entry in toc:
         name = str(entry[0]).lower()
         src = str(entry[1]).lower() if len(entry) > 1 else ''
-        if 'flac-' in name or 'flac-' in src:
-            continue
-        if name.endswith('flac.exe') or src.endswith('flac.exe'):
+        # Only the literal Mac binary — keep flac-win32.exe and
+        # flac-linux-x86_64 so non-Mac platforms still work.
+        if name.endswith('flac-mac') or src.endswith('flac-mac'):
             continue
         keep.append(entry)
     return keep
-a.binaries = _drop_flac_toc(a.binaries)
-a.datas = _drop_flac_toc(a.datas)
+a.binaries = _drop_old_mac_flac(a.binaries)
+a.datas = _drop_old_mac_flac(a.datas)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

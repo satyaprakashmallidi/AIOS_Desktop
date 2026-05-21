@@ -1793,17 +1793,26 @@ def _handle_request(line: str) -> None:
 
 
 def _smoke_import() -> int:
-    """Imports every package the bundled sidecar relies on at runtime.
-    Runs inside the freshly-built PyInstaller binary in CI (via
-    `aios-host --smoke-import`) so we catch bundling regressions (e.g.
-    the v0.2.13 SpeechRecognition crash on Mac) BEFORE shipping an
-    installer. Prints one line per package and exits non-zero on the
-    first failure so the workflow log surfaces the exact culprit.
+    """Two-phase bundle health check, run inside the freshly-built
+    PyInstaller binary in CI (via `aios-host --smoke-import`).
 
-    Keep this list in sync with python/requirements.txt + the
-    hiddenimports block in build/aios-host.spec. Platform-specific
-    packages are skipped on the wrong platform via sys.platform guards
-    (matches the same gates in requirements.txt)."""
+    Phase 1: every package imports — catches "ModuleNotFoundError"
+             regressions like v0.2.13's SR-on-Mac crash.
+    Phase 2: every package responds to a basic API call — catches
+             "imports fine but breaks when actually called" failures
+             (the example we burned hours on: SR's flac binary
+             stripped for notarization, recognize_google fails at
+             runtime even though import speech_recognition passed).
+
+    Each phase 2 probe avoids:
+      - hitting external networks
+      - requiring a graphics server (CI Mac runners are headless)
+      - real input simulation
+
+    Hard-fails on the first error per phase and exits non-zero so the
+    workflow log surfaces the exact culprit. Keep the package list in
+    sync with python/requirements.txt + hiddenimports in
+    build/aios-host.spec."""
     is_mac = sys.platform == "darwin"
     is_win = sys.platform == "win32"
     # (package_name, importable_attribute_or_None)
@@ -1853,12 +1862,129 @@ def _smoke_import() -> int:
             module = __import__(name, fromlist=[attr] if attr else [])
             if attr is not None and not hasattr(module, attr):
                 raise AttributeError(f"{name} has no attribute {attr!r}")
-            print(f"OK  {name}")
+            print(f"OK  import {name}")
         except Exception as exc:
             fail += 1
-            print(f"FAIL {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
-    print(f"\nsmoke-import: {len(packages) - fail}/{len(packages)} ok, {fail} failed")
-    return 1 if fail else 0
+            print(f"FAIL import {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f"\nphase 1 (import): {len(packages) - fail}/{len(packages)} ok, {fail} failed")
+
+    # Phase 2 — runtime probes. Each block is wrapped in its own
+    # try/except so one failure doesn't hide the next one.
+    print("\nphase 2 (runtime probes):")
+    rt_fail = 0
+
+    # 2a. SpeechRecognition: AudioData creation + flac binary reachable.
+    # SR.recognize_google shells to flac to convert WAV → FLAC before
+    # posting to Google. If flac is missing, recognize_google fails at
+    # runtime even though import speech_recognition passes phase 1.
+    # This check is the canary for the v0.2.13 transcription bug.
+    try:
+        import shutil
+        import speech_recognition as sr
+        # Validate the C-level audio data path
+        _ = sr.AudioData(b"\x00\x00" * 1600, 16000, 2)
+        _ = sr.Recognizer()
+        # Locate the flac binary SR will invoke at recognize_google time
+        sr_dir = os.path.dirname(sr.__file__)
+        if sys.platform == "darwin":
+            bundled = os.path.join(sr_dir, "flac-mac")
+        elif sys.platform == "win32":
+            bundled = os.path.join(sr_dir, "flac-win32.exe")
+        else:
+            bundled = os.path.join(sr_dir, "flac-linux-x86_64")
+        bundled_exists = os.path.exists(bundled)
+        system_flac = shutil.which("flac")
+        if bundled_exists:
+            print(f"OK  speech_recognition runtime (flac bundled at {bundled})")
+        elif system_flac:
+            print(f"OK  speech_recognition runtime (flac on PATH at {system_flac})")
+        else:
+            rt_fail += 1
+            print(
+                f"FAIL speech_recognition runtime: no flac binary "
+                f"(checked {bundled} + PATH). recognize_google will fail "
+                f"at the moment users press the mic.",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        rt_fail += 1
+        print(f"FAIL speech_recognition runtime: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    # 2b. pyautogui.size() — light call that exercises the platform
+    # screen-info backend (ctypes GetSystemMetrics on Win, AppKit
+    # NSScreen on Mac). Works on headless macOS runners.
+    try:
+        import pyautogui
+        size = pyautogui.size()
+        print(f"OK  pyautogui.size() -> {size.width}x{size.height}")
+    except Exception as exc:
+        rt_fail += 1
+        print(f"FAIL pyautogui.size(): {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    # 2c. PIL: create + encode a tiny PNG. Forces _imaging C extension
+    # to load AND its codec path to execute.
+    try:
+        from io import BytesIO
+        from PIL import Image
+        img = Image.new("RGB", (16, 16), (200, 100, 50))
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        print(f"OK  PIL encode PNG ({buf.tell()} bytes)")
+    except Exception as exc:
+        rt_fail += 1
+        print(f"FAIL PIL encode: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    # 2d. mss: enumerate monitors. May return 0 on headless Mac CI;
+    # we treat 0 as a soft warning (works on user machines) but a
+    # raised exception as a hard fail (C extension broken).
+    try:
+        import mss
+        with mss.mss() as sct:
+            n = len(sct.monitors)
+        if n == 0 and sys.platform == "darwin":
+            print(f"WARN mss enumeration returned 0 monitors (headless CI, OK)")
+        else:
+            print(f"OK  mss.mss() -> {n} monitor entries")
+    except Exception as exc:
+        rt_fail += 1
+        print(f"FAIL mss runtime: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    # 2e. Windows-only: UIA root control.
+    if is_win:
+        try:
+            import uiautomation as auto
+            root = auto.GetRootControl()
+            if root is None:
+                rt_fail += 1
+                print("FAIL uiautomation.GetRootControl() returned None", file=sys.stderr)
+            else:
+                print(f"OK  uiautomation.GetRootControl() -> {root.Name or '<root>'}")
+        except Exception as exc:
+            rt_fail += 1
+            print(f"FAIL uiautomation runtime: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    # 2f. Mac-only: AppKit + Quartz framework calls. NSScreen works
+    # on headless; CGMainDisplayID may return 0 there — info-only.
+    if is_mac:
+        try:
+            import AppKit
+            screens = AppKit.NSScreen.screens()
+            print(f"OK  AppKit.NSScreen.screens() -> {len(screens)} screen(s)")
+        except Exception as exc:
+            rt_fail += 1
+            print(f"FAIL AppKit runtime: {type(exc).__name__}: {exc}", file=sys.stderr)
+        try:
+            import Quartz
+            disp = Quartz.CGMainDisplayID()
+            print(f"INFO Quartz.CGMainDisplayID() -> {disp} (0 expected on headless CI)")
+        except Exception as exc:
+            # Don't hard-fail; headless Mac may not have a main display
+            print(f"INFO Quartz.CGMainDisplayID: {type(exc).__name__}: {exc}")
+
+    total = len(packages) + 6 + (1 if is_win else 0) + (2 if is_mac else 0)
+    print(f"\nphase 2 (runtime): {rt_fail} failure(s)")
+    print(f"smoke-import: {total - fail - rt_fail}/{total} ok, {fail + rt_fail} failed")
+    return 1 if (fail + rt_fail) else 0
 
 
 def main() -> None:
