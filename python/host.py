@@ -1807,6 +1807,15 @@ def _smoke_import() -> int:
     is_mac = sys.platform == "darwin"
     is_win = sys.platform == "win32"
     # (package_name, importable_attribute_or_None)
+    # We list only the packages our runtime code actually imports —
+    # NOT every transitive dep PyInstaller happens to bundle. mouseinfo
+    # / pygetwindow / pytweening / pyperclip / rubicon-objc are bundled
+    # because pyautogui depends on them, but our code never calls
+    # pyautogui.position() / .alert() / .getActiveWindow() that would
+    # reach them. mouseinfo specifically does `import tkinter` at
+    # module load, and we exclude tkinter from the bundle (~20MB
+    # savings) — so checking mouseinfo would report a false failure
+    # for code we never execute.
     packages: list[tuple[str, str | None]] = [
         ("speech_recognition", "Recognizer"),
         ("pyautogui", None),
@@ -1814,8 +1823,6 @@ def _smoke_import() -> int:
         ("PIL.Image", None),
         ("mss", None),
         ("pyscreeze", None),
-        ("pymsgbox", None),
-        ("mouseinfo", None),
     ]
     if is_mac:
         packages.extend([
