@@ -17,6 +17,7 @@ import {
   destroyControlPopup,
   isPanelDocked,
   setPanelDocked,
+  getControlPopup,
 } from "./control-popup";
 import {
   installControlBubbleHooks,
@@ -25,6 +26,8 @@ import {
   toggleControlBubble,
   destroyControlBubble,
   isBubbleVisible,
+  beginBubbleDrag,
+  endBubbleDrag,
 } from "./control-bubble";
 import {
   isCursorOverlayActive,
@@ -87,6 +90,9 @@ const mainHandledCommands = new Set<AiosCommand>([
   "control_bubble_toggle",
   "control_bubble_show",
   "control_bubble_hide",
+  "control_bubble_drag_start",
+  "control_bubble_drag_to",
+  "control_bubble_drag_end",
   "control_panel_get_docked",
   "control_panel_set_docked",
   "cursor_overlay_get_active",
@@ -345,14 +351,42 @@ function registerIpcHandlers(): void {
     }
   });
 
-  // Global shortcut for Computer Control (v0.2.2+). Ensures the bubble is
-  // visible so the user has a persistent anchor, then toggles the panel
-  // attached to it. Works even when AIOS is in the background so the
-  // user can drive their OS without alt-tabbing into AIOS first.
-  globalShortcut.register("CommandOrControl+Alt+V", () => {
+  // Global shortcut for Computer Control mic — works from any app on
+  // the desktop. Different chord per OS because the modifier
+  // ergonomics differ:
+  //   Windows: Ctrl + Alt + V         (left hand thumb + index)
+  //   macOS:   Cmd + Ctrl + V         (TipTour parity, doesn't clash
+  //                                    with Cmd+Option+V "paste-as-
+  //                                    plain-text" Mac shortcut)
+  // Pressing the chord:
+  //   1. Shows the bubble if it isn't already
+  //   2. Opens the popup (or focuses if open)
+  //   3. Fires `shortcut:voice-toggle` into the popup so the panel
+  //      starts mic capture immediately (or stops it if listening).
+  // End result: user can press the chord from any app and start
+  // talking right away.
+  const voiceShortcut = process.platform === "darwin"
+    ? "Command+Control+V"
+    : "Control+Alt+V";
+  const voiceShortcutRegistered = globalShortcut.register(voiceShortcut, () => {
     if (!isBubbleVisible()) showControlBubble();
-    toggleControlPopup();
+    // Make sure the popup is OPEN (not just toggled) before we tell
+    // the panel to start listening — otherwise we'd start a voice
+    // session in a hidden popup.
+    openControlPopup();
+    const popup = getControlPopup();
+    if (popup && !popup.isDestroyed()) {
+      // Tiny defer so the popup's renderer is mounted + subscribed to
+      // the voice-toggle event when it arrives. Without this the
+      // first press after-launch sometimes misses the listener.
+      setTimeout(() => {
+        if (!popup.isDestroyed()) popup.webContents.send("shortcut:voice-toggle");
+      }, 80);
+    }
   });
+  if (!voiceShortcutRegistered) {
+    log("shortcut", "voice-register-failed", { chord: voiceShortcut });
+  }
 }
 
 
@@ -485,6 +519,27 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
   if (cmd === "control_bubble_hide") {
     hideControlBubble();
     closeControlPopup();
+    return { ok: true };
+  }
+  // Manual drag IPCs — replaced `-webkit-app-region: drag` (the OS
+  // native drag intercepted clicks in Electron 39+ and the panel toggle
+  // stopped firing). Main polls screen.getCursorScreenPoint() at 60Hz
+  // between drag_start and drag_end to move the bubble — renderer-side
+  // pointermove tracking broke because the bubble window is 56×56 and
+  // the cursor escapes it as soon as the user moves faster than the
+  // bubble can follow. We accept no coordinates on drag_to because
+  // main reads cursor position itself.
+  if (cmd === "control_bubble_drag_start") {
+    beginBubbleDrag();
+    return { ok: true };
+  }
+  if (cmd === "control_bubble_drag_to") {
+    // No-op: kept for API stability (renderer might call it during
+    // transitional builds). Main is already polling the cursor.
+    return { ok: true };
+  }
+  if (cmd === "control_bubble_drag_end") {
+    endBubbleDrag();
     return { ok: true };
   }
   if (cmd === "control_panel_get_docked") {
@@ -693,6 +748,25 @@ app.whenReady().then(() => {
   host = new PythonHost(workspaceRoot, starterKitRoot);
   host.onEvent((event) => {
     broadcastHostEvent(event);
+    // Modifier-only voice shortcut: when the Python sidecar's
+    // Mac CGEventTap detects a clean Cmd+Ctrl tap (both held + both
+    // released without any other key pressed in between), it
+    // broadcasts a `voice_shortcut_triggered` event. We treat this
+    // the same as the keyboard-accelerator global shortcut: show
+    // bubble, open popup, fire shortcut:voice-toggle to start mic.
+    // The Python listener is Mac-only (CGEventTap is macOS API);
+    // Windows users still rely on the Ctrl+Alt+V Electron shortcut.
+    const evtName = (event as { event?: string } | null)?.event;
+    if (evtName === "voice_shortcut_triggered") {
+      if (!isBubbleVisible()) showControlBubble();
+      openControlPopup();
+      const popup = getControlPopup();
+      if (popup && !popup.isDestroyed()) {
+        setTimeout(() => {
+          if (!popup.isDestroyed()) popup.webContents.send("shortcut:voice-toggle");
+        }, 80);
+      }
+    }
   });
   setCursorOverlayHost(host);
 
@@ -765,21 +839,19 @@ app.whenReady().then(() => {
     }
   };
 
-  // electron-updater's in-place auto-update requires the .app bundle to be
-  // code-signed on macOS (Squirrel.Mac validates the new bundle's signature
-  // against the running app's signature before swapping). Our Mac builds
-  // are unsigned today, so any in-place update attempt throws:
-  //   "code failed to satisfy specified code requirement(s)"
-  // Until we get an Apple Developer ID cert + notarization, Mac users get a
-  // "manual download" experience: we hit GitHub's API to see what's the
-  // latest release, and offer a button that opens the release page in their
-  // default browser.
+  // electron-updater's in-place auto-update works on both Windows and macOS
+  // now that we ship Apple Developer ID-signed + notarized .app bundles
+  // (since v0.2.7). Squirrel.Mac validates the new bundle's signature
+  // against the running app's signature before swapping — both are signed
+  // with the same SAPHAARE LABS Developer ID, so the swap succeeds.
   //
-  // Windows is unaffected — NSIS doesn't have the same signing constraint,
-  // and our auto-update has been working there.
+  // Previously this block was gated to `!isMac` because earlier Mac builds
+  // were unsigned and ShipIt threw "code failed to satisfy specified code
+  // requirement(s)". Removing that gate lets Mac users get the same
+  // background-download + restart-to-install flow Windows users already had.
   const isMac = process.platform === "darwin";
 
-  if (app.isPackaged && !isMac) {
+  if (app.isPackaged) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
 
@@ -862,14 +934,15 @@ app.whenReady().then(() => {
   ipcMain.handle("aios:get-version", () => app.getVersion());
 
   // IPC: manual "Check for updates" trigger from Settings.
+  // Both Mac and Windows go through electron-updater now that Mac builds
+  // are signed + notarized. The `checkForUpdatesManual` GitHub-API fallback
+  // is kept as the error path: if electron-updater fails for any reason
+  // (unsigned dev build, latest-mac.yml missing on a release, etc.) we
+  // gracefully degrade to the "open release page in browser" UX rather
+  // than leaving the user stranded.
   ipcMain.handle("aios:check-for-updates", async () => {
     if (!app.isPackaged) {
       return { ok: false, reason: "not-packaged", currentVersion: app.getVersion() };
-    }
-    if (isMac) {
-      // Mac uses manual download path because electron-updater requires
-      // code-signed bundles for ShipIt to swap the app in place.
-      return await checkForUpdatesManual();
     }
     try {
       const result = await autoUpdater.checkForUpdates();
@@ -880,6 +953,9 @@ app.whenReady().then(() => {
         hasUpdate: !!result?.updateInfo && result.updateInfo.version !== app.getVersion()
       };
     } catch (err) {
+      // Fall back to the manual-download path on the off-chance
+      // electron-updater fails. Better than a hard error.
+      if (isMac) return await checkForUpdatesManual();
       return { ok: false, reason: "check-failed", error: err instanceof Error ? err.message : String(err) };
     }
   });
@@ -887,13 +963,6 @@ app.whenReady().then(() => {
   // IPC: install the downloaded update + restart.
   ipcMain.handle("aios:install-update", async () => {
     if (!app.isPackaged) return { ok: false, reason: "not-packaged" };
-    if (isMac) {
-      // On Mac there is no downloaded update to install — the renderer
-      // should be calling openExternal(manualDownloadUrl) directly when the
-      // state is "manual-available". Returning a clear reason in case it
-      // doesn't.
-      return { ok: false, reason: "manual-only-on-mac" };
-    }
     try {
       // isSilent: pass /S to NSIS to suppress the installer UI on update
       // installs (only honored when the installed shell supports it; with

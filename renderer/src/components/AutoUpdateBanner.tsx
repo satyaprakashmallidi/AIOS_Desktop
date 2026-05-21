@@ -1,17 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { ConfirmModal } from "./ui";
 
-// Auto-update popup — Windows-only nudge. Replaces the earlier banner/toast
-// designs with a single centered modal that fires once when an update is
-// detected. Two buttons:
+// Auto-update popup — fires on Windows AND Mac now that Mac builds are
+// signed + notarized (v0.2.7+). Single centered modal that opens when an
+// update is detected. Two buttons:
 //   - Skip      → dismiss + remember this version in localStorage
 //   - Download  → close the popup and route the user to Settings → General,
-//                 where the existing "Restart & install" / "Check for updates"
-//                 button lives. The actual download/install path is unchanged;
+//                 where the "Restart & install" / "Check for updates"
+//                 button lives. The download/install path is unchanged;
 //                 this component is purely the entry-point nudge.
 //
-// Mac builds (unsigned, no working in-place updates) never render this. Idle
-// / checking / up-to-date / error states never trigger the popup either —
+// Idle / checking / up-to-date / error states never trigger the popup —
 // only "available" or "ready" signal an actionable update.
 
 const SKIP_STORAGE_KEY = "aios.autoUpdate.skippedVersion";
@@ -31,10 +30,12 @@ export function AutoUpdateBanner({ platform, onNavigateToSettings }: AutoUpdateB
   const [version, setVersion] = useState<string | null>(null);
   const [dismissedForVersion, setDismissedForVersion] = useState<string | null>(null);
 
-  const isWindows = platform === "win32";
+  // Auto-update is supported on the desktop OS targets we ship signed
+  // installers for. Linux/headless dev modes are excluded.
+  const isSupportedOs = platform === "win32" || platform === "darwin";
 
   useEffect(() => {
-    if (!isWindows) return;
+    if (!isSupportedOs) return;
     const unsubscribe = window.aios?.onUpdateState?.((event: AutoUpdateEvent) => {
       // Treat "available" and "ready" identically — both mean an update
       // exists. The actual download happens silently in the background; from
@@ -46,7 +47,7 @@ export function AutoUpdateBanner({ platform, onNavigateToSettings }: AutoUpdateB
       }
     });
     return () => unsubscribe?.();
-  }, [isWindows]);
+  }, [isSupportedOs]);
 
   // Clear the persisted skip when a newer version comes in so the popup
   // shows again for the new version.
@@ -62,7 +63,7 @@ export function AutoUpdateBanner({ platform, onNavigateToSettings }: AutoUpdateB
     }
   }, [version]);
 
-  if (!isWindows || !hasUpdate || !version) return null;
+  if (!isSupportedOs || !hasUpdate || !version) return null;
 
   let persistedSkip: string | null = null;
   try { persistedSkip = localStorage.getItem(SKIP_STORAGE_KEY); } catch { /* ignore */ }

@@ -31,6 +31,17 @@ let onUnsubscribe: ((win: BrowserWindow) => void) | null = null;
 let panelDocked = true;
 let undockedBounds: { x: number; y: number } | null = null;
 
+// Helper: move + pin the popup window's size. We use setBounds (not
+// setPosition) and force width/height to POPUP_WIDTH/POPUP_HEIGHT
+// every call because on Windows DWM, transparent frameless windows
+// accumulate shadow-padding into their reported bounds on every move
+// — over 60Hz of bubble-drag callbacks the popup balloons to 5×
+// its real size (the v0.2.16-dev "popup expands when dragging" bug).
+function moveAndPinPopup(x: number, y: number): void {
+  if (!popupWindow || popupWindow.isDestroyed()) return;
+  popupWindow.setBounds({ x, y, width: POPUP_WIDTH, height: POPUP_HEIGHT });
+}
+
 // When the user drags the bubble, drag the panel along with it (only
 // when the panel is currently visible AND in docked mode — undocked
 // means the user explicitly placed the panel and doesn't want it
@@ -40,7 +51,7 @@ onBubbleMove(() => {
   if (!popupWindow || popupWindow.isDestroyed() || !popupWindow.isVisible()) return;
   if (!panelDocked) return;
   const origin = topRightOrigin();
-  popupWindow.setPosition(origin.x, origin.y, false);
+  moveAndPinPopup(origin.x, origin.y);
 });
 
 export function isPanelDocked(): boolean { return panelDocked; }
@@ -51,7 +62,7 @@ export function setPanelDocked(docked: boolean): void {
   // and remember that position.
   if (docked && popupWindow && !popupWindow.isDestroyed() && popupWindow.isVisible()) {
     const origin = topRightOrigin();
-    popupWindow.setPosition(origin.x, origin.y, false);
+    moveAndPinPopup(origin.x, origin.y);
   } else if (!docked && popupWindow && !popupWindow.isDestroyed()) {
     const [x, y] = popupWindow.getPosition();
     undockedBounds = { x, y };
@@ -74,20 +85,55 @@ export function installControlPopupHooks(hooks: ControlPopupHooks): void {
 function topRightOrigin(): { x: number; y: number } {
   // Undocked: restore the user's manually-placed position.
   if (!panelDocked && undockedBounds) return undockedBounds;
-  // Docked: snap under the bubble (right-edge aligned) when it exists,
-  // else screen top-right corner.
+
+  // Docked: figure out the best corner to "open from" so the popup
+  // stays on-screen no matter where the user dragged the bubble. We
+  // pick the quadrant of the bubble's screen position (top/bottom ×
+  // left/right) and anchor the popup to the OPPOSITE corner of the
+  // bubble so it always extends INTO the screen.
   const bubble = getBubbleBounds();
-  if (bubble) {
+  const display = screen.getDisplayNearestPoint(
+    bubble ? { x: bubble.x + bubble.width / 2, y: bubble.y + bubble.height / 2 } : { x: 0, y: 0 }
+  );
+  const { x: waX, y: waY, width: waW, height: waH } = display.workArea;
+
+  if (!bubble) {
+    // No bubble yet → fall back to top-right corner of work area.
     return {
-      x: bubble.x + bubble.width - POPUP_WIDTH,
-      y: bubble.y + bubble.height + BUBBLE_GAP,
+      x: waX + waW - POPUP_WIDTH - SCREEN_EDGE_MARGIN,
+      y: waY + SCREEN_EDGE_MARGIN,
     };
   }
-  const display = screen.getPrimaryDisplay();
-  const { x, y, width } = display.workArea;
+
+  const bubbleMidX = bubble.x + bubble.width / 2;
+  const bubbleMidY = bubble.y + bubble.height / 2;
+  const screenMidX = waX + waW / 2;
+  const screenMidY = waY + waH / 2;
+
+  // Horizontal: bubble in right half → popup grows LEFT (anchor right
+  // edge of popup to right edge of bubble). Bubble in left half →
+  // popup grows RIGHT (anchor left edge of popup to left edge of
+  // bubble).
+  const isRightHalf = bubbleMidX >= screenMidX;
+  const x = isRightHalf
+    ? bubble.x + bubble.width - POPUP_WIDTH
+    : bubble.x;
+
+  // Vertical: bubble in bottom half → popup grows UP (anchor bottom
+  // of popup to top of bubble). Bubble in top half → popup grows DOWN
+  // (anchor top of popup to bottom of bubble). BUBBLE_GAP is the
+  // breathing room between bubble and popup.
+  const isBottomHalf = bubbleMidY >= screenMidY;
+  const y = isBottomHalf
+    ? bubble.y - POPUP_HEIGHT - BUBBLE_GAP
+    : bubble.y + bubble.height + BUBBLE_GAP;
+
+  // Final clamp: even after the quadrant flip, the popup might still
+  // poke off-screen on narrow monitors. Pull it back inside the work
+  // area with a SCREEN_EDGE_MARGIN buffer on each side.
   return {
-    x: x + width - POPUP_WIDTH - SCREEN_EDGE_MARGIN,
-    y: y + SCREEN_EDGE_MARGIN,
+    x: Math.max(waX + SCREEN_EDGE_MARGIN, Math.min(x, waX + waW - POPUP_WIDTH - SCREEN_EDGE_MARGIN)),
+    y: Math.max(waY + SCREEN_EDGE_MARGIN, Math.min(y, waY + waH - POPUP_HEIGHT - SCREEN_EDGE_MARGIN)),
   };
 }
 
@@ -205,7 +251,7 @@ export function toggleControlPopup(): void {
   } else {
     // Re-position to top-right in case the primary display changed.
     const origin = topRightOrigin();
-    win.setPosition(origin.x, origin.y, false);
+    moveAndPinPopup(origin.x, origin.y);
     // showInactive avoids stealing focus from whatever app the user was
     // working in — the whole point of a TipTour-style panel.
     win.showInactive();
@@ -216,7 +262,7 @@ export function openControlPopup(): void {
   const win = ensurePopup();
   if (!win.isVisible()) {
     const origin = topRightOrigin();
-    win.setPosition(origin.x, origin.y, false);
+    moveAndPinPopup(origin.x, origin.y);
     win.showInactive();
   }
 }

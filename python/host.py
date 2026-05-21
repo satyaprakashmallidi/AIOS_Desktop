@@ -1980,11 +1980,172 @@ def _smoke_import() -> int:
         except Exception as exc:
             # Don't hard-fail; headless Mac may not have a main display
             print(f"INFO Quartz.CGMainDisplayID: {type(exc).__name__}: {exc}")
+        # CGEventTap modifier-only voice shortcut listener (v0.2.17+)
+        # needs these specific symbols from Quartz. If any is missing
+        # in the bundle, the listener silently no-ops at runtime and
+        # the user is stuck on the Cmd+Ctrl+V fallback. Hard-fail the
+        # CI so we know BEFORE shipping.
+        try:
+            from Quartz import (
+                CGEventTapCreate,
+                CGEventTapEnable,
+                CGEventGetFlags,
+                kCGSessionEventTap,
+                kCGHeadInsertEventTap,
+                kCGEventTapOptionListenOnly,
+                kCGEventFlagsChanged,
+                kCGEventKeyDown,
+                kCGEventFlagMaskCommand,
+                kCGEventFlagMaskControl,
+                kCGEventFlagMaskShift,
+                kCGEventFlagMaskAlternate,
+                CFMachPortCreateRunLoopSource,
+                CFRunLoopAddSource,
+                CFRunLoopGetCurrent,
+                kCFRunLoopCommonModes,
+                CFRunLoopRun,
+            )
+            print("OK  Quartz CGEventTap + CFRunLoop symbols import cleanly")
+        except Exception as exc:
+            rt_fail += 1
+            print(
+                f"FAIL Quartz CGEventTap symbols: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
 
     total = len(packages) + 6 + (1 if is_win else 0) + (2 if is_mac else 0)
     print(f"\nphase 2 (runtime): {rt_fail} failure(s)")
     print(f"smoke-import: {total - fail - rt_fail}/{total} ok, {fail + rt_fail} failed")
     return 1 if (fail + rt_fail) else 0
+
+
+def _start_mac_voice_shortcut_listener() -> None:
+    """Detect a clean Cmd+Ctrl tap on macOS (both held + both released
+    without any other key pressed in between) and broadcast a
+    `voice_shortcut_triggered` event. This is the modifier-only chord
+    the user asked for — Electron's `globalShortcut` can't register
+    modifier-only accelerators, so we do it natively via CGEventTap.
+
+    Requires the macOS Accessibility permission (which AIOS already
+    needs for voice-control clicks / typing). If permission isn't
+    granted, `CGEventTapCreate` returns NULL and we exit gracefully —
+    the user can still use Cmd+Ctrl+V (registered through Electron's
+    globalShortcut) as a fallback that doesn't need accessibility.
+
+    Runs in a daemon thread with its own CFRunLoop so it doesn't
+    block the main JSON-RPC stdin loop."""
+    if sys.platform != "darwin":
+        return
+
+    def listener_thread() -> None:
+        try:
+            from Quartz import (
+                CGEventTapCreate,
+                CGEventTapEnable,
+                CGEventGetFlags,
+                kCGSessionEventTap,
+                kCGHeadInsertEventTap,
+                kCGEventTapOptionListenOnly,
+                kCGEventFlagsChanged,
+                kCGEventKeyDown,
+                kCGEventFlagMaskCommand,
+                kCGEventFlagMaskControl,
+                kCGEventFlagMaskShift,
+                kCGEventFlagMaskAlternate,
+                CFMachPortCreateRunLoopSource,
+                CFRunLoopAddSource,
+                CFRunLoopGetCurrent,
+                kCFRunLoopCommonModes,
+                CFRunLoopRun,
+            )
+        except Exception as exc:
+            print(
+                f"[voice-shortcut] failed to import Quartz: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+
+        # State machine across flagsChanged + keyDown events.
+        # idle    : no relevant keys held
+        # holding : Cmd+Ctrl both held with no Shift/Option and no
+        #           non-modifier keypresses observed yet
+        # aborted : was holding but a non-modifier key got pressed —
+        #           release will NOT fire (so Cmd+Ctrl+C still copies
+        #           cleanly without our listener intercepting)
+        state = {"name": "idle"}
+
+        def callback(_proxy, type_, event, _refcon):
+            try:
+                flags = CGEventGetFlags(event)
+                cmd = bool(flags & kCGEventFlagMaskCommand)
+                ctrl = bool(flags & kCGEventFlagMaskControl)
+                shift = bool(flags & kCGEventFlagMaskShift)
+                alt = bool(flags & kCGEventFlagMaskAlternate)
+
+                if type_ == kCGEventKeyDown:
+                    # Any non-modifier press while holding the chord
+                    # aborts so we don't fire on release.
+                    if state["name"] == "holding":
+                        state["name"] = "aborted"
+                elif type_ == kCGEventFlagsChanged:
+                    pure_chord = cmd and ctrl and not shift and not alt
+                    if pure_chord and state["name"] == "idle":
+                        state["name"] = "holding"
+                    elif not (cmd and ctrl):
+                        # One or both modifiers released.
+                        if state["name"] == "holding":
+                            try:
+                                broadcast_event("voice_shortcut_triggered", {})
+                            except Exception as bexc:
+                                print(
+                                    f"[voice-shortcut] broadcast failed: {bexc}",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                        state["name"] = "idle"
+            except Exception as exc:
+                print(
+                    f"[voice-shortcut] callback err: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return event
+
+        # listen-only tap: we don't consume events, so the user's
+        # Cmd+Ctrl+other-letter combos still reach their target app.
+        mask = (1 << kCGEventFlagsChanged) | (1 << kCGEventKeyDown)
+        tap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly,
+            mask,
+            callback,
+            None,
+        )
+        if not tap:
+            print(
+                "[voice-shortcut] CGEventTapCreate returned NULL — "
+                "Accessibility permission likely not granted to AIOS. "
+                "Cmd+Ctrl+V (fallback) still works.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+
+        source = CFMachPortCreateRunLoopSource(None, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes)
+        CGEventTapEnable(tap, True)
+        try:
+            CFRunLoopRun()
+        except Exception as exc:
+            print(
+                f"[voice-shortcut] run loop err: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    threading.Thread(target=listener_thread, daemon=True).start()
 
 
 def main() -> None:
@@ -1998,6 +2159,10 @@ def main() -> None:
         tasks_runner.start_runner(broadcast_event)
     except Exception as runner_err:
         print(f"[host] tasks_runner failed to start: {runner_err}", file=sys.stderr, flush=True)
+    # Mac-only: register the Cmd+Ctrl tap listener so users can open
+    # the mic from any app without a letter key. Silently no-ops on
+    # Windows.
+    _start_mac_voice_shortcut_listener()
     for line in sys.stdin:
         threading.Thread(target=_handle_request, args=(line,), daemon=True).start()
 

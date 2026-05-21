@@ -9500,12 +9500,14 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   align-items: center;
   justify-content: center;
   cursor: grab;
-  /* Bubble IS the drag handle for the whole control surface — grab it
-     and the panel follows automatically (see main/control-popup.ts
-     onBubbleMove subscription). Electron's drag regions still allow a
-     fast click-without-drag to fire the onClick handler that opens the
-     panel, so the same bubble both drags AND toggles. */
-  -webkit-app-region: drag;
+  /* Drag is implemented manually via pointer events in BubbleApp.tsx
+     (mousedown → control_bubble_drag_start IPC, pointermove →
+     control_bubble_drag_to, pointerup → either control_panel_toggle if
+     no movement OR control_bubble_drag_end). Previously this element
+     had `-webkit-app-region: drag` on the assumption that Electron's
+     drag region still fires onClick on quick taps — that turned out
+     to be unreliable on macOS in Electron 39+. The OS-native drag
+     intercepted every mouse event and the popup never opened. */
   transition: transform 120ms ease, background 140ms ease;
 }
 .control-bubble:active { cursor: grabbing; }

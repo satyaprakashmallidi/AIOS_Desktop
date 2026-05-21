@@ -16,6 +16,18 @@ import type { ClaudeStatus, WorkspaceInfo } from "../types";
 
 export function ControlApp() {
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  // Bumped every time the global voice shortcut fires. VoiceControlPanel
+  // watches this signal and toggles between startListening / stopListening
+  // when it changes — so a Ctrl+Alt+V (Win) / Cmd+Ctrl+V (Mac) press from
+  // anywhere on the desktop kicks off mic capture immediately.
+  const [voiceToggle, setVoiceToggle] = useState(0);
+
+  useEffect(() => {
+    const unsub = window.aios?.window?.onShortcutVoiceToggle?.(() => {
+      setVoiceToggle((n) => n + 1);
+    });
+    return () => unsub?.();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -71,7 +83,7 @@ export function ControlApp() {
     <div className="control-popup-root">
       <VoiceControlPanel
         claude={claude}
-        toggleSignal={0}
+        toggleSignal={voiceToggle}
         onClose={() => { void invoke("control_panel_close"); }}
         popupMode
       />
