@@ -37,24 +37,18 @@ from PyInstaller.utils.hooks import collect_all
 sr_binaries = sr_datas = sr_hiddenimports = []
 try:
     sr_datas, sr_binaries, sr_hiddenimports = collect_all('speech_recognition')
-    # SpeechRecognition ships bundled FLAC encoder binaries (flac-mac,
-    # flac-linux-x86_64, flac-win32.exe) compiled against ancient SDKs.
-    # On Mac, Apple's notary service rejects flac-mac with
-    # "binary uses an SDK older than the 10.9 SDK" — blocks the whole
-    # notarization. We never use FLAC: transcribe_audio always sends
-    # WAV/PCM to Google's free web API, which doesn't require FLAC
-    # conversion. Strip all three flac binaries from the bundle.
-    def _strip_flac(items):
-        return [pair for pair in items
-                if 'flac-' not in str(pair[0]).lower()
-                and not str(pair[0]).lower().endswith('flac.exe')]
-    sr_binaries = _strip_flac(sr_binaries)
-    sr_datas = _strip_flac(sr_datas)
 except Exception:
     # Library not installed yet (e.g., running spec without `pip install -r
     # python/requirements.txt`). The runtime import in transcribe_audio
     # surfaces a clean "missing dependency" error in that case.
     pass
+# NOTE: PyInstaller's bundled contrib hook for speech_recognition
+# (hook-speech_recognition.py in _pyinstaller_hooks_contrib) injects
+# the ancient FLAC encoder binaries directly into the Analysis output
+# — independently of this collect_all call. The filter that actually
+# strips them lives AFTER `a = Analysis(...)` below, against
+# a.binaries / a.datas. See the comment block there for the full
+# notarization rationale.
 
 # pyautogui pulls a tree of Mac-only deps (pyobjc-framework-Cocoa,
 # Quartz, AppKit, ApplicationServices, etc) that PyInstaller's static
@@ -189,6 +183,37 @@ a = Analysis(
     ],
     noarchive=False,
 )
+
+# Filter out the ancient FLAC encoder binaries that PyInstaller's
+# bundled `hook-speech_recognition.py` contrib hook injects directly
+# into `a.binaries` / `a.datas` during Analysis — outside the
+# `collect_all('speech_recognition')` we did at the top of this file,
+# so the earlier `_strip_flac` filter never saw them.
+#
+# The binaries (flac-mac, flac-linux-x86_64, flac-win32.exe) ship
+# inside the SpeechRecognition wheel compiled against a pre-10.9
+# macOS SDK, which Apple's notary service rejects with
+# "binary uses an SDK older than the 10.9 SDK", failing the whole
+# Mac notarization. transcribe_audio uses recognize_google with a
+# WAV AudioData object — the FLAC binary is never invoked on any
+# platform — so dropping it is safe.
+#
+# TOC entries here are 3-tuples (name, src_path, typecode); flag on
+# either name or src so we catch both the "speech_recognition/flac-mac"
+# name and the absolute source path the hook records.
+def _drop_flac_toc(toc):
+    keep = []
+    for entry in toc:
+        name = str(entry[0]).lower()
+        src = str(entry[1]).lower() if len(entry) > 1 else ''
+        if 'flac-' in name or 'flac-' in src:
+            continue
+        if name.endswith('flac.exe') or src.endswith('flac.exe'):
+            continue
+        keep.append(entry)
+    return keep
+a.binaries = _drop_flac_toc(a.binaries)
+a.datas = _drop_flac_toc(a.datas)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
