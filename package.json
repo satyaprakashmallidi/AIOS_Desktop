@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -21,7 +21,8 @@
     "dist": "npm run build && npm run build:python && electron-builder",
     "dist:win": "npm run build && npm run build:python && electron-builder --win",
     "dist:mac": "npm run build && npm run build:python && electron-builder --mac",
-    "release": "npm run build && npm run build:python && electron-builder --publish always"
+    "release": "npm run build && npm run build:python && electron-builder --publish always",
+    "release:no-python": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",

@@ -32,14 +32,26 @@ jobs:
             platform: mac
             arch: arm64
             pyinstallerArch: arm64
-          # Intel (x86_64) Mac — runs on GitHub's older macos-13 runner
-          # which has Intel hardware. Same flow as arm64 but every dep
-          # installs x86_64-native. Two separate DMGs ship to the same
-          # GitHub Release; users grab the one matching their CPU.
-          # (We previously tried a single universal2 build but Pillow
-          # doesn't publish universal2 wheels, so PyInstaller COLLECT
-          # always errored on _imaging.cpython-darwin.so.)
-          - os: macos-13
+          # Intel (x86_64) Mac — CROSS-BUILT from Apple Silicon
+          # (macos-latest) under Rosetta 2.
+          #
+          # We previously used `os: macos-13` (the only free Intel runner
+          # on GitHub) but its queue is contested for 12+ hours per job.
+          # Instead, install python.org's universal2 Python 3.11 on the
+          # arm64 runner — it contains both arm64 AND x86_64 slices in
+          # one bundle. Then run pip + PyInstaller under `arch -x86_64`
+          # so wheel resolution and the resulting Mach-O bits are all
+          # x86_64. electron-builder cross-builds the Electron shell
+          # for x64 natively via @electron/rebuild. End result: a real
+          # Intel DMG produced on an arm64 host with no macos-13 queue.
+          #
+          # Verified before shipping (queries against PyPI):
+          # - pyobjc-{core, Cocoa, Quartz, ApplicationServices} ship
+          #   universal2 wheels for cp311 — both arches in one wheel.
+          # - Pillow ships a dedicated cp311 x86_64 wheel.
+          # - pyautogui/pyscreeze/mouseinfo are sdist-only but pure
+          #   Python (no C extensions), so arch is irrelevant.
+          - os: macos-latest
             platform: mac
             arch: x64
             pyinstallerArch: x86_64
@@ -63,6 +75,30 @@ jobs:
           pip install pyinstaller
           pip install -r python/requirements.txt
 
+      # Cross-build setup for the Intel (x86_64) Mac job. macos-latest
+      # is Apple Silicon (arm64) — actions/setup-python above gave us
+      # an arm64-only Python that PyInstaller cannot use to produce an
+      # x86_64 sidecar. Install python.org's universal2 Python (single
+      # bundle, both arches) and pre-install x86_64 wheels under
+      # Rosetta. PyInstaller invoked via `arch -x86_64` later produces
+      # a real Intel Mach-O binary. This entire block is no-op on
+      # every other job.
+      - name: Install universal2 Python + x86_64 deps (Intel Mac only)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: |
+          curl -L -o /tmp/python-universal2.pkg https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg /tmp/python-universal2.pkg -target /
+          PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11
+          echo "AIOS_X64_PYTHON=$PY" >> $GITHUB_ENV
+          arch -x86_64 $PY -m pip install --upgrade pip
+          arch -x86_64 $PY -m pip install pyinstaller
+          arch -x86_64 $PY -m pip install -r python/requirements.txt
+          # Sanity: confirm we got x86_64 PIL (the Pillow wheel that
+          # the previous universal2 attempts tripped on). file(1) on
+          # the C extension should report Mach-O x86_64.
+          arch -x86_64 $PY -c "import PIL, os; print(PIL.__file__)"
+          file "$($PY -c 'import PIL, os; print(os.path.join(os.path.dirname(PIL.__file__), \"_imaging.cpython-311-darwin.so\"))' 2>/dev/null)" || true
+
       - name: Install npm deps
         run: npm ci
 
@@ -75,23 +111,43 @@ jobs:
       - name: Release gate (build + tests + Python sidecar dispatch check)
         run: npm run check
 
+      # Default sidecar build — Windows + Mac arm64 use system PyInstaller
+      # (from `actions/setup-python`'s pip install above) on the native arch.
       - name: Build Python sidecar
+        if: '!(matrix.platform == ''mac'' && matrix.arch == ''x64'')'
         env:
           AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
         run: npm run build:python
 
+      # Intel Mac sidecar — invoke PyInstaller from the universal2
+      # Python via Rosetta, so EVERY collected binary (host bootloader,
+      # Pillow's _imaging, pyobjc framework slices, etc.) is x86_64
+      # Mach-O. AIOS_PYINSTALLER_TARGET_ARCH=x86_64 is also read by
+      # build/aios-host.spec (sets EXE target_arch) for belt-and-braces.
+      - name: Build Python sidecar (Intel via Rosetta)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        env:
+          AIOS_PYINSTALLER_TARGET_ARCH: x86_64
+        run: arch -x86_64 "$AIOS_X64_PYTHON" -m PyInstaller --noconfirm --clean build/aios-host.spec
+
+      # IMPORTANT: every publish step below calls `release:no-python`
+      # — NOT `release`. The `release` script re-runs `npm run build:python`
+      # which would clobber the already-built sidecar with whatever the
+      # default system Python produces. On the Intel Mac job that would
+      # silently overwrite our cross-built x86_64 sidecar with an arm64
+      # one (the original v0.2.9 regression). For Windows + Mac arm64
+      # it's just wasted minutes. release:no-python uses the sidecar
+      # built by the previous step as-is.
       - name: Build + publish (Windows)
         if: matrix.platform == 'win'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
-        run: npm run release -- --win
+        run: npm run release:no-python -- --win
 
       - name: Build + publish (macOS arm64)
         if: matrix.platform == 'mac' && matrix.arch == 'arm64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
           # Code signing (electron-builder reads these automatically):
           # CSC_LINK = base64-encoded Developer ID Application .p12
           # CSC_KEY_PASSWORD = .p12 export password
@@ -102,19 +158,18 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run release -- --mac --arm64
+        run: npm run release:no-python -- --mac --arm64
 
       - name: Build + publish (macOS x64 / Intel)
         if: matrix.platform == 'mac' && matrix.arch == 'x64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run release -- --mac --x64
+        run: npm run release:no-python -- --mac --x64
 
       - name: Upload installer artifacts (debugging)
         if: always()
