@@ -163,6 +163,21 @@ jobs:
           AIOS_PYINSTALLER_TARGET_ARCH: x86_64
         run: arch -x86_64 "$AIOS_X64_PYTHON" -m PyInstaller --noconfirm --clean build/aios-host.spec
 
+      # Bundle smoke test. Boots the freshly-built sidecar with
+      # `--smoke-import` and confirms every runtime-required package
+      # (SpeechRecognition, pyautogui, PIL, pyobjc-*, uiautomation,
+      # internal modules) actually loads inside the bundle. This is
+      # where v0.2.13's SpeechRecognition crash on Mac would have been
+      # caught before reaching users — never again. Intel build needs
+      # Rosetta to execute the x86_64 binary.
+      - name: Bundle smoke test (every module imports)
+        if: matrix.platform != 'mac' || matrix.arch != 'x64'
+        run: npm run test:bundle
+
+      - name: Bundle smoke test (Intel via Rosetta)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: arch -x86_64 ./dist/aios-host/aios-host --smoke-import
+
       # IMPORTANT: every publish step below calls `release:no-python`
       # — NOT `release`. The `release` script re-runs `npm run build:python`
       # which would clobber the already-built sidecar with whatever the

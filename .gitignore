@@ -36,6 +36,10 @@ aios_app/
 # Local Claude Code config (contains shell command history with secrets)
 .claude/settings.local.json
 
+# Third-party clones kept locally for cross-referencing while we
+# extend Computer Control. Not part of AIOS — never committed.
+reference/
+
 # Junk screenshots in root
 aios-chat-check.png
 chat-ui-check.png

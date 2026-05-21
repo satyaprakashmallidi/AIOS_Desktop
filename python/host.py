@@ -735,10 +735,15 @@ def transcribe_audio(args: dict[str, Any]) -> dict[str, Any]:
 
     try:
         import speech_recognition as sr  # type: ignore
-    except ImportError:
+    except Exception as exc:
+        # Catch every exception kind, not just ImportError — packaged builds
+        # have surfaced things like FileNotFoundError (missing flac binary
+        # touched at import time) and AttributeError (typing.Self on older
+        # Python). Surface the real reason so we can diagnose from app logs
+        # instead of guessing at "missing dependency".
         raise HostError(
-            "MISSING_DEPENDENCY",
-            "Install the free transcription dependency: pip install SpeechRecognition",
+            "TRANSCRIBE_INIT_FAILED",
+            f"speech_recognition could not be loaded: {type(exc).__name__}: {exc}",
         )
 
     tmp_path: str | None = None
@@ -1787,7 +1792,71 @@ def _handle_request(line: str) -> None:
         respond(message_id, False, code="HOST_ERROR", message=str(error))
 
 
+def _smoke_import() -> int:
+    """Imports every package the bundled sidecar relies on at runtime.
+    Runs inside the freshly-built PyInstaller binary in CI (via
+    `aios-host --smoke-import`) so we catch bundling regressions (e.g.
+    the v0.2.13 SpeechRecognition crash on Mac) BEFORE shipping an
+    installer. Prints one line per package and exits non-zero on the
+    first failure so the workflow log surfaces the exact culprit.
+
+    Keep this list in sync with python/requirements.txt + the
+    hiddenimports block in build/aios-host.spec. Platform-specific
+    packages are skipped on the wrong platform via sys.platform guards
+    (matches the same gates in requirements.txt)."""
+    is_mac = sys.platform == "darwin"
+    is_win = sys.platform == "win32"
+    # (package_name, importable_attribute_or_None)
+    packages: list[tuple[str, str | None]] = [
+        ("speech_recognition", "Recognizer"),
+        ("pyautogui", None),
+        ("PIL", "Image"),
+        ("PIL.Image", None),
+        ("mss", None),
+        ("pyscreeze", None),
+        ("pymsgbox", None),
+        ("mouseinfo", None),
+    ]
+    if is_mac:
+        packages.extend([
+            ("objc", None),
+            ("AppKit", None),
+            ("Foundation", None),
+            ("Quartz", None),
+            ("ApplicationServices", None),
+        ])
+    if is_win:
+        packages.extend([
+            ("uiautomation", None),
+            ("comtypes", None),
+        ])
+    # Also our own internal modules, so a missing workspace/agents/etc
+    # surfaces here instead of when the user opens the app.
+    packages.extend([
+        ("workspace", None),
+        ("agents", None),
+        ("tasks_store", None),
+        ("tasks_runner", None),
+        ("claude_runtime", None),
+    ])
+
+    fail = 0
+    for name, attr in packages:
+        try:
+            module = __import__(name, fromlist=[attr] if attr else [])
+            if attr is not None and not hasattr(module, attr):
+                raise AttributeError(f"{name} has no attribute {attr!r}")
+            print(f"OK  {name}")
+        except Exception as exc:
+            fail += 1
+            print(f"FAIL {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f"\nsmoke-import: {len(packages) - fail}/{len(packages)} ok, {fail} failed")
+    return 1 if fail else 0
+
+
 def main() -> None:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--smoke-import":
+        sys.exit(_smoke_import())
     # Initialize the database early so startup failures are visible.
     get_workspace_info()
     # Start the background task runner after stdout locking/event helpers exist.

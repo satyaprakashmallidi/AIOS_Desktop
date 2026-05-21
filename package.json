@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -15,6 +15,7 @@
     "start": "electron dist/main/main.js",
     "test": "vitest run --config vitest.config.ts",
     "test:python": "node scripts/run-python-tests.js",
+    "test:bundle": "node scripts/run-bundle-smoke-test.js",
     "check": "npm run build && npm run test && npm run test:python",
     "build:python": "pyinstaller --noconfirm --clean build/aios-host.spec",
     "pack": "npm run build && npm run build:python && electron-builder --dir",
