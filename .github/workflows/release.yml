@@ -119,7 +119,12 @@ jobs:
             --only-binary=:all: \
             --dest=/tmp/x86_64-wheels \
             Pillow
-          arch -x86_64 $PY -m pip install --no-deps --force-reinstall /tmp/x86_64-wheels/Pillow-*.whl
+          # Glob pattern must be case-insensitive — PyPI normalizes the
+          # filename to lowercase (pillow-12.2.0-...) even though the
+          # package is named Pillow. Using *.whl (the /tmp dir was
+          # freshly created with mkdir -p above and only contains the
+          # one downloaded wheel) sidesteps the case mismatch entirely.
+          arch -x86_64 $PY -m pip install --no-deps --force-reinstall /tmp/x86_64-wheels/*.whl
           # Sanity check (must report Mach-O x86_64). file(1) failing or
           # reporting arm64 here = stop now, don't waste minutes on a
           # build that's guaranteed to fail in COLLECT later.
