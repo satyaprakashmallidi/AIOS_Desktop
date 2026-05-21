@@ -37,6 +37,19 @@ from PyInstaller.utils.hooks import collect_all
 sr_binaries = sr_datas = sr_hiddenimports = []
 try:
     sr_datas, sr_binaries, sr_hiddenimports = collect_all('speech_recognition')
+    # SpeechRecognition ships bundled FLAC encoder binaries (flac-mac,
+    # flac-linux-x86_64, flac-win32.exe) compiled against ancient SDKs.
+    # On Mac, Apple's notary service rejects flac-mac with
+    # "binary uses an SDK older than the 10.9 SDK" — blocks the whole
+    # notarization. We never use FLAC: transcribe_audio always sends
+    # WAV/PCM to Google's free web API, which doesn't require FLAC
+    # conversion. Strip all three flac binaries from the bundle.
+    def _strip_flac(items):
+        return [pair for pair in items
+                if 'flac-' not in str(pair[0]).lower()
+                and not str(pair[0]).lower().endswith('flac.exe')]
+    sr_binaries = _strip_flac(sr_binaries)
+    sr_datas = _strip_flac(sr_datas)
 except Exception:
     # Library not installed yet (e.g., running spec without `pip install -r
     # python/requirements.txt`). The runtime import in transcribe_audio
