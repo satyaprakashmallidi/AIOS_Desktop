@@ -61,48 +61,92 @@ export function getSourceStarterKit(): string {
 // data, outputs, plans, shares, gtd, imports — those belong to the user).
 const INFRA_DIRS = ["module-installs", ".claude", "reference"];
 
-// FAST path used at startup. Only creates the bare-minimum directories the
-// Python sidecar needs to open the SQLite DB and start logging. The starter-
-// kit copy (which can be a few hundred ms of synchronous file I/O on first
-// launch) is deferred to `backfillStarterKit` and runs after the window has
-// shown so the user isn't staring at a blank window during file copying.
+// Like copyDirClean, but never overwrites existing files. Heals partial
+// workspaces: if a prior first-launch copy aborted mid-flight (TCC denial,
+// ENOSPC, interrupted quit), the resulting partial module-installs/ would
+// stay broken forever because a top-level fs.existsSync check thinks the
+// dir is already populated. copyDirMerge recurses through every level and
+// restores only the pieces that are missing — user-edited files (markdown,
+// context) are preserved.
+function copyDirMerge(source: string, target: string): string[] {
+  const created: string[] = [];
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(target, { recursive: true });
+  }
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    if (ignoredCopyNames.has(entry.name)) continue;
+    const from = path.join(source, entry.name);
+    const to = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      created.push(...copyDirMerge(from, to));
+    } else if (entry.isFile() && !fs.existsSync(to)) {
+      fs.copyFileSync(from, to);
+      created.push(to);
+    }
+  }
+  return created;
+}
+
+// FAST path used at startup. Creates the directories the Python sidecar
+// needs to open the SQLite DB and start logging. ALSO runs the starter-kit
+// copy inline on first launch (when CLAUDE.md is missing) so the very first
+// `list_modules` call sees a populated module-installs/ — without this,
+// there's a race where the renderer fetches the module list before the
+// deferred backfillStarterKit completes and every row shows "Source missing"
+// for up to 60 s. On subsequent launches CLAUDE.md exists and this block
+// is skipped, preserving v0.1.19's fast cold-boot.
 export function ensureRuntimeWorkspace(): string {
   const workspaceRoot = getWorkspaceRoot();
   fs.mkdirSync(path.join(workspaceRoot, "data"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "logs"), { recursive: true });
+
+  const marker = path.join(workspaceRoot, "CLAUDE.md");
+  if (!fs.existsSync(marker)) {
+    try {
+      copyDirClean(getSourceStarterKit(), workspaceRoot);
+    } catch (err) {
+      // Don't block boot if the starter kit is truly missing from the bundle.
+      // The deferred backfillStarterKit will retry.
+      // eslint-disable-next-line no-console
+      console.error("first-launch starter kit copy failed:", err);
+    }
+  }
   return workspaceRoot;
 }
 
-// BACKGROUND path called after the BrowserWindow is on screen. Performs the
-// expensive starter-kit copy on first launch and the idempotent infra resync
-// on subsequent launches. Safe to call concurrently with renderer activity —
-// only writes files; never deletes user data. Errors are caught and logged
-// rather than surfaced, since the chat path doesn't depend on these files.
-export function backfillStarterKit(): void {
+// BACKGROUND path called after the BrowserWindow is on screen. Two jobs:
+//   (1) If ensureRuntimeWorkspace's inline first-launch copy failed (or
+//       didn't run for some reason), full copy here as a fallback.
+//   (2) Self-heal partial / corrupt INFRA_DIRS via copyDirMerge — restores
+//       any missing file under module-installs/, .claude/, or reference/
+//       without touching user-edited content. This is what fixes existing
+//       v0.2.19 users whose first-launch copy aborted mid-flight; auto-
+//       update to a fixed version triggers the heal on next launch.
+// Returns the list of top-level INFRA_DIRS that had something copied (or
+// "__full__" for the full first-launch path). Empty array = nothing
+// happened, no event broadcast needed.
+export function backfillStarterKit(): { copied: string[] } {
+  const copied: string[] = [];
   try {
     const workspaceRoot = getWorkspaceRoot();
     const marker = path.join(workspaceRoot, "CLAUDE.md");
     const starterKit = getSourceStarterKit();
     if (!fs.existsSync(marker)) {
       copyDirClean(starterKit, workspaceRoot);
-      return;
+      copied.push("__full__");
+      return { copied };
     }
-    // Idempotent infrastructure resync. Older workspaces (from earlier app
-    // versions, or partial first-launch copies) can be missing module-installs/
-    // — without this, the Modules page shows every row as "Source missing".
-    // Only copies dirs that are entirely absent; never overwrites existing files.
     for (const dir of INFRA_DIRS) {
       const source = path.join(starterKit, dir);
       const target = path.join(workspaceRoot, dir);
-      if (fs.existsSync(source) && !fs.existsSync(target)) {
-        copyDirClean(source, target);
+      if (fs.existsSync(source)) {
+        const createdFiles = copyDirMerge(source, target);
+        if (createdFiles.length > 0) copied.push(dir);
       }
     }
   } catch (err) {
-    // Logged, not thrown — the renderer can boot without the starter kit
-    // present; affected screens (Modules / Reference) will just be empty
-    // until the next launch reruns the backfill.
     // eslint-disable-next-line no-console
     console.error("backfillStarterKit failed:", err);
   }
+  return { copied };
 }

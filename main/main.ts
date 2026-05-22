@@ -914,17 +914,28 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
 
-  // Run the starter-kit copy / infra resync AFTER the window is on screen.
-  // ensureRuntimeWorkspace() above only set up data/ and logs/ — the heavier
-  // copy work happens here so it can't block the boot critical path.
+  // Run the deferred infra resync AFTER the window is on screen. The fresh-
+  // install copy already happened inline in ensureRuntimeWorkspace() above;
+  // this path exists to self-heal v0.2.19 users whose first-launch copy
+  // aborted mid-flight (partial or missing module-installs/). When anything
+  // is actually copied, broadcast a workspace_backfilled event so the
+  // renderer refreshes immediately rather than waiting for the 60s polling
+  // tick to surface the now-present modules.
+  const runBackfill = () => {
+    const { copied } = backfillStarterKit();
+    if (copied.length > 0) {
+      broadcastHostEvent({
+        id: `backfill-${Date.now()}`,
+        event: "workspace_backfilled",
+        data: { copied },
+      });
+    }
+  };
   if (mainWindow) {
-    mainWindow.once("ready-to-show", () => {
-      setImmediate(() => backfillStarterKit());
-    });
-    // Fallback in case ready-to-show is somehow not emitted within 2 s.
-    setTimeout(() => backfillStarterKit(), 2000);
+    mainWindow.once("ready-to-show", () => setImmediate(runBackfill));
+    setTimeout(runBackfill, 2000);
   } else {
-    backfillStarterKit();
+    runBackfill();
   }
 
   if (host && mainWindow) {

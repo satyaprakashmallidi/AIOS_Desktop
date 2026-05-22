@@ -736,6 +736,14 @@ function App() {
         refreshWorkspace().catch(() => undefined);
         return;
       }
+      // Main process broadcasts this when backfillStarterKit healed a missing
+      // or partial INFRA_DIR (module-installs/, .claude/, reference/). Refresh
+      // immediately so the user doesn't have to wait for the 60s polling tick
+      // to see "Source missing" flip to the correct module status.
+      if (event.event === "workspace_backfilled") {
+        refreshWorkspace().catch(() => undefined);
+        return;
+      }
       // Stream deltas are handled at the App level (not CommandScreen) so the
       // user can navigate to another page mid-response without losing it —
       // setSessions keeps writing into the matching message by streamId even
