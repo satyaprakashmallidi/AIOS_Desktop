@@ -9,9 +9,11 @@
 // App.tsx branches into ControlApp (a minimal wrapper that mounts only
 // the VoiceControlPanel) instead of the full sidebar app.
 
-import { BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, screen } from "electron";
 import * as path from "node:path";
 import { getBubbleBounds, onBubbleMove } from "./control-bubble";
+
+const isMac = process.platform === "darwin";
 
 // Sized to feel like a chat tooltip drawer beneath the bubble — small
 // enough to read at a glance, scrolls internally for long transcripts.
@@ -304,18 +306,20 @@ export function prepareControlPopupForMic(): void {
     popupWindow.setAlwaysOnTop(true, "floating");
   } catch { /* non-fatal — level swap not strictly required on Windows */ }
   try {
-    // Mac NSPanel non-activating windows are SHOWN via showInactive(),
-    // which means the window isn't the "key window" — and Chromium's
-    // getUserMedia permission policy needs the requesting webContents
-    // to live in the focused window of the focused app on Mac.
-    //
-    // BrowserWindow.focus() bridges to [NSWindow makeKeyAndOrderFront:]
-    // on Mac which makes a non-activating NSPanel key WITHOUT
-    // activating AIOS as the foreground app. webContents.focus() alone
-    // doesn't bridge to that AppKit call — it only sets the renderer's
-    // internal focus state, which isn't sufficient for TCC. We call
-    // both here: BrowserWindow.focus() for the OS-level key state,
-    // then webContents.focus() for the renderer.
+    // CRITICAL on Mac: the popup is `type: "panel"` (non-activating
+    // NSPanel). popupWindow.focus() bridges to [NSWindow
+    // makeKeyAndOrderFront:] which makes the panel key, but does NOT
+    // activate AIOS as the foreground Cocoa app — the user's previous
+    // app (Safari, Finder, whatever) stays in front. macOS's TCC mic
+    // permission dialog only appears in front when the requesting app
+    // is the active foreground app. Without app.focus({ steal: true })
+    // (which bridges to [NSApp activateIgnoringOtherApps:YES]), the
+    // dialog either never appears or hides behind the other app and
+    // the getUserMedia call silently fails. THIS is what's been
+    // breaking voice on Mac since the popup was introduced.
+    if (isMac) {
+      try { app.focus({ steal: true }); } catch { /* non-fatal */ }
+    }
     popupWindow.focus();
     popupWindow.webContents.focus();
   } catch { /* non-fatal */ }

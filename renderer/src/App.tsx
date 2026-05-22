@@ -48,6 +48,7 @@ import { ControlApp } from "./screens/ControlApp";
 import { BubbleApp } from "./screens/BubbleApp";
 import { CursorOverlayApp } from "./screens/CursorOverlayApp";
 import { DailyBriefModal } from "./screens/DailyBriefModal";
+import { MacPermissionsModal } from "./components/MacPermissionsModal";
 import type {
   ChatSession,
   ClaudeStatus,
@@ -191,6 +192,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [briefStatus, setBriefStatus] = useState<DailyBriefStatus | null>(null);
   const [briefDismissed, setBriefDismissed] = useState(false);
+  const [showMacPermissions, setShowMacPermissions] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Default to "light" on first launch — the inline boot splash in index.html
@@ -601,103 +603,24 @@ function App() {
     window.aios?.window?.onShortcutPreferences?.(() => setScreen("settings"));
   }, []);
 
-  // Mac-only FIRST-LAUNCH permissions kick-off. No AIOS-side UI;
-  // macOS owns every user-facing dialog/Settings pane. We chain the
-  // 4 permission requests SEQUENTIALLY — each one only fires after
-  // the user has responded to the previous one (or 60s timeout).
+  // Mac-only first-launch permissions modal. The MacPermissionsModal
+  // (rendered below) walks the user through the 4 macOS TCC permissions
+  // ONE AT A TIME, gated by an explicit "Grant" or "Skip" click for each.
+  // No native dialog or Settings pane fires until the user clicks Grant.
+  // Replaces the v0.2.18 auto-firing chain that triggered all 4 native
+  // dialogs back-to-back without any AIOS-side context — felt
+  // overwhelming on first boot.
   //
-  // Order:
-  //   1. Microphone     — macOS auto-prompts. Poll status; advance
-  //                       when it leaves "not-determined".
-  //   2. Accessibility  — AXIsProcessTrustedWithOptions(prompt=true)
-  //                       shows the "Open System Preferences" dialog.
-  //                       User ticks the box in Settings → status
-  //                       becomes "granted". Advance on grant OR
-  //                       60s timeout (user may not relaunch yet).
-  //   3. Screen Recording — same flow as Accessibility.
-  //   4. Automation     — first AppleScript fire shows the prompt.
-  //                       We can't detect grant (no public API),
-  //                       so trigger and move on without polling.
-  //
-  // Marked done in localStorage after the chain completes — never
-  // asked again on subsequent launches.
+  // Marked done in localStorage when the modal closes (Finish, Skip-all,
+  // X dismiss, or Escape) — never re-asked on subsequent launches. Users
+  // can still grant any missed permission via System Settings whenever
+  // they want.
   useEffect(() => {
     if (!workspace) return;
     if (workspace.platform !== "darwin") return;
     if (typeof localStorage === "undefined") return;
     if (localStorage.getItem("aios.macPermissionsAsked.v1") === "1") return;
-
-    let cancelled = false;
-    type PermSnap = { microphone: string; screenRecording: string; accessibility: string; automation: string; available: boolean };
-    const getStatus = async (): Promise<PermSnap | null> => {
-      try { return await invoke<PermSnap>("mac_check_permissions"); }
-      catch { return null; }
-    };
-    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-    async function chain() {
-      // Mark asked immediately so a re-render / HMR doesn't re-fire
-      // the whole chain. Even if the user kills the app mid-chain
-      // we treat it as "asked" — they can grant any missed permission
-      // later through macOS System Settings directly.
-      try { localStorage.setItem("aios.macPermissionsAsked.v1", "1"); } catch { /* ignore */ }
-
-      const PER_PERMISSION_TIMEOUT_MS = 60_000;
-      const POLL_INTERVAL_MS = 800;
-
-      type Step = { kind: "microphone" | "accessibility" | "screenRecording" | "automation"; wait: boolean };
-      const steps: Step[] = [
-        { kind: "microphone", wait: true },
-        { kind: "accessibility", wait: true },
-        { kind: "screenRecording", wait: true },
-        // Automation has no detectable grant state — fire and move on.
-        { kind: "automation", wait: false },
-      ];
-
-      for (const step of steps) {
-        if (cancelled) return;
-        const before = await getStatus();
-        if (!before?.available) return;
-        const initial = before[step.kind];
-
-        try {
-          await invoke("mac_request_permission", { kind: step.kind });
-        } catch {
-          // permission API failed — just move to the next, the user
-          // can grant later via macOS System Settings if they want.
-          continue;
-        }
-
-        if (!step.wait) {
-          // Small breather so the system dialog can paint before the
-          // next request fires.
-          await wait(1200);
-          continue;
-        }
-
-        // Poll until status leaves the initial value (user responded)
-        // OR until the per-permission timeout fires. A response of
-        // "denied" still counts as a response — we don't loop forever
-        // hoping the user changes their mind.
-        const deadline = Date.now() + PER_PERMISSION_TIMEOUT_MS;
-        while (!cancelled && Date.now() < deadline) {
-          await wait(POLL_INTERVAL_MS);
-          const snap = await getStatus();
-          if (!snap?.available) break;
-          const current = snap[step.kind];
-          // Mic transitions: not-determined → granted/denied
-          // Screen / Accessibility transitions: denied → granted
-          //   (denied is the "default-not-asked" state for these,
-          //    because there's no not-determined value — the macOS
-          //    APIs return true/false only)
-          if (current !== initial) break;
-          if (current === "granted") break;
-        }
-      }
-    }
-
-    void chain();
-    return () => { cancelled = true; };
+    setShowMacPermissions(true);
   }, [workspace?.platform]);
 
   // Toggle body.window-hidden so all CSS animations pause when the window is
@@ -1206,6 +1129,14 @@ function App() {
         onConfirm={handleConfirmDeleteThread}
         onCancel={() => setConfirmDeleteThreadId(null)}
       />
+      {showMacPermissions ? (
+        <MacPermissionsModal
+          onClose={() => {
+            try { localStorage.setItem("aios.macPermissionsAsked.v1", "1"); } catch { /* ignore */ }
+            setShowMacPermissions(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

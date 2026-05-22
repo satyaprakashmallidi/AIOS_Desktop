@@ -10276,3 +10276,221 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.85); }
 }
+
+/* === Mac permissions modal === */
+/* Paced single-permission-at-a-time first-launch modal. Replaces the old
+   auto-firing useEffect; renders only on Mac, only on first launch.
+   No backdrop-filter blur (CLAUDE.md hard rule — would stutter over
+   anything underneath). Editorial single-column layout matching the
+   onboarding v2 design vocabulary. */
+.mac-permissions-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(13, 13, 13, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: macPermissionsFade 180ms ease-out;
+}
+@keyframes macPermissionsFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.mac-permissions-card {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--sage-line);
+  border-radius: 22px;
+  padding: 36px 36px 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.mac-permissions-dismiss {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.mac-permissions-dismiss:hover {
+  background: var(--sage-soft);
+  color: var(--ink);
+}
+.mac-permissions-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+.mac-permissions-eyebrow-rule {
+  display: inline-block;
+  width: 28px;
+  height: 1px;
+  background: var(--sage);
+  opacity: 0.6;
+}
+.mac-permissions-title {
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--ink);
+}
+.mac-permissions-title-italic {
+  font-family: "Instrument Serif", "Geist", serif;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--sage);
+  margin-right: 4px;
+}
+.mac-permissions-body {
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.mac-permissions-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.mac-permissions-status.is-pending {
+  background: var(--sage-soft);
+  color: var(--ink-soft);
+  border-color: var(--sage-line);
+}
+.mac-permissions-status.is-requesting {
+  background: rgba(229, 165, 76, 0.12);
+  color: #b97a2f;
+  border-color: rgba(229, 165, 76, 0.32);
+}
+[data-theme="dark"] .mac-permissions-status.is-requesting {
+  color: #e5a54c;
+}
+.mac-permissions-status.is-granted {
+  background: rgba(95, 138, 110, 0.14);
+  color: #2f6f48;
+  border-color: rgba(95, 138, 110, 0.32);
+}
+[data-theme="dark"] .mac-permissions-status.is-granted {
+  color: #9bd0a8;
+}
+.mac-permissions-status.is-denied,
+.mac-permissions-status.is-skipped {
+  background: rgba(170, 80, 80, 0.10);
+  color: #a14747;
+  border-color: rgba(170, 80, 80, 0.24);
+}
+[data-theme="dark"] .mac-permissions-status.is-denied,
+[data-theme="dark"] .mac-permissions-status.is-skipped {
+  color: #d99a9a;
+}
+.mac-permissions-status-spin {
+  animation: macPermissionsSpin 1s linear infinite;
+}
+@keyframes macPermissionsSpin {
+  to { transform: rotate(360deg); }
+}
+.mac-permissions-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+.mac-permissions-grant {
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease, opacity 140ms ease;
+}
+.mac-permissions-grant:hover:not(:disabled) {
+  background: var(--ink-soft);
+}
+.mac-permissions-grant:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.mac-permissions-grant:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.mac-permissions-skip {
+  font-family: "Geist", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--sage-line);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.mac-permissions-skip:hover {
+  background: var(--sage-soft);
+  color: var(--ink);
+  border-color: var(--sage);
+}
+.mac-permissions-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  justify-content: center;
+}
+.mac-permissions-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sage-line);
+  transition: background 160ms ease, transform 160ms ease;
+}
+.mac-permissions-dot.is-active {
+  background: var(--sage);
+  transform: scale(1.4);
+}
+.mac-permissions-dot.is-done {
+  background: var(--sage);
+  opacity: 0.55;
+}

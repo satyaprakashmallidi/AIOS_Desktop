@@ -317,6 +317,13 @@ export function VoiceControlPanel({
     //      getUserMedia rejected by some macOS versions.
     if (popupMode) {
       try { await invoke("control_panel_prepare_mic", {}); } catch { /* non-fatal */ }
+      // Give macOS / Chromium ~120ms to propagate the app-activation +
+      // window-focus change (from prepareControlPopupForMic, which
+      // calls app.focus({steal:true}) and popupWindow.focus() on Mac)
+      // before requesting the mic. Without this, on cold Mac launches
+      // getUserMedia fires while Chromium still thinks the popup
+      // webContents isn't the active frame and TCC silently rejects.
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
     }
 
     let stream: MediaStream;
@@ -326,7 +333,18 @@ export function VoiceControlPanel({
       if (popupMode) {
         try { await invoke("control_panel_release_mic", {}); } catch { /* non-fatal */ }
       }
-      setPhase({ kind: "error", message: err instanceof Error ? err.message : "Microphone permission denied." });
+      const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || "");
+      const name = err instanceof Error ? err.name : "";
+      // Map Chromium's mic-permission rejection codes to actionable text
+      // on Mac. The bare err.message ("Permission denied" / "NotAllowed
+      // Error") tells the user nothing about how to recover. Same hint
+      // as the silence-detection path further down — single source of
+      // truth for "go to System Settings".
+      const macHint = "Open System Settings → Privacy & Security → Microphone, enable AIOS Desktop, then quit AIOS (Cmd+Q) and reopen so the audio pipeline picks up the permission.";
+      const message = isMac && (name === "NotAllowedError" || name === "SecurityError")
+        ? `Microphone permission denied. ${macHint}`
+        : err instanceof Error ? err.message : "Microphone permission denied.";
+      setPhase({ kind: "error", message });
       return;
     }
     audioStreamRef.current = stream;
