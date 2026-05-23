@@ -331,6 +331,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ON tasks(status, priority DESC, created_at);
         CREATE INDEX IF NOT EXISTS idx_tasks_agent
             ON tasks(agent_id, status);
+
+        CREATE TABLE IF NOT EXISTS import_markers (
+            folder_name TEXT PRIMARY KEY,
+            marked_at   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS linked_folders (
+            absolute_path TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            added_at      TEXT NOT NULL
+        );
         """
     )
     conn.execute("INSERT OR IGNORE INTO onboarding (id, current_step, answers) VALUES (1, 0, '{}')")
@@ -1446,6 +1457,148 @@ def list_connector_status() -> dict[str, Any]:
             "label": label if label else None,
         }
     return {"connectors": statuses}
+
+
+def mark_import_folder(folder_name: str) -> dict[str, Any]:
+    """Mark an import folder as available for @mention in chat. Idempotent —
+    re-marking refreshes marked_at. Returns the row state after the write."""
+    name = (folder_name or "").strip()
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError("Invalid folder name")
+    marked_at = utc_now()
+    with closing(connect()) as conn:
+        conn.execute(
+            "INSERT INTO import_markers (folder_name, marked_at) VALUES (?, ?) "
+            "ON CONFLICT(folder_name) DO UPDATE SET marked_at = excluded.marked_at",
+            (name, marked_at),
+        )
+        conn.commit()
+    return {"name": name, "isMarked": True, "markedAt": marked_at}
+
+
+def unmark_import_folder(folder_name: str) -> dict[str, Any]:
+    """Remove the @mention marker for a folder. Safe to call when the row is
+    already absent — returns the same shape either way."""
+    name = (folder_name or "").strip()
+    if not name:
+        raise ValueError("Folder name is required")
+    with closing(connect()) as conn:
+        conn.execute("DELETE FROM import_markers WHERE folder_name = ?", (name,))
+        conn.commit()
+    return {"name": name, "isMarked": False, "markedAt": None}
+
+
+def list_marked_import_folders() -> list[dict[str, Any]]:
+    """Return marked import folders sorted by most-recently-marked first.
+    Skips ghosts: if the folder was deleted on disk, we drop the row and
+    don't surface it. Cleanup is best-effort — fail-quiet if delete races."""
+    root = workspace_root() / "context" / "import"
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT folder_name, marked_at FROM import_markers ORDER BY marked_at DESC"
+        ).fetchall()
+        ghosts: list[str] = []
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            name = row["folder_name"]
+            target = root / name
+            if not target.exists() or not target.is_dir():
+                ghosts.append(name)
+                continue
+            result.append({
+                "name": name,
+                "absolutePath": str(target.resolve()),
+                "markedAt": row["marked_at"],
+            })
+        if ghosts:
+            try:
+                conn.executemany(
+                    "DELETE FROM import_markers WHERE folder_name = ?",
+                    [(n,) for n in ghosts],
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+    return result
+
+
+def link_folder(absolute_path: str, display_name: str | None = None) -> dict[str, Any]:
+    """Register an on-disk folder (anywhere outside the workspace) so it shows
+    up on the Imports page and in the chat @ palette. The folder is referenced
+    by absolute path — no copy happens, Claude reaches into it lazily via the
+    --add-dir flag at run_task time."""
+    raw = (absolute_path or "").strip()
+    if not raw:
+        raise ValueError("absolute_path is required")
+    # Best-effort existence check at link time; ghosts are pruned on read.
+    if not os.path.isdir(raw):
+        raise ValueError(f"Folder does not exist: {raw}")
+    segments = [seg for seg in raw.replace("\\", "/").split("/") if seg]
+    fallback = segments[-1] if segments else raw
+    name = (display_name or "").strip() or fallback
+    added_at = utc_now()
+    with closing(connect()) as conn:
+        conn.execute(
+            "INSERT INTO linked_folders (absolute_path, name, added_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(absolute_path) DO UPDATE SET name = excluded.name, added_at = excluded.added_at",
+            (raw, name, added_at),
+        )
+        conn.commit()
+    return {"absolutePath": raw, "name": name, "addedAt": added_at}
+
+
+def unlink_folder(absolute_path: str) -> dict[str, Any]:
+    raw = (absolute_path or "").strip()
+    if not raw:
+        raise ValueError("absolute_path is required")
+    with closing(connect()) as conn:
+        conn.execute("DELETE FROM linked_folders WHERE absolute_path = ?", (raw,))
+        conn.commit()
+    return {"absolutePath": raw, "removed": True}
+
+
+def list_linked_folders() -> list[dict[str, Any]]:
+    """Return picked-on-disk folders sorted by most-recently-added first.
+    Prunes rows whose path no longer exists — keeps the Imports page honest
+    when external drives are ejected or folders are deleted outside the app."""
+    with closing(connect()) as conn:
+        rows = conn.execute(
+            "SELECT absolute_path, name, added_at FROM linked_folders ORDER BY added_at DESC"
+        ).fetchall()
+        ghosts: list[str] = []
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            ap = row["absolute_path"]
+            try:
+                exists = os.path.isdir(ap)
+            except OSError:
+                exists = False
+            if not exists:
+                ghosts.append(ap)
+                continue
+            result.append({
+                "absolutePath": ap,
+                "name": row["name"],
+                "addedAt": row["added_at"],
+            })
+        if ghosts:
+            try:
+                conn.executemany(
+                    "DELETE FROM linked_folders WHERE absolute_path = ?",
+                    [(p,) for p in ghosts],
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+    return result
+
+
+def is_import_folder_marked(folder_name: str) -> bool:
+    with closing(connect()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM import_markers WHERE folder_name = ?", (folder_name,)
+        ).fetchone()
+    return row is not None
 
 
 def claude_settings_path() -> Path:

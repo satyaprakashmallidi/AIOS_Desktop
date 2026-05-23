@@ -3,9 +3,11 @@ import {
   Bot,
   ChevronLeft,
   Folder,
+  FolderOpen,
   FolderPlus,
   Inbox,
   Loader2,
+  Star,
   Trash2,
   Upload,
   X
@@ -27,6 +29,19 @@ interface ImportFolder {
   fileCount: number;
   totalSize: number;
   modifiedAt: string;
+  // True when the user has starred this folder so it appears in the chat
+  // composer's @ palette. Toggled via toggle_import_marker.
+  isMarked?: boolean;
+}
+
+// Folder that lives anywhere on the user's filesystem and was picked via the
+// "Pick folder" button — referenced by absolute path, never copied. Always
+// available for @-mention in chat (linking IS the opt-in), unlike local
+// import folders which need to be starred explicitly.
+interface LinkedFolder {
+  absolutePath: string;
+  name: string;
+  addedAt: string;
 }
 
 const TEXT_EXTENSIONS = new Set([
@@ -75,6 +90,7 @@ export function ImportsScreen({
   onAskClaude: (prompt: string) => void;
 }) {
   const [folders, setFolders] = useState<ImportFolder[]>([]);
+  const [linkedFolders, setLinkedFolders] = useState<LinkedFolder[]>([]);
   const [looseFiles, setLooseFiles] = useState<ImportFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -85,9 +101,13 @@ export function ImportsScreen({
 
   async function refresh() {
     try {
-      const result = await invoke<{ folders: ImportFolder[]; entries: ImportFile[] }>("list_imports");
-      setFolders(result?.folders ?? []);
-      setLooseFiles(result?.entries ?? []);
+      const [importsRes, linkedRes] = await Promise.all([
+        invoke<{ folders: ImportFolder[]; entries: ImportFile[] }>("list_imports"),
+        invoke<{ folders: LinkedFolder[] }>("list_linked_folders"),
+      ]);
+      setFolders(importsRes?.folders ?? []);
+      setLooseFiles(importsRes?.entries ?? []);
+      setLinkedFolders(linkedRes?.folders ?? []);
     } catch (error) {
       flashStatus(error instanceof Error ? error.message : "Failed to load imports");
     } finally {
@@ -96,6 +116,16 @@ export function ImportsScreen({
   }
 
   useEffect(() => { refresh(); }, []);
+
+  // Keep this page in sync when other surfaces (chat composer @-mentions,
+  // workspace events) mutate the linked-folder table.
+  useEffect(() => {
+    const unsubscribe = window.aios.onHostEvent((event) => {
+      const e = event as { event?: string } | null;
+      if (e?.event === "imports_changed") refresh();
+    });
+    return () => unsubscribe();
+  }, []);
 
   function flashStatus(message: string) {
     setStatus(message);
@@ -169,6 +199,68 @@ export function ImportsScreen({
     }
   }
 
+  // "Pick folder" button — opens the native OS folder picker via the main
+  // process, then registers the picked path so it appears as a card on this
+  // page AND becomes mentionable in the chat @ palette.
+  async function pickAndLinkFolder() {
+    setBusy(true);
+    try {
+      const pick = await invoke<{ canceled: boolean; path: string | null; requiresTccPrompt: boolean }>(
+        "pick_folder"
+      );
+      if (!pick || pick.canceled || !pick.path) return;
+      const absolutePath = pick.path;
+      const segments = absolutePath.split(/[\\/]/).filter(Boolean);
+      const fallbackName = segments.length ? segments[segments.length - 1] : absolutePath;
+      try {
+        await invoke("link_folder", { absolutePath, name: fallbackName });
+        await refresh();
+        const tccSuffix = pick.requiresTccPrompt
+          ? " — macOS may prompt the first time Claude reads from it"
+          : "";
+        flashStatus(`Linked folder "${fallbackName}"${tccSuffix}`);
+      } catch (error) {
+        flashStatus(error instanceof Error ? error.message : "Failed to link folder");
+      }
+    } catch (error) {
+      flashStatus(error instanceof Error ? error.message : "Folder picker failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlinkFolder(folder: LinkedFolder) {
+    setBusy(true);
+    try {
+      await invoke("unlink_folder", { absolutePath: folder.absolutePath });
+      await refresh();
+      flashStatus(`Removed "${folder.name}" from linked folders`);
+    } catch (error) {
+      flashStatus(error instanceof Error ? error.message : "Failed to remove folder");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleMarker(folder: ImportFolder) {
+    // Optimistic flip — refresh re-confirms with the server (will also catch
+    // the case where the row was nuked by a concurrent delete).
+    const nextMarked = !folder.isMarked;
+    setFolders((cur) =>
+      cur.map((f) => (f.name === folder.name ? { ...f, isMarked: nextMarked } : f))
+    );
+    try {
+      await invoke("toggle_import_marker", { name: folder.name, marked: nextMarked });
+      flashStatus(nextMarked ? `Starred "${folder.name}" for chat` : `Unstarred "${folder.name}"`);
+    } catch (error) {
+      // Roll back on failure so the UI matches reality.
+      setFolders((cur) =>
+        cur.map((f) => (f.name === folder.name ? { ...f, isMarked: !nextMarked } : f))
+      );
+      flashStatus(error instanceof Error ? error.message : "Failed to toggle marker");
+    }
+  }
+
   async function deleteFile(file: ImportFile, folderName: string | null) {
     setBusy(true);
     try {
@@ -199,6 +291,12 @@ export function ImportsScreen({
             <div className="imports-overview">
               <Inbox size={13} />
               <span><strong>{folders.length}</strong> {folders.length === 1 ? "folder" : "folders"}</span>
+              {linkedFolders.length > 0 ? (
+                <>
+                  <span className="imports-overview-dot">·</span>
+                  <span><strong>{linkedFolders.length}</strong> linked</span>
+                </>
+              ) : null}
               {looseFiles.length > 0 ? (
                 <>
                   <span className="imports-overview-dot">·</span>
@@ -238,14 +336,26 @@ export function ImportsScreen({
                 </button>
               </form>
             ) : (
-              <button
-                type="button"
-                className="imports-new-folder-btn imports-new-folder-btn-hero"
-                onClick={() => setCreating(true)}
-              >
-                <FolderPlus size={14} />
-                <span>New folder</span>
-              </button>
+              <div className="imports-hero-actions">
+                <button
+                  type="button"
+                  className="imports-new-folder-btn imports-new-folder-btn-hero is-ghost"
+                  onClick={pickAndLinkFolder}
+                  disabled={busy}
+                  title="Pick a folder anywhere on disk — Claude reads it as project context when @mentioned"
+                >
+                  <FolderOpen size={14} />
+                  <span>Pick folder</span>
+                </button>
+                <button
+                  type="button"
+                  className="imports-new-folder-btn imports-new-folder-btn-hero"
+                  onClick={() => setCreating(true)}
+                >
+                  <FolderPlus size={14} />
+                  <span>New folder</span>
+                </button>
+              </div>
             )}
           </div>
         </header>
@@ -275,12 +385,33 @@ export function ImportsScreen({
                   folder={folder}
                   onOpen={() => setOpenFolder(folder)}
                   onDelete={() => deleteFolder(folder)}
+                  onToggleMarker={() => toggleMarker(folder)}
                   busy={busy}
                 />
               ))}
             </div>
           )}
         </div>
+
+        {linkedFolders.length > 0 ? (
+          <div className="imports-section">
+            <div className="imports-section-row">
+              <h2 className="imports-section-label">Linked folders</h2>
+              <span className="imports-section-sub">On-disk references</span>
+              <span className="imports-section-count">{linkedFolders.length}</span>
+            </div>
+            <div className="imports-folder-grid">
+              {linkedFolders.map((folder) => (
+                <LinkedFolderCard
+                  key={folder.absolutePath}
+                  folder={folder}
+                  busy={busy}
+                  onUnlink={() => unlinkFolder(folder)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {looseFiles.length > 0 ? (
           <div className="imports-section">
@@ -338,15 +469,18 @@ function FolderCard({
   folder,
   onOpen,
   onDelete,
+  onToggleMarker,
   busy
 }: {
   folder: ImportFolder;
   onOpen: () => void;
   onDelete: () => void;
+  onToggleMarker: () => void;
   busy: boolean;
 }) {
+  const marked = !!folder.isMarked;
   return (
-    <article className="import-folder-card">
+    <article className={`import-folder-card ${marked ? "is-marked" : ""}`}>
       <button type="button" className="import-folder-card-main" onClick={onOpen}>
         <div className="import-folder-card-icon"><Folder size={18} /></div>
         <div className="import-folder-card-text">
@@ -361,10 +495,27 @@ function FolderCard({
             ) : null}
             <span className="import-folder-card-dot">·</span>
             <span>{formatDate(folder.modifiedAt)}</span>
+            {marked ? (
+              <>
+                <span className="import-folder-card-dot">·</span>
+                <span className="import-folder-card-marked-hint">@mentionable in chat</span>
+              </>
+            ) : null}
           </div>
         </div>
       </button>
       <div className="import-folder-card-actions" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className={`import-folder-card-btn star ${marked ? "is-active" : ""}`}
+          onClick={onToggleMarker}
+          disabled={busy}
+          title={marked ? "Unmark for chat @mention" : "Mark for chat @mention"}
+          aria-label={marked ? "Unmark folder for chat" : "Mark folder for chat"}
+          aria-pressed={marked}
+        >
+          <Star size={13} fill={marked ? "currentColor" : "none"} strokeWidth={marked ? 1.5 : 1.75} />
+        </button>
         <button
           type="button"
           className="import-folder-card-btn danger"
@@ -372,6 +523,45 @@ function FolderCard({
           disabled={busy}
           title="Delete folder"
           aria-label="Delete folder"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function LinkedFolderCard({
+  folder,
+  busy,
+  onUnlink,
+}: {
+  folder: LinkedFolder;
+  busy: boolean;
+  onUnlink: () => void;
+}) {
+  return (
+    <article className="import-folder-card is-linked">
+      <div className="import-folder-card-main is-linked">
+        <div className="import-folder-card-icon"><FolderOpen size={18} /></div>
+        <div className="import-folder-card-text">
+          <strong title={folder.absolutePath}>{folder.name}</strong>
+          <span className="import-folder-card-path" title={folder.absolutePath}>
+            {folder.absolutePath}
+          </span>
+          <span className="import-folder-card-hint">
+            @mentionable in chat · added {formatDate(folder.addedAt)}
+          </span>
+        </div>
+      </div>
+      <div className="import-folder-card-actions" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="import-folder-card-btn danger"
+          onClick={onUnlink}
+          disabled={busy}
+          title="Remove this linked folder"
+          aria-label="Remove linked folder"
         >
           <Trash2 size={13} />
         </button>

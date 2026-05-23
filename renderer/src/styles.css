@@ -2695,7 +2695,7 @@ body.is-mac .sidebar-brand {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 12px;
   /* Big right padding so the scrollbar lives in a gutter, not flush against the message card */
   padding: 14px 18px 18px 4px;
   scrollbar-width: none;
@@ -2831,7 +2831,7 @@ body.is-mac .sidebar-brand {
   grid-template-columns: 32px minmax(0, 1fr);
   column-gap: 14px;
   align-self: stretch;
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .aios-message-meta {
@@ -2871,19 +2871,31 @@ body.is-mac .sidebar-brand {
 }
 
 .aios-message.assistant .aios-message-body {
-  padding: 22px 26px;
+  padding: 14px 18px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.55;
   color: var(--ink);
   box-shadow: var(--shadow-sm);
 }
 
 .aios-message.assistant .message-actions {
-  margin-top: 6px;
+  margin-top: 0;
   padding-left: 4px;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 140ms var(--ease-out), opacity 140ms var(--ease-out), margin-top 140ms var(--ease-out);
+  pointer-events: none;
+}
+.aios-message.assistant:hover .message-actions,
+.aios-message.assistant:focus-within .message-actions {
+  margin-top: 6px;
+  max-height: 32px;
+  opacity: 0.85;
+  pointer-events: auto;
 }
 
 /* Attachment chips — surfaced under an assistant message when a plan or output
@@ -2958,10 +2970,10 @@ body.is-mac .sidebar-brand {
 .aios-message-body li {
   margin: 0;
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.55;
   color: var(--ink-soft);
 }
-.aios-message-body p + p { margin-top: 12px; }
+.aios-message-body p + p { margin-top: 8px; }
 
 /* Markdown — clean, calm, restrained. Apply to BOTH .aios-markdown wrapper
    AND any direct h* inside .aios-message-body, in case the wrapper isn't there. */
@@ -3221,6 +3233,11 @@ body.is-mac .sidebar-brand {
   background: rgba(61, 90, 74, 0.08);
   color: var(--sage);
   box-shadow: inset 0 0 0 1px rgba(61, 90, 74, 0.16);
+}
+.aios-mention-token.is-folder {
+  background: rgba(61, 90, 74, 0.10);
+  color: var(--sage);
+  box-shadow: inset 0 0 0 1px rgba(61, 90, 74, 0.20);
 }
 
 .aios-composer-input-line {
@@ -3603,6 +3620,104 @@ body.is-mac .sidebar-brand {
 .aios-model-option > svg {
   color: var(--sage);
   flex-shrink: 0;
+}
+
+/* ===== Sources picker — File / Folder popover off the composer underbar ===== */
+.aios-source-picker {
+  position: relative;
+  display: inline-flex;
+}
+.aios-source-picker .aios-composer-action {
+  gap: 6px;
+}
+.aios-source-picker .aios-composer-action > svg:last-child {
+  transition: transform var(--duration-base) var(--ease-out);
+  opacity: 0.7;
+}
+.aios-source-picker .aios-composer-action[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+.aios-source-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 260px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  animation: aios-model-menu-in 160ms var(--ease-out);
+}
+.aios-source-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+  color: var(--ink);
+}
+.aios-source-menu-item:hover { background: var(--surface-soft); }
+.aios-source-menu-item > svg {
+  color: var(--sage);
+  flex-shrink: 0;
+}
+.aios-source-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.aios-source-menu-text > strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.aios-source-menu-text > span {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+/* Folder-attachment chip variant + Mac TCC hint */
+.aios-attachment-chip.is-folder {
+  border-color: rgba(61, 90, 74, 0.35);
+  background: rgba(61, 90, 74, 0.06);
+}
+.aios-attachment-chip.is-folder svg:first-child {
+  color: var(--sage);
+}
+.aios-attachment-chip.needs-tcc {
+  border-color: rgba(218, 165, 32, 0.45);
+  background: rgba(218, 165, 32, 0.08);
+}
+.aios-attachment-tcc {
+  font-size: 10px;
+  font-style: italic;
+  color: rgba(140, 95, 0, 0.95);
+  margin-left: 2px;
+}
+
+/* @-palette: folder mention row visual parity with agent/connector rows */
+.aios-palette-avatar.is-folder {
+  background: rgba(61, 90, 74, 0.12);
+  color: var(--sage);
+}
+.aios-palette-item.is-folder .aios-palette-avatar { background: rgba(61, 90, 74, 0.12); color: var(--sage); }
+.aios-palette-group.is-folder {
+  background: rgba(61, 90, 74, 0.12);
+  color: var(--sage);
 }
 
 /* ===== Sidebar quick action — primary "+ New chat" ===== */
@@ -4808,7 +4923,7 @@ body.is-mac .sidebar-brand {
 }
 
 /* ===== Shared markdown ramp (used in Plans / Outputs / Context previews) ===== */
-.aios-markdown { font-family: var(--font-body); font-size: 14px; line-height: 1.65; color: var(--ink-soft); }
+.aios-markdown { font-family: var(--font-body); font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
 .aios-markdown > *:first-child { margin-top: 0; }
 .aios-markdown > *:last-child { margin-bottom: 0; }
 .aios-markdown h1, .aios-markdown h2, .aios-markdown h3, .aios-markdown h4 {
@@ -7779,7 +7894,100 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 }
 .import-folder-card-btn:hover { background: var(--surface); color: var(--ink); }
 .import-folder-card-btn.danger:hover { background: rgba(220, 38, 38, 0.08); color: var(--danger); border-color: transparent; }
+.import-folder-card-btn.star:hover { background: rgba(61, 90, 74, 0.08); color: var(--sage); }
+.import-folder-card-btn.star.is-active { color: var(--sage); background: rgba(61, 90, 74, 0.12); }
+.import-folder-card-btn.star.is-active:hover { background: rgba(61, 90, 74, 0.18); }
 .import-folder-card-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.import-folder-card.is-marked { border-color: rgba(61, 90, 74, 0.35); }
+.import-folder-card.is-linked { border-color: rgba(61, 90, 74, 0.35); background: rgba(61, 90, 74, 0.03); }
+.import-folder-card.is-linked .import-folder-card-icon { color: var(--sage); }
+.import-folder-card-main.is-linked {
+  cursor: default;
+  text-align: left;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 14px;
+  padding: 16px 18px;
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+}
+.import-folder-card-main.is-linked .import-folder-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.import-folder-card-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gray-500);
+  word-break: break-all;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.import-folder-card-hint {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--sage);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.import-folder-card-marked-hint {
+  color: var(--sage);
+  font-style: italic;
+  font-family: var(--font-body);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.imports-hero-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.imports-new-folder-btn-hero.is-ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+}
+.imports-new-folder-btn-hero.is-ghost:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+
+/* Toast — bottom-center sage pill, brief feedback for link / unlink / star /
+   create / upload actions. Previously the .imports-toast div had no styles
+   so the message rendered as raw text in the page flow. */
+.imports-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 480px;
+  padding: 10px 18px;
+  background: var(--ink);
+  color: var(--paper, #fafaf7);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  letter-spacing: 0;
+  text-transform: none;
+  pointer-events: none;
+  animation: imports-toast-in 200ms var(--ease-out);
+}
+@keyframes imports-toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
 
 .imports-loose-list {
   display: flex;

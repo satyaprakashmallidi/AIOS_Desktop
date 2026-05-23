@@ -19,6 +19,7 @@ import {
   DollarSign,
   Eraser,
   FileText,
+  Folder,
   FolderOpen,
   HelpCircle,
   Inbox,
@@ -66,7 +67,7 @@ import type { OnboardingState, Screen } from "../ui";
 // known entity. Agents render in sage, connectors render in slate. Other
 // text is emitted as plain text so it renders identically to what's in the
 // textarea underneath (which has transparent text + visible caret).
-type MirrorEntity = { name: string; kind: "agent" | "connector" };
+type MirrorEntity = { name: string; kind: "agent" | "connector" | "folder" };
 function renderHighlightedPrompt(
   text: string,
   entities: MirrorEntity[],
@@ -312,9 +313,27 @@ export function CommandScreen({
   const recognitionRef = useRef<any>(null);
   const activeStreamRef = useRef<{ streamId: string; assistantId: string } | null>(null);
   const [activity, setActivity] = useState<{ tool: string; summary: string } | null>(null);
-  const [attachments, setAttachments] = useState<Array<{ name: string; path: string; size: number }>>([]);
+  // Chat attachments. Files are uploaded into context/import/ and referenced
+  // by workspace-relative path; folders are picked via the OS dialog and
+  // referenced by absolute path (no copy — Claude gets --add-dir scope so it
+  // can Read/Glob/Grep the folder in place). `requiresTccPrompt` is set on
+  // Mac when the picked folder lives under a TCC-protected root.
+  type ChatAttachmentInput = {
+    kind: "file" | "folder";
+    name: string;
+    path: string;
+    size?: number;
+    requiresTccPrompt?: boolean;
+  };
+  const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const sourceMenuRef = useRef<HTMLDivElement | null>(null);
+  // Marked import folders surfaced in the @ palette. Cached at mount and
+  // re-fetched whenever the Python sidecar broadcasts `imports_changed`.
+  type MarkedFolder = { name: string; absolutePath: string; markedAt: string };
+  const [markedFolders, setMarkedFolders] = useState<MarkedFolder[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("default");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -338,8 +357,9 @@ export function CommandScreen({
     const c = (connections || [])
       .filter((conn) => conn.status === "connected")
       .map<MirrorEntity>((conn) => ({ name: conn.label, kind: "connector" }));
-    return [...a, ...c];
-  }, [agents, connections]);
+    const f = markedFolders.map<MirrorEntity>((folder) => ({ name: folder.name, kind: "folder" }));
+    return [...a, ...c, ...f];
+  }, [agents, connections, markedFolders]);
   // When set, the next chat send addresses this agent — its effective_prompt
   // is overlaid as a system prompt so the response comes back in-character.
   // Chip lives above the textarea with an × to remove. One agent at a time.
@@ -386,6 +406,66 @@ export function CommandScreen({
       })
       .catch(() => undefined);
   }, []);
+
+  // Chat-referenceable folder palette source. Combines:
+  //   - starred local import folders (context/import/<name>) from
+  //     list_marked_import_folders
+  //   - on-disk linked folders the user picked via Imports → Pick folder,
+  //     from list_linked_folders
+  // Both kinds carry an absolutePath so the renderer can forward them as
+  // --add-dir to run_task without further translation. Fetched at mount and
+  // refreshed on every imports_changed host event (link/unlink/star/delete).
+  useEffect(() => {
+    let cancelled = false;
+    const reload = async () => {
+      try {
+        const [markedRes, linkedRes] = await Promise.all([
+          invoke<{ folders: MarkedFolder[] }>("list_marked_import_folders"),
+          invoke<{ folders: MarkedFolder[] }>("list_linked_folders"),
+        ]);
+        if (cancelled) return;
+        // Dedup by absolutePath — a linked folder that happens to live under
+        // context/import/ shouldn't appear twice. The marked list wins for
+        // name collisions (preserves the local-import label).
+        const seen = new Set<string>();
+        const combined: MarkedFolder[] = [];
+        for (const f of markedRes?.folders ?? []) {
+          if (!f?.absolutePath || seen.has(f.absolutePath)) continue;
+          seen.add(f.absolutePath);
+          combined.push(f);
+        }
+        for (const f of linkedRes?.folders ?? []) {
+          if (!f?.absolutePath || seen.has(f.absolutePath)) continue;
+          seen.add(f.absolutePath);
+          combined.push({ name: f.name, absolutePath: f.absolutePath, markedAt: (f as any).addedAt ?? "" });
+        }
+        setMarkedFolders(combined);
+      } catch {
+        /* best-effort — leave the previous list in place */
+      }
+    };
+    void reload();
+    const unsubscribe = window.aios.onHostEvent((event) => {
+      const e = event as { event?: string } | null;
+      if (e?.event === "imports_changed") void reload();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  // Click-away to close the Sources file/folder menu.
+  useEffect(() => {
+    if (!sourceMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (sourceMenuRef.current?.contains(target)) return;
+      setSourceMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [sourceMenuOpen]);
 
   // Click-away to close the model dropdown.
   useEffect(() => {
@@ -709,7 +789,7 @@ export function CommandScreen({
   async function uploadAttachments(fileList: FileList) {
     setUploadingAttachment(true);
     try {
-      const next: Array<{ name: string; path: string; size: number }> = [];
+      const next: ChatAttachmentInput[] = [];
       for (const file of Array.from(fileList)) {
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
@@ -724,7 +804,7 @@ export function CommandScreen({
         const path = `imports/chat-${stamp}-${safeName}`;
         try {
           await invoke("write_binary_file", { path, data: base64 });
-          next.push({ name: file.name, path, size: file.size });
+          next.push({ kind: "file", name: file.name, path, size: file.size });
         } catch (err) {
           console.error("Attachment upload failed:", err);
         }
@@ -737,6 +817,39 @@ export function CommandScreen({
     }
   }
 
+  async function pickFolderAttachment() {
+    setSourceMenuOpen(false);
+    setUploadingAttachment(true);
+    try {
+      const result = await invoke<{ canceled: boolean; path: string | null; requiresTccPrompt: boolean }>(
+        "pick_folder"
+      );
+      if (!result || result.canceled || !result.path) return;
+      const absolutePath = result.path;
+      // Derive a basename that works on Win + Mac without depending on Node's
+      // path module in the renderer.
+      const segments = absolutePath.split(/[\\/]/).filter(Boolean);
+      const basename = segments.length ? segments[segments.length - 1] : absolutePath;
+      // Dedup — if the user picks the same folder twice, skip the second add.
+      setAttachments((current) => {
+        if (current.some((a) => a.kind === "folder" && a.path === absolutePath)) return current;
+        return [
+          ...current,
+          {
+            kind: "folder",
+            name: basename,
+            path: absolutePath,
+            requiresTccPrompt: !!result.requiresTccPrompt,
+          },
+        ];
+      });
+    } catch (err) {
+      console.error("Folder picker failed:", err);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
   function removeAttachment(path: string) {
     setAttachments((current) => current.filter((a) => a.path !== path));
   }
@@ -744,15 +857,39 @@ export function CommandScreen({
   async function sendPrompt(text: string) {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || !claude?.found || busy || !activeSession) return;
-    const attachmentBlock = attachments.length > 0
-      ? `Attached files for this message:\n${attachments.map((a) => `- ${a.path}  (${a.name})`).join("\n")}\n\nRead any of these files with the Read tool when relevant to the user's request.\n\n---\n\n`
-      : "";
+    const fileAttachments = attachments.filter((a) => a.kind === "file");
+    const folderAttachments = attachments.filter((a) => a.kind === "folder");
+    // Build a single attachment block listing files and folders separately,
+    // with verbs tuned for each (Read for files, Glob/Read/Grep for folders).
+    const blockLines: string[] = [];
+    if (fileAttachments.length || folderAttachments.length) {
+      blockLines.push("Attached for this message:");
+      for (const f of fileAttachments) blockLines.push(`- file: ${f.name} → ${f.path}`);
+      for (const f of folderAttachments) blockLines.push(`- folder: ${f.name} → ${f.path}`);
+      blockLines.push("");
+      if (fileAttachments.length) {
+        blockLines.push("Files: open with the Read tool when relevant.");
+      }
+      if (folderAttachments.length) {
+        blockLines.push(
+          "Folders: treat as a project directory — use Glob/Read/Grep to understand the contents before answering. Skim broadly first (Glob for the project shape), then drill in. Skip .DS_Store and other hidden files unless directly relevant."
+        );
+      }
+      blockLines.push("", "---", "");
+    }
+    const attachmentBlock = blockLines.join("\n");
     const finalText = attachmentBlock + trimmed;
-    // The prompt already contains @AgentName tokens inline — show it as-is
-    // in the chat bubble. (The MessageMarkdown renderer turns @Name into a
-    // styled mention chip via the same parser used by the composer overlay.)
+    // The prompt already contains @AgentName / @FolderName tokens inline.
+    // Display a compact summary line under the user bubble listing the attached
+    // chips so the user can see what they sent even if the @-mention is the
+    // only inline cue.
+    const chipSummary = attachments.length > 0
+      ? `\n\n📎 ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}: ${attachments
+          .map((a) => (a.kind === "folder" ? `${a.name}/` : a.name))
+          .join(", ")}`
+      : "";
     const displayText = attachments.length > 0
-      ? `${trimmed || "(see attached files)"}\n\n📎 ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}: ${attachments.map((a) => a.name).join(", ")}`
+      ? `${trimmed || "(see attached items)"}${chipSummary}`
       : trimmed;
     const userMessage: ChatMessage = { id: newId("msg"), role: "user", content: displayText, createdAt: new Date().toISOString() };
     const streamId = newId("stream");
@@ -797,8 +934,16 @@ export function CommandScreen({
           baseArgs.systemPrompt = buildChatSystemPrompt(mentionedAgents);
         }
       }
+      // Folder attachments — both manual picks AND folder @mentions — flow
+      // through as --add-dir flags. Dedup defensively so the same folder
+      // can't grow the cmd-line if both code paths added it.
+      const addDirs = Array.from(
+        new Set(folderAttachments.map((a) => a.path).filter((p): p is string => !!p))
+      );
       const taskArgs = command === "run_prime"
         ? baseArgs
+        : addDirs.length > 0
+        ? { ...baseArgs, prompt: finalText, addDirs }
         : { ...baseArgs, prompt: finalText };
       const result = await invoke<{ response: string; sessionId?: string; durationMs?: number; costUsd?: number }>(
         command,
@@ -950,9 +1095,12 @@ export function CommandScreen({
   type MentionItem = {
     id: string;
     label: string;
-    group: "agent" | "connector";
+    group: "agent" | "connector" | "folder";
     detail: string;
     icon: PaletteIcon;
+    // Folders only — absolute on-disk path so commitPaletteSelection can pass
+    // it through to run_task as --add-dir. Undefined for agents/connectors.
+    absolutePath?: string;
   };
 
   const mentions: MentionItem[] = useMemo(() => {
@@ -972,8 +1120,18 @@ export function CommandScreen({
         detail: c.detail || c.status,
         icon: Plug
       }));
-    return [...agentItems, ...connectorItems];
-  }, [agents, connections]);
+    // Marked import folders — surface in the @ palette so the user can attach
+    // a previously-organized folder by name without re-picking it.
+    const folderItems: MentionItem[] = markedFolders.slice(0, 20).map((f) => ({
+      id: `folder:${f.name}`,
+      label: f.name,
+      group: "folder",
+      detail: "Import folder",
+      icon: Folder,
+      absolutePath: f.absolutePath,
+    }));
+    return [...agentItems, ...connectorItems, ...folderItems];
+  }, [agents, connections, markedFolders]);
 
   function detectTrigger(value: string, cursor: number): PaletteState {
     // Slash: only when the entire prompt up to the cursor is "/<query>" with
@@ -1025,7 +1183,7 @@ export function CommandScreen({
     label: string;
     hint: string;
     icon: PaletteIcon;
-    group?: "command" | "agent" | "connector";
+    group?: "command" | "agent" | "connector" | "folder";
   };
 
   const paletteList: PaletteRow[] =
@@ -1069,9 +1227,31 @@ export function CommandScreen({
       const cursor = composerRef.current?.selectionStart ?? prompt.length;
       const before = prompt.slice(0, palette.from);
       const after = prompt.slice(cursor);
-      // Insert the mention as inline text. The overlay-highlighter picks up
-      // `@AgentName` / `@ServiceName` tokens and renders them as styled chips
-      // inside the textarea — supports any number of mentions per message.
+      // Folder picks are represented entirely by the attachment chip — strip
+      // the `@partial` the user typed and don't insert any mention text, so
+      // the composer doesn't end up showing both a chip AND a stray @token.
+      if (item.group === "folder" && item.absolutePath) {
+        const folderPath = item.absolutePath;
+        const folderName = item.label;
+        const next = before + after;
+        const caret = before.length;
+        setPrompt(next);
+        setAttachments((current) => {
+          if (current.some((a) => a.kind === "folder" && a.path === folderPath)) return current;
+          return [
+            ...current,
+            { kind: "folder", name: folderName, path: folderPath },
+          ];
+        });
+        closePalette();
+        requestAnimationFrame(() => {
+          composerRef.current?.setSelectionRange(caret, caret);
+          composerRef.current?.focus();
+        });
+        return;
+      }
+      // Agents / connectors stay as inline @-text — the overlay highlighter
+      // turns them into styled chips inside the textarea.
       const inserted = `@${item.label} `;
       const next = before + inserted + after;
       const caret = (before + inserted).length;
@@ -1360,20 +1540,35 @@ export function CommandScreen({
             />
             {attachments.length > 0 ? (
               <div className="aios-composer-attachments">
-                {attachments.map((att) => (
-                  <span key={att.path} className="aios-attachment-chip" title={att.path}>
-                    <Paperclip size={11} />
-                    <span className="aios-attachment-name">{att.name}</span>
-                    <button
-                      type="button"
-                      className="aios-attachment-remove"
-                      onClick={() => removeAttachment(att.path)}
-                      aria-label={`Remove ${att.name}`}
+                {attachments.map((att) => {
+                  const isFolder = att.kind === "folder";
+                  const ChipIcon = isFolder ? Folder : Paperclip;
+                  return (
+                    <span
+                      key={att.path}
+                      className={`aios-attachment-chip ${isFolder ? "is-folder" : ""} ${att.requiresTccPrompt ? "needs-tcc" : ""}`}
+                      title={
+                        att.requiresTccPrompt
+                          ? `${att.path} — macOS may prompt you to allow AIOS to read this folder. Click Allow when it appears.`
+                          : att.path
+                      }
                     >
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
+                      <ChipIcon size={11} />
+                      <span className="aios-attachment-name">{isFolder ? `${att.name}/` : att.name}</span>
+                      {att.requiresTccPrompt ? (
+                        <span className="aios-attachment-tcc" aria-hidden="true">macOS will prompt</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="aios-attachment-remove"
+                        onClick={() => removeAttachment(att.path)}
+                        aria-label={`Remove ${att.name}`}
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             ) : null}
             <div className="aios-composer-input-line">
@@ -1384,13 +1579,19 @@ export function CommandScreen({
                   </p>
                   {paletteList.map((item, idx) => {
                     const Icon = item.icon;
+                    const isActive = idx === safePaletteIndex;
                     return (
                       <button
                         key={item.id}
                         type="button"
                         role="option"
-                        aria-selected={idx === safePaletteIndex}
-                        className={`aios-palette-item is-${item.group ?? "command"} ${idx === safePaletteIndex ? "is-active" : ""}`}
+                        ref={isActive
+                          ? (el) => {
+                              if (el) el.scrollIntoView({ block: "nearest" });
+                            }
+                          : undefined}
+                        aria-selected={isActive}
+                        className={`aios-palette-item is-${item.group ?? "command"} ${isActive ? "is-active" : ""}`}
                         onMouseEnter={() => setPaletteIndex(idx)}
                         onMouseDown={(e) => {
                           e.preventDefault();
@@ -1449,16 +1650,52 @@ export function CommandScreen({
               />
             </div>
             <div className="aios-composer-underbar">
-              <button
-                className="aios-composer-action"
-                type="button"
-                onClick={() => attachInputRef.current?.click()}
-                disabled={effectiveBusy || uploadingAttachment}
-                title="Attach files to this message"
-              >
-                {uploadingAttachment ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
-                {uploadingAttachment ? "Uploading…" : "Sources"}
-              </button>
+              <div className="aios-source-picker" ref={sourceMenuRef}>
+                <button
+                  className="aios-composer-action"
+                  type="button"
+                  onClick={() => setSourceMenuOpen((open) => !open)}
+                  disabled={effectiveBusy || uploadingAttachment}
+                  title="Attach files or a folder to this message"
+                  aria-haspopup="menu"
+                  aria-expanded={sourceMenuOpen}
+                >
+                  {uploadingAttachment ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />}
+                  {uploadingAttachment ? "Uploading…" : "Sources"}
+                  <ChevronDown size={11} />
+                </button>
+                {sourceMenuOpen ? (
+                  <div className="aios-source-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="aios-source-menu-item"
+                      onClick={() => {
+                        setSourceMenuOpen(false);
+                        attachInputRef.current?.click();
+                      }}
+                    >
+                      <Paperclip size={13} />
+                      <span className="aios-source-menu-text">
+                        <strong>File</strong>
+                        <span>Upload one or more files</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="aios-source-menu-item"
+                      onClick={pickFolderAttachment}
+                    >
+                      <Folder size={13} />
+                      <span className="aios-source-menu-text">
+                        <strong>Folder</strong>
+                        <span>Pick a folder — Claude reads it like a project</span>
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div className="aios-model-picker">
                 <button
                   ref={modelButtonRef}

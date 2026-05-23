@@ -55,6 +55,13 @@ from workspace import (
     list_daily_briefs,
     mark_brief_seen,
     save_daily_brief,
+    mark_import_folder,
+    unmark_import_folder,
+    list_marked_import_folders,
+    is_import_folder_marked,
+    link_folder,
+    unlink_folder,
+    list_linked_folders,
 )
 
 if hasattr(sys.stdin, "reconfigure"):
@@ -432,6 +439,7 @@ def run_claude(
     session_id: str | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
+    add_dirs: list[str] | None = None,
 ) -> dict[str, Any]:
     path = claude_path or get_setting("claude_path")
     if not path:
@@ -444,6 +452,28 @@ def run_claude(
     # the same tool-call result, dropping identify from ~10s to ~3-4s.
     # Falsy / unset = use the user's default model.
     model_flags = ["--model", model] if model else []
+    # Extra dirs to grant Claude tool scope over — used when the user attaches
+    # a folder in chat or @mentions a marked import folder. Lazy: --add-dir only
+    # grants Read/Glob/Grep permission, it does NOT pre-read the directory, so
+    # even huge folders cost zero tokens until Claude reaches into them. We
+    # silently drop paths that don't exist on disk (e.g. external drive ejected
+    # between attach and send) so the cmd-line stays valid.
+    add_dir_flags: list[str] = []
+    if add_dirs:
+        seen: set[str] = set()
+        for raw in add_dirs:
+            if not isinstance(raw, str):
+                continue
+            stripped = raw.strip()
+            if not stripped or stripped in seen:
+                continue
+            try:
+                if not os.path.isdir(stripped):
+                    continue
+            except OSError:
+                continue
+            seen.add(stripped)
+            add_dir_flags.extend(["--add-dir", stripped])
     # Force Claude to only use MCP servers AIOS hands it, ignoring claude.ai's
     # first-party connectors. Without this, a user whose Anthropic account has
     # Gmail linked to a different address gets cross-wired data when they ask
@@ -456,8 +486,8 @@ def run_claude(
     # tool-use guardrails. Empty / missing = chat default behavior.
     agent_overlay = ["--append-system-prompt", system_prompt] if system_prompt else []
     attempts = [
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, *add_dir_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, *add_dir_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
     ]
     if stream_id:
         stream_command = [
@@ -468,6 +498,7 @@ def run_claude(
             *composio_hint,
             *agent_overlay,
             *model_flags,
+            *add_dir_flags,
             "--verbose",
             "--output-format",
             "stream-json",
@@ -594,6 +625,7 @@ def list_imports(_args: dict[str, Any]) -> dict[str, Any]:
     root = workspace_root() / "context" / "import"
     folders: list[dict[str, Any]] = []
     files: list[dict[str, Any]] = []
+    marked_names = {m["name"] for m in list_marked_import_folders()}
     if root.exists():
         for child in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if child.is_dir():
@@ -606,6 +638,7 @@ def list_imports(_args: dict[str, Any]) -> dict[str, Any]:
                     "fileCount": len(items),
                     "totalSize": total_size,
                     "modifiedAt": datetime.fromtimestamp(latest, tz=timezone.utc).isoformat(),
+                    "isMarked": child.name in marked_names,
                 })
             elif child.is_file():
                 files.append(_import_entry_dict(child, root))
@@ -651,10 +684,72 @@ def delete_import_folder(args: dict[str, Any]) -> dict[str, Any]:
     if "/" in name or "\\" in name or name.startswith("."):
         raise HostError("BAD_REQUEST", "Invalid folder name.")
     target = workspace_root() / "context" / "import" / name
+    deleted = False
     if target.exists() and target.is_dir():
         shutil.rmtree(target)
-        return {"deleted": True, "name": name}
-    return {"deleted": False, "name": name}
+        deleted = True
+    # Always clean up the marker row — even if the folder was already gone on
+    # disk, we want to keep the SQLite table honest. Cheap, idempotent.
+    try:
+        unmark_import_folder(name)
+    except Exception:
+        pass
+    if deleted:
+        broadcast_event("imports_changed", {"folderName": name, "deleted": True})
+    return {"deleted": deleted, "name": name}
+
+
+def toggle_import_marker(args: dict[str, Any]) -> dict[str, Any]:
+    """Star / unstar an import folder so it appears in the chat composer's
+    @ palette. Idempotent — re-marking refreshes marked_at; unmarking an
+    already-unmarked folder returns the same shape."""
+    name = require_str(args, "name").strip()
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise HostError("BAD_REQUEST", "Invalid folder name.")
+    marked = bool(args.get("marked"))
+    target = workspace_root() / "context" / "import" / name
+    if not target.exists() or not target.is_dir():
+        raise HostError("NOT_FOUND", f"Folder not found: {name}")
+    try:
+        result = mark_import_folder(name) if marked else unmark_import_folder(name)
+    except ValueError as exc:
+        raise HostError("BAD_REQUEST", str(exc))
+    broadcast_event("imports_changed", {"folderName": name, "marked": marked})
+    return result
+
+
+def list_marked_import_folders_handler(_args: dict[str, Any]) -> dict[str, Any]:
+    """Return the set of marked import folders for the chat @ palette. Includes
+    each folder's absolute path so the renderer can forward it to run_task
+    as an --add-dir target without another round-trip."""
+    return {"folders": list_marked_import_folders()}
+
+
+def link_folder_handler(args: dict[str, Any]) -> dict[str, Any]:
+    """Register an arbitrary on-disk folder so it shows up on the Imports
+    page and is mentionable in chat. Reference-by-path only — no copy."""
+    raw = require_str(args, "absolutePath").strip()
+    name = str(args.get("name") or "").strip() or None
+    try:
+        result = link_folder(raw, name)
+    except ValueError as exc:
+        raise HostError("BAD_REQUEST", str(exc))
+    broadcast_event("imports_changed", {"absolutePath": raw, "linked": True})
+    return result
+
+
+def unlink_folder_handler(args: dict[str, Any]) -> dict[str, Any]:
+    raw = require_str(args, "absolutePath").strip()
+    try:
+        result = unlink_folder(raw)
+    except ValueError as exc:
+        raise HostError("BAD_REQUEST", str(exc))
+    broadcast_event("imports_changed", {"absolutePath": raw, "unlinked": True})
+    return result
+
+
+def list_linked_folders_handler(_args: dict[str, Any]) -> dict[str, Any]:
+    return {"folders": list_linked_folders()}
 
 
 def rotate_device_user_id_handler(_args: dict[str, Any]) -> dict[str, Any]:
@@ -815,6 +910,18 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
             "---\n\n"
             f"{prompt}"
         )
+    # Folder context — list of absolute paths the renderer attached either
+    # via the chat Sources → Folder picker, or via an @mention of a marked
+    # import folder. Forwarded as `--add-dir` flags so Claude can Read/Glob
+    # /Grep across each one. We don't validate-or-reject here: run_claude
+    # silently drops missing paths (race-safe), and we want the inline prompt
+    # block to still mention attempted-but-broken folders so Claude can flag.
+    raw_dirs = args.get("addDirs")
+    add_dirs: list[str] = []
+    if isinstance(raw_dirs, list):
+        for entry in raw_dirs:
+            if isinstance(entry, str) and entry.strip():
+                add_dirs.append(entry.strip())
     try:
         return run_claude(
             prompt,
@@ -825,6 +932,7 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
             session_id=str(args.get("sessionId") or "") or None,
             model=str(args.get("model") or "") or None,
             system_prompt=str(args.get("systemPrompt") or "") or None,
+            add_dirs=add_dirs or None,
         )
     finally:
         for p in image_paths:
@@ -1875,6 +1983,11 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
         "list_import_folder": list_import_folder,
         "create_import_folder": create_import_folder,
         "delete_import_folder": delete_import_folder,
+        "toggle_import_marker": toggle_import_marker,
+        "list_marked_import_folders": list_marked_import_folders_handler,
+        "link_folder": link_folder_handler,
+        "unlink_folder": unlink_folder_handler,
+        "list_linked_folders": list_linked_folders_handler,
         "update_claude_mcp": update_claude_mcp,
         "rotate_device_user_id": rotate_device_user_id_handler,
         "list_connector_status": lambda _a: list_connector_status(),

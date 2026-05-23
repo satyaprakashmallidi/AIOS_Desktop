@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -118,6 +118,11 @@
         "NSMicrophoneUsageDescription": "AIOS uses your microphone for voice input in Computer Control.",
         "NSScreenCaptureUsageDescription": "AIOS captures your screen so Computer Control can see what's on screen and act on your voice commands.",
         "NSAppleEventsUsageDescription": "AIOS uses Apple Events to bring the launched app to the foreground after you say 'open <app>' — so the next screenshot reflects the app you asked for.",
+        "NSDocumentsFolderUsageDescription": "AIOS reads folders you attach in chat so Claude can help you with their contents.",
+        "NSDesktopFolderUsageDescription": "AIOS reads folders you attach in chat so Claude can help you with their contents.",
+        "NSDownloadsFolderUsageDescription": "AIOS reads folders you attach in chat so Claude can help you with their contents.",
+        "NSRemovableVolumesUsageDescription": "AIOS reads folders you attach from external drives so Claude can help you with their contents.",
+        "NSNetworkVolumesUsageDescription": "AIOS reads folders you attach from network drives so Claude can help you with their contents.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false
         }

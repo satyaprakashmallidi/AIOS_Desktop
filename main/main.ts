@@ -137,7 +137,8 @@ const mainHandledCommands = new Set<AiosCommand>([
   "control_close_all",
   "control_open_settings",
   "control_panel_prepare_mic",
-  "control_panel_release_mic"
+  "control_panel_release_mic",
+  "pick_folder"
 ]);
 
 // Theme cache lives in userData so the main process can pick the right
@@ -538,6 +539,51 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     }
     shell.showItemInFolder(absolutePath);
     return { ok: true, path: relativePath };
+  }
+
+  if (cmd === "pick_folder") {
+    // Native folder picker for the chat composer Sources → Folder flow.
+    // Reference-by-path (no copy) — we just hand the absolute path back so
+    // run_task can forward it as --add-dir to Claude.
+    //
+    // On Mac we surface a `requiresTccPrompt` hint when the picked folder
+    // lives under a TCC-protected root (Documents / Desktop / Downloads /
+    // iCloud Drive / Volumes). The first time Claude's subprocess Reads a
+    // file inside one of those, macOS will fire a permission prompt; we use
+    // this flag to show a tiny in-chat hint so the user isn't surprised.
+    const isMacPlatform = process.platform === "darwin";
+    const browserWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+    const result = await (browserWindow
+      ? dialog.showOpenDialog(browserWindow, {
+          properties: ["openDirectory"],
+          title: "Pick a folder to attach",
+          buttonLabel: "Attach folder",
+        })
+      : dialog.showOpenDialog({
+          properties: ["openDirectory"],
+          title: "Pick a folder to attach",
+          buttonLabel: "Attach folder",
+        }));
+    if (result.canceled || !result.filePaths.length) {
+      return { canceled: true, path: null, requiresTccPrompt: false };
+    }
+    const folderPath = result.filePaths[0];
+    let requiresTccPrompt = false;
+    if (isMacPlatform) {
+      const home = app.getPath("home");
+      const protectedRoots = [
+        path.join(home, "Documents"),
+        path.join(home, "Desktop"),
+        path.join(home, "Downloads"),
+        path.join(home, "Library", "Mobile Documents"),
+        "/Volumes",
+      ];
+      requiresTccPrompt = protectedRoots.some((root) => {
+        if (!root) return false;
+        return folderPath === root || folderPath.startsWith(`${root}${path.sep}`);
+      });
+    }
+    return { canceled: false, path: folderPath, requiresTccPrompt };
   }
 
   if (cmd === "run_auto_task_now") {
