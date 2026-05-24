@@ -66,3 +66,8 @@ releases:
     features:
       - windows-claude-path-discovery
       - windows-foreground-thread-safety
+
+  - tag: v0.2.37
+    features:
+      - claude-style-chat-bubbles
+      - code-block-lang-header

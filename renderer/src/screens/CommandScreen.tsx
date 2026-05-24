@@ -223,14 +223,16 @@ function MessageActions({ content }: { content: string }) {
   );
 }
 
-const CodeBlock = React.memo(function CodeBlock({ children }: { children?: React.ReactNode }) {
+const CodeBlock = React.memo(function CodeBlock({ children, lang }: { children?: React.ReactNode; lang?: string }) {
   const text = useMemo(() => {
     if (typeof children === "string") return children;
     if (Array.isArray(children)) return children.map((c) => (typeof c === "string" ? c : "")).join("");
     return "";
   }, [children]);
+  // Pass language as a data attribute so CSS can render the header label
+  // without React having to mount an extra element per block.
   return (
-    <div className="code-block-wrapper">
+    <div className="code-block-wrapper" data-lang={lang || undefined}>
       <pre>
         <code>{text}</code>
       </pre>
@@ -245,7 +247,10 @@ const MARKDOWN_COMPONENTS = {
   code({ className, children, ...props }: { className?: string; children?: React.ReactNode }) {
     const isInline = !className;
     if (isInline) return <code {...props}>{children}</code>;
-    return <CodeBlock>{String(children).replace(/\n$/, "")}</CodeBlock>;
+    // ReactMarkdown sets className like "language-python" on fenced blocks
+    // with a hint. Strip the prefix so CSS sees "python".
+    const lang = className?.replace(/^language-/, "") || "";
+    return <CodeBlock lang={lang}>{String(children).replace(/\n$/, "")}</CodeBlock>;
   }
 } as const;
 const MARKDOWN_PLUGINS = [remarkGfm] as const;

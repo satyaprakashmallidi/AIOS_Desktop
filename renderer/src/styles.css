@@ -1049,25 +1049,43 @@ body.is-mac .sidebar-brand {
 
 /* ─── Code Copy Button ─────────────────────────────────────────────────────── */
 .code-block-wrapper { position: relative; }
+/* Always-visible copy button (Claude-style). The hover-only behavior
+   meant users on tablets/touchpads with no hover state never saw it. */
 .copy-code-btn {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
-  height: 26px;
-  padding: 0 10px;
+  height: 24px;
+  padding: 0 9px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-surface);
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--duration-fast);
-  box-shadow: var(--shadow-sm);
+  opacity: 0.65;
+  transition: opacity var(--duration-fast), background var(--duration-fast);
 }
 .code-block-wrapper:hover .copy-code-btn { opacity: 1; }
-.copy-code-btn:hover { background: var(--bg-hover); color: var(--text); }
+.copy-code-btn:hover { background: var(--bg-hover); color: var(--text); opacity: 1; }
+/* Language label shown in top-left of a fenced code block — matches
+   Claude.ai's header treatment. Pure CSS via a content attribute on
+   the wrapper. */
+.code-block-wrapper[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  left: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-soft);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  z-index: 1;
+  pointer-events: none;
+}
+.code-block-wrapper[data-lang] pre { padding-top: 28px !important; }
 
 
 /* ─── Avatar / Role Indicators ─────────────────────────────────────────────── */
@@ -2696,7 +2714,7 @@ body.is-mac .sidebar-brand {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
   /* Big right padding so the scrollbar lives in a gutter, not flush against the message card */
   padding: 14px 18px 18px 4px;
   scrollbar-width: none;
@@ -2829,8 +2847,8 @@ body.is-mac .sidebar-brand {
 
 .aios-message.assistant {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  column-gap: 14px;
+  grid-template-columns: 0 minmax(0, 1fr);
+  column-gap: 0;
   align-self: stretch;
   margin-bottom: 0;
 }
@@ -2871,15 +2889,20 @@ body.is-mac .sidebar-brand {
   grid-column: 2;
 }
 
+/* Claude-style assistant bubble — restraint over decoration.
+   No border, no avatar column, lighter background, tighter padding,
+   line-height 1.5 for cleaner reading.
+   Background is a near-paper tone (1% darker than canvas) so the
+   bubble is delineated by tone alone, not strokes. */
 .aios-message.assistant .aios-message-body {
-  padding: 14px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
   border-radius: var(--radius-lg);
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--ink);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .aios-message.assistant .message-actions {
@@ -3185,13 +3208,13 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
 }
 
+/* Claude-style blockquote — gray rule, no background fill. */
 .aios-message.assistant .aios-markdown blockquote {
   margin: 12px 0;
-  padding: 8px 14px;
-  border-left: 2px solid var(--sage);
-  background: var(--sage-soft);
+  padding: 4px 0 4px 14px;
+  border-left: 2px solid var(--gray-300);
+  background: transparent;
   color: var(--ink-soft);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 .aios-message.assistant .aios-markdown blockquote p { margin: 0; }
 
