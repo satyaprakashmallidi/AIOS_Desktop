@@ -1852,8 +1852,8 @@ export function CommandScreen({
                   className="aios-composer-action"
                   type="button"
                   onClick={() => setSourceMenuOpen((open) => !open)}
-                  disabled={effectiveBusy || uploadingAttachment}
-                  title="Attach files or a folder to this message"
+                  disabled={uploadingAttachment}
+                  title={effectiveBusy ? "Attach files for your queued next message" : "Attach files or a folder to this message"}
                   aria-haspopup="menu"
                   aria-expanded={sourceMenuOpen}
                 >
@@ -1899,10 +1899,9 @@ export function CommandScreen({
                   type="button"
                   className="aios-model-pill"
                   onClick={() => setModelMenuOpen((open) => !open)}
-                  disabled={effectiveBusy}
                   aria-haspopup="menu"
                   aria-expanded={modelMenuOpen}
-                  title="Pick the Claude model for this chat"
+                  title="Pick the Claude model for this chat (applies to queued and next messages)"
                 >
                   <span>{CHAT_MODELS.find((m) => m.id === selectedModel)?.label ?? "Default"}</span>
                   <ChevronDown size={12} />

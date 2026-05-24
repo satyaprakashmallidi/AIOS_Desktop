@@ -87,3 +87,8 @@ releases:
   - tag: v0.2.41
     features:
       - centered-chat-column
+
+  - tag: v0.2.42
+    features:
+      - source-picker-during-busy
+      - model-picker-during-busy
