@@ -83,3 +83,7 @@ releases:
   - tag: v0.2.40
     features:
       - empty-heroes-plans-outputs-briefs
+
+  - tag: v0.2.41
+    features:
+      - centered-chat-column

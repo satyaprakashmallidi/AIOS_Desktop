@@ -2659,14 +2659,22 @@ body.is-mac .sidebar-brand {
   min-width: 0 !important;
 }
 
+/* Centered Claude-style chat column. Max-width ~760px keeps long
+   paragraphs scannable; >900 viewports get whitespace either side
+   instead of edge-to-edge text. */
 .aios-chat-panel {
   width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
   height: 100%;
   padding: 0 32px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 14px;
   min-height: 0;
+}
+@media (max-width: 820px) {
+  .aios-chat-panel { padding: 0 16px; }
 }
 
 .aios-chat-setup {
