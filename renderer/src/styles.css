@@ -3221,6 +3221,64 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
 }
 
+/* Queued-message preview strip above the composer. Shows what's about
+   to send once the current turn finishes. Each chip is removable. */
+.aios-composer-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+.aios-composer-queue-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-500);
+  font-family: var(--font-mono);
+}
+.aios-composer-queue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.aios-composer-queue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--ink);
+  max-width: 280px;
+}
+.aios-composer-queue-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aios-composer-queue-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--gray-500);
+  cursor: pointer;
+}
+.aios-composer-queue-remove:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
 /* Stop button on the activity strip — kills the current Claude
    subprocess via cancel_chat_stream. Subtle: text + icon, no fill. */
 .aios-activity-stop {

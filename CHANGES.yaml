@@ -105,3 +105,7 @@ releases:
   - tag: v0.2.45
     features:
       - cancelled-renders-clean
+
+  - tag: v0.2.46
+    features:
+      - composer-queue-chips

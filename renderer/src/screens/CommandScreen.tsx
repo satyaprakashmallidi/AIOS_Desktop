@@ -1737,6 +1737,32 @@ export function CommandScreen({
             })() }
           </div>
 
+          {pendingQueue.length > 0 ? (
+            <div className="aios-composer-queue" aria-label="Messages queued to send when Claude finishes" data-testid="composer-queue">
+              <span className="aios-composer-queue-label">Queued · sends in order</span>
+              <div className="aios-composer-queue-chips">
+                {pendingQueue.map((q, idx) => {
+                  const preview = q.text.trim().slice(0, 48) + (q.text.length > 48 ? "…" : "");
+                  return (
+                    <span key={`${idx}:${q.text.slice(0, 12)}`} className="aios-composer-queue-chip" title={q.text}>
+                      <span>{preview || "(attachments only)"}</span>
+                      <button
+                        type="button"
+                        className="aios-composer-queue-remove"
+                        onClick={() => {
+                          setPendingQueue((cur) => cur.filter((_, i) => i !== idx));
+                        }}
+                        aria-label="Remove from queue"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <form
             className="aios-composer"
             onSubmit={(event) => {
