@@ -620,6 +620,20 @@ def list_directory(path: str, recursive: bool = False, limit: int = 200) -> dict
     return {"path": path, "entries": _list_files(target, recursive=recursive, limit=limit)}
 
 
+def list_external_directory(path: str, limit: int = 200) -> dict[str, Any]:
+    """List files at an arbitrary absolute path on the user's machine —
+    used to peek inside folder attachments picked from the OS dialog.
+    Bypasses safe_path because the user explicitly granted access by
+    picking the folder. Read-only; refuses to list non-existent or
+    non-directory paths."""
+    target = Path(path).expanduser()
+    if not target.is_absolute():
+        return {"path": path, "entries": [], "error": "Path must be absolute"}
+    if not target.exists() or not target.is_dir():
+        return {"path": path, "entries": [], "error": "Folder not found"}
+    return {"path": str(target), "entries": _list_files(target, recursive=False, limit=limit)}
+
+
 def list_workspace_section(section: str) -> dict[str, Any]:
     mapping = {
         "context": ("context", False),

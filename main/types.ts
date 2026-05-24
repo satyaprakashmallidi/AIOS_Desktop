@@ -15,6 +15,7 @@ export type AiosCommand =
   | "list_workspace_files"
   | "list_workspace_section"
   | "list_directory"
+  | "list_external_directory"
   | "get_recent_workspace_activity"
   | "read_markdown_preview"
   | "list_outputs"

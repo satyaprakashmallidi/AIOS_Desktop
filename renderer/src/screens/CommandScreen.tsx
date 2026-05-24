@@ -332,6 +332,7 @@ export function CommandScreen({
   // queue up follow-ups without waiting for the agent to finish thinking.
   const [pendingQueue, setPendingQueue] = useState<Array<{ text: string; attachments: ChatAttachmentInput[] }>>([]);
   const lastBusyRef = useRef(false);
+  const [previewFolder, setPreviewFolder] = useState<ChatAttachmentInput | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
@@ -1587,12 +1588,15 @@ export function CommandScreen({
                   return (
                     <span
                       key={att.path}
-                      className={`aios-attachment-chip ${isFolder ? "is-folder" : ""} ${att.requiresTccPrompt ? "needs-tcc" : ""}`}
+                      className={`aios-attachment-chip ${isFolder ? "is-folder" : ""} ${att.requiresTccPrompt ? "needs-tcc" : ""} ${isFolder ? "is-clickable" : ""}`}
                       title={
                         att.requiresTccPrompt
                           ? `${att.path} — macOS may prompt you to allow AIOS to read this folder. Click Allow when it appears.`
-                          : att.path
+                          : isFolder ? `${att.path} — click to see what's inside` : att.path
                       }
+                      onClick={isFolder ? () => setPreviewFolder(att) : undefined}
+                      role={isFolder ? "button" : undefined}
+                      tabIndex={isFolder ? 0 : undefined}
                     >
                       <ChipIcon size={11} />
                       <span className="aios-attachment-name">{isFolder ? `${att.name}/` : att.name}</span>
@@ -1602,7 +1606,7 @@ export function CommandScreen({
                       <button
                         type="button"
                         className="aios-attachment-remove"
-                        onClick={() => removeAttachment(att.path)}
+                        onClick={(e) => { e.stopPropagation(); removeAttachment(att.path); }}
                         aria-label={`Remove ${att.name}`}
                       >
                         <X size={11} />
@@ -1795,8 +1799,84 @@ export function CommandScreen({
             </div>
           </form>
       </div>
+      {previewFolder ? (
+        <FolderPreviewModal folder={previewFolder} onClose={() => setPreviewFolder(null)} />
+      ) : null}
     </section>
   );
+}
+
+function FolderPreviewModal({ folder, onClose }: { folder: { name: string; path: string }; onClose: () => void }) {
+  const [entries, setEntries] = useState<Array<{ name: string; path: string; size?: number; modifiedAt?: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<{ entries: Array<{ name: string; path: string; size?: number; modifiedAt?: string }>; error?: string }>(
+      "list_external_directory",
+      { path: folder.path, limit: 200 }
+    )
+      .then((res) => {
+        if (cancelled) return;
+        setEntries(res?.entries ?? []);
+        setError(res?.error ?? null);
+      })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [folder.path]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="detail-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="detail-modal-card folder-preview-card" onClick={(e) => e.stopPropagation()}>
+        <header className="detail-modal-head">
+          <div>
+            <span className="eyebrow">Folder preview</span>
+            <h2>{folder.name}</h2>
+            <p className="folder-preview-path">{folder.path}</p>
+          </div>
+          <button type="button" className="detail-modal-close" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </header>
+        <div className="folder-preview-body">
+          {loading ? (
+            <div className="folder-preview-loading"><Loader2 size={16} className="spin" /> Loading…</div>
+          ) : error ? (
+            <div className="folder-preview-empty">{error}</div>
+          ) : entries.length === 0 ? (
+            <div className="folder-preview-empty">Folder is empty.</div>
+          ) : (
+            <ul className="folder-preview-list">
+              {entries.map((e) => (
+                <li key={e.path}>
+                  <span className="folder-preview-name">{e.name}</span>
+                  {e.size !== undefined ? <span className="folder-preview-size">{formatBytes(e.size)}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <footer className="folder-preview-foot">
+          {entries.length > 0 ? <span>{entries.length} {entries.length === 1 ? "file" : "files"}</span> : null}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function MissingClaude({ claude, onDetect }: { claude: ClaudeStatus | null; onDetect: () => Promise<ClaudeStatus> }) {
