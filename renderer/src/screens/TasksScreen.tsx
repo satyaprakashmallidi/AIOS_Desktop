@@ -268,7 +268,25 @@ export function TasksScreen() {
       </header>
 
       <div className="tasks-v2-body">
-        <KanbanView tasks={filteredTasks} agents={agents} onOpen={openDetails} />
+        {tasks.length === 0 ? (
+          <div className="tasks-v2-empty-hero">
+            <div className="tasks-v2-empty-hero-mark" aria-hidden="true">
+              <Plus size={28} strokeWidth={1.5} />
+            </div>
+            <h2>No tasks yet</h2>
+            <p>Tasks are missions you hand to AIOS agents to run on their own. Create one to see it land in the kanban.</p>
+            <button
+              type="button"
+              className="btn-pill"
+              onClick={() => setCreateOpen(true)}
+              disabled={saving}
+            >
+              <Plus size={14} /> Create your first task
+            </button>
+          </div>
+        ) : (
+          <KanbanView tasks={filteredTasks} agents={agents} onOpen={openDetails} />
+        )}
       </div>
 
       {createOpen && (

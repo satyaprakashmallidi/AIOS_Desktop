@@ -8721,6 +8721,50 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   font-style: italic;
 }
 
+/* Page-level hero shown when there are zero tasks across all columns.
+   Replaces the 4 empty kanban columns with a single clear CTA so first-
+   time users know what to do. */
+.tasks-v2-empty-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 80px 24px;
+  text-align: center;
+  max-width: 480px;
+  margin: 60px auto;
+}
+.tasks-v2-empty-hero-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--sage-soft);
+  color: var(--sage);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--sage-line);
+}
+.tasks-v2-empty-hero h2 {
+  margin: 0;
+  font-family: var(--font-display, var(--font-sans));
+  font-style: italic;
+  font-weight: 400;
+  font-size: 28px;
+  color: var(--ink);
+}
+.tasks-v2-empty-hero p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--gray-600);
+  line-height: 1.5;
+  max-width: 360px;
+}
+.tasks-v2-empty-hero .btn-pill {
+  margin-top: 8px;
+}
+
 .tasks-v2-card {
   display: flex;
   flex-direction: column;
