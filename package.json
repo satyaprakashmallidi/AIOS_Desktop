@@ -155,7 +155,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "satyaprakashmallidi",
+      "owner": "everyai-com",
       "repo": "AIOS_Desktop",
       "releaseType": "release"
     }
