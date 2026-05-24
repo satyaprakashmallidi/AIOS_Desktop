@@ -1078,7 +1078,26 @@ export function CommandScreen({
       // so the chat stays clean.
       const exportMarkerRe = /\[AIOS_EXPORT_PDF:\s*outputs\/([A-Za-z0-9._-]+\.pdf)\s*\]/i;
       const exportMatch = result.response.match(exportMarkerRe);
-      const cleanedResponse = result.response.replace(/\[AIOS_EXPORT_PDF:[^\]\r\n]+\]/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+      // AIOS_ASK marker: `[AIOS_ASK: question | a | b | c]` → render as
+      // clickable option buttons under the message. Parse first, then strip
+      // the marker alongside the PDF one in a single cleanup pass.
+      const askMarkerRe = /\[AIOS_ASK:\s*([^\]\r\n]+)\]/i;
+      const askMatch = result.response.match(askMarkerRe);
+      let askOptions: { question: string; options: string[] } | null = null;
+      if (askMatch) {
+        const parts = askMatch[1].split("|").map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          askOptions = {
+            question: parts[0],
+            options: parts.slice(1, 6), // hard cap at 5 buttons
+          };
+        }
+      }
+      const cleanedResponse = result.response
+        .replace(/\[AIOS_EXPORT_PDF:[^\]\r\n]+\]/gi, "")
+        .replace(/\[AIOS_ASK:[^\]\r\n]+\]/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
       let pdfAttachment: import("../types").ChatAttachment | null = null;
       if (exportMatch) {
         const filename = exportMatch[1];
@@ -1110,6 +1129,7 @@ export function CommandScreen({
                 attachments: pdfAttachment
                   ? [...(message.attachments ?? []), pdfAttachment]
                   : message.attachments,
+                askOptions: askOptions ?? message.askOptions,
               }
             : message
         ),
@@ -1606,6 +1626,43 @@ export function CommandScreen({
                           <span className="aios-attachment-kind">{att.kind === "plan" ? "Plan" : "Output"}</span>
                         </button>
                       ))}
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && message.askOptions && message.askOptions.options.length > 0 ? (
+                    <div className="aios-ask-card" data-testid="ask-options">
+                      {message.askOptions.question ? (
+                        <p className="aios-ask-question">{message.askOptions.question}</p>
+                      ) : null}
+                      <div className="aios-ask-options">
+                        {message.askOptions.options.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            className="aios-ask-option"
+                            onClick={() => {
+                              // Clear the options on click so the buttons disappear
+                              // (prevents double-pick) and send the option text as
+                              // the next user message.
+                              const sessionId = activeSession?.id;
+                              if (sessionId) {
+                                onSessionsChange((current) => current.map((s) => {
+                                  if (s.id !== sessionId) return s;
+                                  return {
+                                    ...s,
+                                    messages: s.messages.map((m) => m.id === message.id
+                                      ? { ...m, askOptions: undefined }
+                                      : m
+                                    ),
+                                  };
+                                }));
+                              }
+                              void sendPrompt(opt);
+                            }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>

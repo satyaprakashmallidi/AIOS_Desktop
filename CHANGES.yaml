@@ -71,3 +71,7 @@ releases:
     features:
       - claude-style-chat-bubbles
       - code-block-lang-header
+
+  - tag: v0.2.38
+    features:
+      - aios-ask-option-buttons

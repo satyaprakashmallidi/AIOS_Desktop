@@ -330,6 +330,12 @@ export interface ChatMessage {
   // clicking a chip jumps to the matching Plans / Outputs screen with that
   // file pre-opened.
   attachments?: ChatAttachment[];
+  // When set, Claude offered the user a closed-set multiple-choice. Parsed
+  // from an `[AIOS_ASK: question | a | b | c]` marker stripped from `content`.
+  // Renderer renders clickable option buttons under the message. Click sends
+  // the option text as the user's next message and clears askOptions on this
+  // bubble so the buttons disappear (prevents double-pick).
+  askOptions?: { question: string; options: string[] };
 }
 
 export interface ChatSession {

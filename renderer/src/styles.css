@@ -3208,6 +3208,43 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
 }
 
+/* AIOS_ASK option card — rendered when Claude offers a closed-set
+   multiple-choice. Clean stacked pills, Claude-style restraint. */
+.aios-ask-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.aios-ask-question {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.aios-ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.aios-ask-option {
+  padding: 7px 14px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+  font-family: inherit;
+}
+.aios-ask-option:hover {
+  background: var(--sage-soft);
+  border-color: var(--sage-line);
+}
+.aios-ask-option:active { transform: translateY(1px); }
+
 /* Claude-style blockquote — gray rule, no background fill. */
 .aios-message.assistant .aios-markdown blockquote {
   margin: 12px 0;

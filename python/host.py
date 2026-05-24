@@ -396,6 +396,14 @@ _COMPOSIO_SYSTEM_PROMPT_BASE = (
     "line on its own: `[AIOS_EXPORT_PDF: outputs/<short-slug>.pdf]` "
     "AIOS will render your answer to a PDF in the workspace's outputs/ folder and "
     "show a downloadable chip under your message. Pick a 2-4 word slug.\n"
+    "• Ask with options (v0.2.38+): When you need the user to pick between a small "
+    "set of choices (2–5), end your reply with a single line: "
+    "`[AIOS_ASK: brief question | Option A | Option B | Option C]`. "
+    "AIOS renders this as a row of clickable buttons under your message; "
+    "clicking sends the option text as the user's next message. Use ONLY for "
+    "genuinely closed-set choices (model picks, yes/no, A vs B). For open "
+    "questions, just ask in plain prose — don't force-fit options. The marker "
+    "is stripped from the displayed text.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"
 
