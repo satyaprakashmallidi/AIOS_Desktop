@@ -1141,10 +1141,14 @@ export function CommandScreen({
       await saveUpdatedSession(saved);
       await onRefreshWorkspace();
     } catch (error) {
+      // Cancelled streams come back as CLAUDE_CANCELLED — render a soft
+      // "Cancelled." line, not a scary "Claude Code failed: ..." error.
+      const raw = error instanceof Error ? error.message : String(error);
+      const isCancelled = /CLAUDE_CANCELLED|Cancelled\./i.test(raw);
       const assistant: ChatMessage = {
         id: activeStreamRef.current?.assistantId ?? newId("msg"),
         role: "assistant",
-        content: `Claude Code failed: ${error instanceof Error ? error.message : String(error)}`,
+        content: isCancelled ? "Cancelled." : `Claude Code failed: ${raw}`,
         createdAt: new Date().toISOString()
       };
       await saveUpdatedSession({

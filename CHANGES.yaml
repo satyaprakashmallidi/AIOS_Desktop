@@ -101,3 +101,7 @@ releases:
     features:
       - chat-stream-cancel-button
       - cancel-chat-stream-ipc
+
+  - tag: v0.2.45
+    features:
+      - cancelled-renders-clean
