@@ -57,3 +57,12 @@ releases:
   - tag: v0.2.34
     features:
       - tasks-recent-outputs-strip
+
+  - tag: v0.2.35
+    features:
+      - verifier-contract-bootstrap
+
+  - tag: v0.2.36
+    features:
+      - windows-claude-path-discovery
+      - windows-foreground-thread-safety

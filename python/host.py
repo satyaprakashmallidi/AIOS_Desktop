@@ -77,12 +77,23 @@ def execution_env() -> dict[str, str]:
     home = str(Path.home())
     current_path = os.environ.get("PATH", "")
     if sys.platform.startswith("win"):
-        additions = [
-            os.path.join(os.environ.get("APPDATA", ""), "npm"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "nodejs"),
+        appdata = os.environ.get("APPDATA", "")
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        userprofile = os.environ.get("USERPROFILE", home)
+        # Skip any join where the env var resolved empty — joining "" with
+        # a tail yields a relative path that pollutes PATH without helping.
+        # Order: most-likely Claude/npm install locations first.
+        candidates = [
+            os.path.join(userprofile, ".claude", "bin") if userprofile else "",  # standalone Claude installer
+            os.path.join(userprofile, ".claude", "local", "bin") if userprofile else "",
+            os.path.join(userprofile, ".local", "bin") if userprofile else "",
+            os.path.join(appdata, "npm") if appdata else "",                     # default npm global
+            os.path.join(local_appdata, "Programs", "nodejs") if local_appdata else "",
+            os.path.join(local_appdata, "npm") if local_appdata else "",
             r"C:\Program Files\nodejs",
             r"C:\Program Files (x86)\nodejs",
         ]
+        additions = [p for p in candidates if p]
     else:
         additions = [
             os.path.join(home, ".npm-global", "bin"),
@@ -1441,12 +1452,18 @@ def _win_bring_to_foreground(matcher: str, attempts: int = 8, gap: float = 0.4) 
                     fg = user32.GetForegroundWindow()
                     cur_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
                     new_tid = user32.GetWindowThreadProcessId(hwnd, None)
-                    if cur_tid and new_tid and cur_tid != new_tid:
-                        user32.AttachThreadInput(cur_tid, new_tid, True)
+                    attached = False
+                    try:
+                        if cur_tid and new_tid and cur_tid != new_tid:
+                            user32.AttachThreadInput(cur_tid, new_tid, True)
+                            attached = True
                         user32.SetForegroundWindow(hwnd)
-                        user32.AttachThreadInput(cur_tid, new_tid, False)
-                    else:
-                        user32.SetForegroundWindow(hwnd)
+                    finally:
+                        # Always detach so a SetForegroundWindow failure or
+                        # sandbox denial never leaks a THREAD_INFO struct that
+                        # would later deadlock the event loop on app-switch.
+                        if attached:
+                            user32.AttachThreadInput(cur_tid, new_tid, False)
                     user32.BringWindowToTop(hwnd)
                 except Exception:
                     pass
