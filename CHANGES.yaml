@@ -92,3 +92,7 @@ releases:
     features:
       - source-picker-during-busy
       - model-picker-during-busy
+
+  - tag: v0.2.43
+    features:
+      - user-bubble-pill-style
