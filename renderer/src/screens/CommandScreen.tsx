@@ -313,6 +313,7 @@ export function CommandScreen({
   const recognitionRef = useRef<any>(null);
   const activeStreamRef = useRef<{ streamId: string; assistantId: string } | null>(null);
   const [activity, setActivity] = useState<{ tool: string; summary: string } | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   // Chat attachments. Files are uploaded into context/import/ and referenced
   // by workspace-relative path; folders are picked via the OS dialog and
   // referenced by absolute path (no copy — Claude gets --add-dir scope so it
@@ -538,6 +539,19 @@ export function CommandScreen({
   useEffect(() => {
     if (!busy) composerRef.current?.focus();
   }, [busy, activeSession?.id]);
+
+  // Elapsed-seconds counter for the activity strip. Resets when busy
+  // toggles on, ticks every 1s while busy, clears when busy goes false.
+  // Gives users an "the app is alive and working" signal during long
+  // turns instead of a blank wait.
+  useEffect(() => {
+    if (!busy) { setElapsedSeconds(0); return; }
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [busy]);
 
   useEffect(() => {
     return () => {
@@ -1493,7 +1507,7 @@ export function CommandScreen({
                     <span className="typing-dot" />
                     <span className="typing-dot" />
                   </div>
-                  <p>{activity ? friendlyActivityLabel(activity) : "Claude is thinking"}</p>
+                  <p>{activity ? friendlyActivityLabel(activity) : "Claude is thinking"}{elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}</p>
                   {activity?.summary ? <code className="activity-detail">{activity.summary}</code> : null}
                 </div>
               </article>
@@ -1505,7 +1519,7 @@ export function CommandScreen({
                 return (
                   <div className="aios-activity-row">
                     <Loader2 size={13} className="spin" />
-                    <span className="aios-activity-label">{friendlyActivityLabel(activity)}</span>
+                    <span className="aios-activity-label">{friendlyActivityLabel(activity)}{elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}</span>
                     {activity.summary ? <code className="aios-activity-detail">{activity.summary}</code> : null}
                   </div>
                 );
@@ -1513,7 +1527,7 @@ export function CommandScreen({
               return (
                 <div className="aios-activity-row aios-activity-thinking">
                   <Loader2 size={13} className="spin" />
-                  <span className="aios-activity-label">Claude is thinking…</span>
+                  <span className="aios-activity-label">Claude is thinking…{elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}</span>
                 </div>
               );
             })() }
@@ -1730,7 +1744,7 @@ export function CommandScreen({
                   </div>
                 ) : null}
               </div>
-              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : effectiveBusy ? (activity ? friendlyActivityLabel(activity) : "Claude is thinking…") : "")}</span>
+              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : effectiveBusy ? `${activity ? friendlyActivityLabel(activity) : "Claude is thinking…"}${elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}` : "")}</span>
               <div className="aios-composer-right">
                 <button
                   className={`aios-composer-tool ${listening ? "active" : ""}`}

@@ -321,11 +321,13 @@ export function OnboardingScreen({
   }
 
   function skipConnect() {
-    // Connect-stage Skip → advance to Profile. Skipping a step should
-    // move forward one stage, not jump straight to Ready (the old
-    // behavior, which surprised users testing the onboarding flow).
+    // Connect-stage Skip → finish onboarding immediately and land in chat.
+    // The interview is friction for users who just want to start using the
+    // app. Empty answers write "Not answered yet." into the context files
+    // (workspace.py:write_context_files); the user can fill them later via
+    // /prime or by editing context/*.md directly.
     setSetupMessage(null);
-    setStage("profile");
+    void finish();
   }
 
   function skipProfile() {
@@ -604,7 +606,7 @@ export function OnboardingScreen({
 
             <div className="onboarding-v2-foot">
               <button className="btn-pill-ghost" onClick={skipConnect} disabled={saving}>
-                Skip for now
+                Skip and start using AIOS
               </button>
               <button
                 className="btn-pill"

@@ -157,6 +157,29 @@ function GeneralPanel({
   const [updateState, setUpdateState] = useState<string>("idle");
   const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string; manualDownloadUrl?: string }>({});
   const [checking, setChecking] = useState(false);
+  const [chatModel, setChatModel] = useState<string>("default");
+
+  // Mirror of CHAT_MODELS in CommandScreen.tsx — keep these in sync.
+  // The per-chat pill in the composer and this Settings tile read/write
+  // the same chat_model setting, so picking here updates the pill and
+  // vice versa.
+  const chatModelOptions = [
+    { value: "default", label: "Default",    description: "Use your Claude CLI default (currently Sonnet)." },
+    { value: "haiku",   label: "Haiku 4.5",  description: "Fastest — best for simple questions and quick edits." },
+    { value: "sonnet",  label: "Sonnet 4.6", description: "Balanced — the everyday workhorse." },
+    { value: "opus",    label: "Opus 4.7",   description: "Smartest — slower, use for complex reasoning." }
+  ];
+
+  useEffect(() => {
+    invoke<{ key: string; value: string | null }>("get_setting", { key: "chat_model" })
+      .then((res) => { if (res?.value) setChatModel(res.value); })
+      .catch(() => undefined);
+  }, []);
+
+  async function pickChatModel(value: string) {
+    setChatModel(value);
+    await invoke("set_setting", { key: "chat_model", value }).catch(() => undefined);
+  }
 
   async function resetOnboarding() {
     setResetting(true);
@@ -262,6 +285,24 @@ function GeneralPanel({
 
   return (
     <>
+      <SettingsSection eyebrow="Chat" title="Default model" detail="Pick which Claude model new chats use. Override per chat from the model pill in the composer.">
+        <div className="theme-grid">
+          {chatModelOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`theme-tile ${chatModel === option.value ? "active" : ""}`}
+              onClick={() => pickChatModel(option.value)}
+            >
+              <div className="theme-tile-head">
+                <strong>{option.label}</strong>
+              </div>
+              <p>{option.description}</p>
+              {chatModel === option.value ? <Check size={14} className="theme-check" /> : null}
+            </button>
+          ))}
+        </div>
+      </SettingsSection>
       <SettingsSection eyebrow="Workspace" title="General" detail="Paths and default behavior for your AIOS workspace.">
         <SettingsRow
           title="Workspace folder"
