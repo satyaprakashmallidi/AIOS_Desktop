@@ -71,10 +71,11 @@ function agentNameById(agents: AgentInfo[], agentId: string): string {
   return agents.find((a) => a.id === agentId)?.name ?? agentId;
 }
 
-export function TasksScreen() {
+export function TasksScreen({ onNavigate }: { onNavigate?: (screen: import("../ui").Screen) => void } = {}) {
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [recentOutputs, setRecentOutputs] = useState<Array<{ path: string; name?: string; modifiedAt?: string }>>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -115,12 +116,16 @@ export function TasksScreen() {
 
   async function refresh() {
     try {
-      const [taskRes, agentRes] = await Promise.all([
+      const [taskRes, agentRes, outputsRes] = await Promise.all([
         invoke<{ tasks: TaskInfo[] }>("list_tasks", {}),
         invoke<{ agents: AgentInfo[] }>("list_agents", {}),
+        invoke<{ entries: Array<{ path: string; name?: string; modifiedAt?: string }> }>("list_outputs", {}).catch(() => ({ entries: [] })),
       ]);
       setTasks(taskRes?.tasks || []);
       setAgents(agentRes?.agents || []);
+      // Top 5 most recently modified outputs — list_directory already
+      // returns entries sorted by modifiedAt desc.
+      setRecentOutputs((outputsRes?.entries || []).slice(0, 5));
     } catch (err) {
       console.error("Failed to load tasks/agents:", err);
     } finally {
@@ -268,6 +273,36 @@ export function TasksScreen() {
       </header>
 
       <div className="tasks-v2-body">
+        {recentOutputs.length > 0 && onNavigate ? (
+          <section className="tasks-v2-outputs-strip" aria-label="Recent outputs from chat">
+            <header className="tasks-v2-outputs-head">
+              <span className="eyebrow">Recent outputs from chat</span>
+              <button type="button" className="tasks-v2-outputs-link" onClick={() => onNavigate("outputs")}>
+                Open Outputs →
+              </button>
+            </header>
+            <ul className="tasks-v2-outputs-list">
+              {recentOutputs.map((entry) => {
+                const filename = entry.name || entry.path.split(/[\\/]/).filter(Boolean).pop() || entry.path;
+                return (
+                  <li key={entry.path}>
+                    <button
+                      type="button"
+                      className="tasks-v2-output-card"
+                      onClick={() => onNavigate("outputs")}
+                      title={entry.path}
+                    >
+                      <span className="tasks-v2-output-name">{filename}</span>
+                      {entry.modifiedAt ? (
+                        <span className="tasks-v2-output-time">{formatShortTime(entry.modifiedAt)}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
         {tasks.length === 0 ? (
           <div className="tasks-v2-empty-hero">
             <div className="tasks-v2-empty-hero-mark" aria-hidden="true">

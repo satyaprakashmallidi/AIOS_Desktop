@@ -8847,6 +8847,69 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 /* Page-level hero shown when there are zero tasks across all columns.
    Replaces the 4 empty kanban columns with a single clear CTA so first-
    time users know what to do. */
+/* Recent outputs strip above the kanban — surfaces Claude's drafts so
+   the user sees them without navigating to Outputs. Each card is a
+   button to the Outputs screen for now; future: open the file inline. */
+.tasks-v2-outputs-strip {
+  padding: 8px 24px 0;
+  margin-bottom: 12px;
+}
+.tasks-v2-outputs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tasks-v2-outputs-link {
+  background: none;
+  border: none;
+  color: var(--sage);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.tasks-v2-outputs-link:hover { background: rgba(61, 90, 74, 0.07); }
+.tasks-v2-outputs-list {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.tasks-v2-outputs-list::-webkit-scrollbar { height: 4px; }
+.tasks-v2-output-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 160px;
+  max-width: 220px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.tasks-v2-output-card:hover { border-color: var(--sage-line); background: var(--sage-soft); }
+.tasks-v2-output-name {
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.tasks-v2-output-time {
+  font-size: 10.5px;
+  color: var(--gray-500);
+}
+
 .tasks-v2-empty-hero {
   display: flex;
   flex-direction: column;

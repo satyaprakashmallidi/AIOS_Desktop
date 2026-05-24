@@ -742,3 +742,27 @@ package.json                            version 0.2.0 → 0.2.1
 - Start a long voice task (e.g. *"Open Notepad, write a haiku, save it"*). Cmd-Tab to Chrome mid-execution → after ~2 turn polls, panel shows "Paused — you switched to chrome.exe."
 - Trigger a modal mid-task (e.g. say *"Quit Notepad without saving"* with unsaved changes) → panel pauses with "A modal dialog appeared".
 - Open the panel quickly while a prior task is mid-loop → no stale state from old run leaks into the new panel state.
+
+
+---
+
+## Post-release verification (VerifierOS)
+
+The workspace at `../module-installs/verifier-os-v1/` (relative to this repo) holds a verifier that downloads each shipped release artifact, installs it on a clean machine, and runs Playwright probes against it. Reports land at `../verification-reports/<tag>-<platform>.md`.
+
+**Two things this repo owes the verifier:**
+
+1. **`CHANGES.yaml`** at the repo root (template at `../module-installs/verifier-os-v1/config/CHANGES.yaml.example`). Each release adds a stanza listing feature tags changed:
+   ```yaml
+   releases:
+     - tag: v0.2.24
+       features: [skip-onboarding, model-selector]
+   ```
+   The verifier reads this from the tagged commit to decide which probes to run beyond the always-on smoke set.
+
+2. **`data-testid` attributes on UI elements probes need to locate.** Currently:
+   - `data-testid="onboarding-skip"` on the Welcome screen Skip button
+   - `data-testid="chat-input"` on the chat message textarea
+   Add more as you add probes. Falling back to text-matching works but is brittle.
+
+CI mode (matrix mac+win on `release: published`) uses templates in the module; drop `dispatch-verifier.yml.template` into `.github/workflows/` when wiring it up.

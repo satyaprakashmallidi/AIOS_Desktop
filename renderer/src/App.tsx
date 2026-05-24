@@ -1027,7 +1027,7 @@ function App() {
 
         {screen === "tasks" && !setupRequired ? (
           <div className="screen-enter">
-          <TasksScreen />
+          <TasksScreen onNavigate={setScreen} />
           </div>
         ) : null}
 
