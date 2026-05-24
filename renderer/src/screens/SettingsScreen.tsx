@@ -158,6 +158,16 @@ function GeneralPanel({
   const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; message?: string; manualDownloadUrl?: string }>({});
   const [checking, setChecking] = useState(false);
   const [chatModel, setChatModel] = useState<string>("default");
+  const [currentVersion, setCurrentVersion] = useState<string>("");
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+
+  // Read the running app version once. Drives the "App version X.Y.Z" line
+  // so users always see what they're on, not just a generic "App version" label.
+  useEffect(() => {
+    window.aios?.getVersion?.()
+      .then((v) => setCurrentVersion(v))
+      .catch(() => setCurrentVersion(""));
+  }, []);
 
   // Mirror of CHAT_MODELS in CommandScreen.tsx — keep these in sync.
   // The per-chat pill in the composer and this Settings tile read/write
@@ -243,6 +253,7 @@ function GeneralPanel({
       } else if (!result.hasUpdate) {
         setUpdateState("up-to-date");
         setUpdateInfo({ version: result.currentVersion });
+        setLastCheckedAt(Date.now());
       } else if (result.manualDownloadUrl) {
         // Mac path: there's no in-place update, but a newer release exists.
         setUpdateState("manual-available");
@@ -268,18 +279,32 @@ function GeneralPanel({
     await window.aios.installUpdate();
   }
 
+  function relativeTimeSince(ts: number): string {
+    const secs = Math.floor((Date.now() - ts) / 1000);
+    if (secs < 5) return "just now";
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hr ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
   function updateLabel(): string {
     switch (updateState) {
-      case "idle": return "Check for updates";
-      case "checking": return "Checking…";
-      case "available": return `Downloading ${updateInfo.version ?? ""}…`;
-      case "downloading": return `Downloading ${updateInfo.percent ?? 0}%`;
-      case "ready": return `Restart to install ${updateInfo.version ?? ""}`;
-      case "manual-available": return `v${updateInfo.version ?? ""} available · download manually`;
-      case "up-to-date": return `You're on the latest (${updateInfo.version ?? ""})`;
-      case "dev-mode": return "Updates only run in installed builds";
-      case "error": return updateInfo.message || "Update check failed";
-      default: return "Check for updates";
+      case "idle":
+        return lastCheckedAt
+          ? `Up to date · checked ${relativeTimeSince(lastCheckedAt)}`
+          : "Click to check for a newer release";
+      case "checking": return "Checking for updates…";
+      case "available": return `Update v${updateInfo.version ?? ""} found — downloading in the background`;
+      case "downloading": return `Downloading update… ${updateInfo.percent ?? 0}%`;
+      case "ready": return `✓ Update v${updateInfo.version ?? ""} ready — click Restart & install to apply`;
+      case "manual-available": return `Update v${updateInfo.version ?? ""} available — click Open release page`;
+      case "up-to-date": return `✓ You're on the latest version${updateInfo.version ? ` (${updateInfo.version})` : ""}${lastCheckedAt ? ` — checked ${relativeTimeSince(lastCheckedAt)}` : ""}`;
+      case "dev-mode": return "Auto-update only runs in installed builds (you're in dev mode)";
+      case "error": return `× Check failed: ${updateInfo.message || "unknown error"}. Try again or check your connection.`;
+      default: return "Click to check for a newer release";
     }
   }
 
@@ -342,7 +367,7 @@ function GeneralPanel({
             is only used if the API call errors. */}
         {(workspace?.platform === "win32" || workspace?.platform === "darwin") ? (
           <SettingsRow
-            title="App version"
+            title={currentVersion ? `App version ${currentVersion}` : "App version"}
             description={updateLabel()}
             control={
               updateState === "ready" ? (
