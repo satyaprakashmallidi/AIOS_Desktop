@@ -37,6 +37,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Square,
   Sun,
   Target,
   TrendingUp,
@@ -1694,12 +1695,31 @@ export function CommandScreen({
               const last = renderedMessages[renderedMessages.length - 1];
               const lastIsEmptyAssistant = last?.role === "assistant" && !last.content?.trim();
               if (lastIsEmptyAssistant) return null;
+              const stopBtn = (
+                <button
+                  type="button"
+                  className="aios-activity-stop"
+                  onClick={() => {
+                    const sid = activeStreamRef.current?.streamId;
+                    if (sid) {
+                      void invoke("cancel_chat_stream", { streamId: sid }).catch(() => undefined);
+                    }
+                  }}
+                  title="Stop this turn"
+                  aria-label="Stop"
+                  data-testid="chat-stop"
+                >
+                  <Square size={11} />
+                  Stop
+                </button>
+              );
               if (activity) {
                 return (
                   <div className="aios-activity-row">
                     <Loader2 size={13} className="spin" />
                     <span className="aios-activity-label">{friendlyActivityLabel(activity)}{elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}</span>
                     {activity.summary ? <code className="aios-activity-detail">{activity.summary}</code> : null}
+                    {stopBtn}
                   </div>
                 );
               }
@@ -1707,6 +1727,7 @@ export function CommandScreen({
                 <div className="aios-activity-row aios-activity-thinking">
                   <Loader2 size={13} className="spin" />
                   <span className="aios-activity-label">Claude is thinking…{elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}</span>
+                  {stopBtn}
                 </div>
               );
             })() }

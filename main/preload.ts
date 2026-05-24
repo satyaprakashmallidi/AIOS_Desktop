@@ -120,6 +120,7 @@ const allowedCommands = new Set<AiosCommand>([
   "create_task",
   "task_action",
   "cancel_task",
+  "cancel_chat_stream",
   "delete_task",
   "whatsapp_status",
   "whatsapp_start",

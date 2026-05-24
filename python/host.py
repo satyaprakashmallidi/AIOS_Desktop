@@ -230,6 +230,34 @@ def _debug_log_tool_error(block: dict[str, Any]) -> None:
         pass
 
 
+# Track active chat-stream subprocesses by streamId so cancel_chat_stream
+# can terminate them. Keyed by streamId because that's what the renderer
+# already passes through the stream events. Locked because cancel runs on
+# the JSON-RPC dispatch thread while run_claude_stream runs on its own.
+_ACTIVE_STREAMS: dict[str, "subprocess.Popen[str]"] = {}
+_ACTIVE_STREAMS_LOCK = threading.Lock()
+
+
+def cancel_chat_stream(stream_id: str) -> dict[str, Any]:
+    """Terminate the Claude Code subprocess for a given streamId. Returns
+    ok=True if there was an active stream to cancel, ok=False with reason
+    otherwise. Best-effort: terminate() first, kill() after 0.5s if still
+    alive. Always pops the dict entry so a stuck process doesn't leak."""
+    with _ACTIVE_STREAMS_LOCK:
+        proc = _ACTIVE_STREAMS.pop(stream_id, None)
+    if proc is None:
+        return {"ok": False, "reason": "no_active_stream"}
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return {"ok": True}
+    except Exception as err:
+        return {"ok": False, "reason": str(err)}
+
+
 def run_claude_stream(
     command: list[str],
     cwd: str,
@@ -249,6 +277,8 @@ def run_claude_stream(
         errors="replace",
         bufsize=1,
     )
+    with _ACTIVE_STREAMS_LOCK:
+        _ACTIVE_STREAMS[stream_id] = started
     final: dict[str, Any] | None = None
     streamed_text = ""
     last_full_text = ""
@@ -285,14 +315,29 @@ def run_claude_stream(
                 final = payload
     except json.JSONDecodeError as error:
         started.kill()
+        with _ACTIVE_STREAMS_LOCK:
+            _ACTIVE_STREAMS.pop(stream_id, None)
         raise HostError("CLAUDE_STREAM_ERROR", f"Claude returned malformed stream output: {error}")
     except subprocess.TimeoutExpired:
         started.kill()
+        with _ACTIVE_STREAMS_LOCK:
+            _ACTIVE_STREAMS.pop(stream_id, None)
         raise HostError("CLAUDE_TIMEOUT", "Claude Code did not finish before the timeout. Reconnect Claude or retry with a shorter prompt.")
+
+    # Pop the active-stream entry so cancel_chat_stream can't fire after
+    # the subprocess has already exited. We pop regardless of success path
+    # below — the dict only tracks running streams.
+    with _ACTIVE_STREAMS_LOCK:
+        _ACTIVE_STREAMS.pop(stream_id, None)
 
     stderr = started.stderr.read().strip() if started.stderr else ""
     return_code = started.wait(timeout=timeout)
     if return_code != 0:
+        # Cancelled streams exit non-zero (SIGTERM = exit code -15 on POSIX,
+        # or various on Windows). Surface a clean cancel error instead of
+        # the raw "Claude exited with code -15" noise.
+        if return_code in (-15, 15, -9, 9, 1):
+            raise HostError("CLAUDE_CANCELLED", "Cancelled.")
         raise HostError("CLAUDE_FAILED", stderr or f"Claude exited with code {return_code}")
     if not final:
         return {"response": streamed_text, "stderr": stderr, "workspaceRoot": cwd, "command": command[:6]}
@@ -2145,6 +2190,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
             note=a.get("note") if isinstance(a.get("note"), str) else None,
         ),
         "cancel_task": lambda a: tasks_store.cancel_task(require_str(a, "id")),
+        "cancel_chat_stream": lambda a: cancel_chat_stream(require_str(a, "streamId")),
     }
     handler = handlers.get(cmd)
     if not handler:

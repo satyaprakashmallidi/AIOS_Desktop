@@ -3221,6 +3221,30 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
 }
 
+/* Stop button on the activity strip — kills the current Claude
+   subprocess via cancel_chat_stream. Subtle: text + icon, no fill. */
+.aios-activity-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.aios-activity-stop:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.aios-activity-row { justify-content: flex-start; }
+.aios-activity-row > .aios-activity-stop { margin-left: auto; }
+
 /* AIOS_ASK option card — rendered when Claude offers a closed-set
    multiple-choice. Clean stacked pills, Claude-style restraint. */
 .aios-ask-card {

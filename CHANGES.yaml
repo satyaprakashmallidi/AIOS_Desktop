@@ -96,3 +96,8 @@ releases:
   - tag: v0.2.43
     features:
       - user-bubble-pill-style
+
+  - tag: v0.2.44
+    features:
+      - chat-stream-cancel-button
+      - cancel-chat-stream-ipc
