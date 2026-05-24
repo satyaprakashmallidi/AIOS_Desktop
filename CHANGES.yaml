@@ -79,3 +79,7 @@ releases:
   - tag: v0.2.39
     features:
       - claude-code-subagents-bundled
+
+  - tag: v0.2.40
+    features:
+      - empty-heroes-plans-outputs-briefs

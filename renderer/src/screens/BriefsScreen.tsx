@@ -98,7 +98,7 @@ export function BriefsScreen() {
         ) : briefs.length === 0 ? (
           <EmptyState
             title="No briefs yet"
-            body="Daily briefs will appear here from your second day onward — every morning when you open the app."
+            body="Daily briefs are auto-generated summaries of your morning: meetings, follow-ups, what to focus on. They appear from your second day onward — every morning when you open the app. Connect Gmail, Calendar, or Slack to give the brief something to work with."
           />
         ) : (
           <div className="briefs-groups">

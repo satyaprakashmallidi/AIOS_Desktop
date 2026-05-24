@@ -136,7 +136,16 @@ export function PlansScreen({
         {entries.length === 0 ? (
           <EmptyState
             title="No plans yet"
-            body="Describe a goal above and let Claude draft a structured plan you can review and queue for implementation."
+            body="Plans are structured Markdown documents Claude drafts before doing real work — they capture goal, current state, proposed changes, and step-by-step tasks. Use /create-plan in chat or click below."
+            action={
+              <button
+                type="button"
+                className="button button-primary compact"
+                onClick={() => onAskClaude("/create-plan ")}
+              >
+                Ask Claude to draft a plan
+              </button>
+            }
           />
         ) : (
           <div className="plans-grid">

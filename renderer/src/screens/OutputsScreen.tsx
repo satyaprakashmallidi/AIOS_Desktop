@@ -209,7 +209,16 @@ export function OutputsScreen({
         {filtered.length === 0 ? (
           <EmptyState
             title="Nothing here yet"
-            body="Outputs from Claude sessions and AIOS modules will appear here as they're generated."
+            body="Outputs are deliverables Claude saves to disk during your chats — drafts, briefs, exported PDFs, generated content. Ask Claude to make something and it'll show up here."
+            action={
+              <button
+                type="button"
+                className="button button-primary compact"
+                onClick={() => onAskClaude("")}
+              >
+                Open chat
+              </button>
+            }
           />
         ) : (
           <div className="outputs-grid">
