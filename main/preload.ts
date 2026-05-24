@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AiosCommand } from "./types";
 
 const allowedCommands = new Set<AiosCommand>([
@@ -136,6 +136,10 @@ contextBridge.exposeInMainWorld("aios", {
     }
     return ipcRenderer.invoke("aios:invoke", cmd, args);
   },
+  // Electron 32+ removed File.path; webUtils.getPathForFile is the
+  // replacement. Exposed here so renderer drag-drop handlers can resolve
+  // an absolute filesystem path for a dropped File/folder.
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onHostEvent: (callback: (event: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on("aios:host-event", listener);

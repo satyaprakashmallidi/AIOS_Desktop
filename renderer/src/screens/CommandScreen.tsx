@@ -333,6 +333,8 @@ export function CommandScreen({
   const [pendingQueue, setPendingQueue] = useState<Array<{ text: string; attachments: ChatAttachmentInput[] }>>([]);
   const lastBusyRef = useRef(false);
   const [previewFolder, setPreviewFolder] = useState<ChatAttachmentInput | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragCounterRef = useRef(0);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
@@ -888,6 +890,65 @@ export function CommandScreen({
     setAttachments((current) => current.filter((a) => a.path !== path));
   }
 
+  // Drag-and-drop folder onto the chat surface → attach as folder.
+  // Uses webUtils.getPathForFile via preload because Electron 32+ removed
+  // the File.path property. webkitGetAsEntry().isDirectory tells us
+  // whether the dropped item is a folder vs a file.
+  function attachDroppedFolders(items: DataTransferItemList | null) {
+    if (!items || !window.aios?.getPathForFile) return;
+    const folderPaths: Array<{ name: string; path: string }> = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind !== "file") continue;
+      const entry = (item as any).webkitGetAsEntry?.();
+      if (!entry || !entry.isDirectory) continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      try {
+        const absolutePath = window.aios.getPathForFile(file);
+        if (!absolutePath) continue;
+        const segments = absolutePath.split(/[\\/]/).filter(Boolean);
+        const basename = segments.length ? segments[segments.length - 1] : absolutePath;
+        folderPaths.push({ name: basename, path: absolutePath });
+      } catch {
+        // Skip folders we can't resolve a path for.
+      }
+    }
+    if (folderPaths.length === 0) return;
+    setAttachments((current) => {
+      const next = [...current];
+      for (const f of folderPaths) {
+        if (next.some((a) => a.kind === "folder" && a.path === f.path)) continue;
+        next.push({ kind: "folder", name: f.name, path: f.path });
+      }
+      return next;
+    });
+  }
+
+  function handleDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragCounterRef.current += 1;
+    setDragActive(true);
+  }
+  function handleDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+  function handleDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  }
+  function handleDrop(event: React.DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragCounterRef.current = 0;
+    setDragActive(false);
+    attachDroppedFolders(event.dataTransfer.items);
+  }
+
   async function sendPrompt(text: string) {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || !claude?.found || !activeSession) return;
@@ -1403,7 +1464,22 @@ export function CommandScreen({
   }
 
   return (
-    <section className="aios-chat-screen">
+    <section
+      className={`aios-chat-screen ${dragActive ? "is-drop-target" : ""}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragActive ? (
+        <div className="aios-chat-drop-overlay" aria-hidden="true">
+          <div className="aios-chat-drop-card">
+            <Folder size={28} />
+            <strong>Drop folder to attach</strong>
+            <span>Claude will read its contents in your next message.</span>
+          </div>
+        </div>
+      ) : null}
       <div className={`aios-chat-panel ${hasRealMessages ? "has-history" : "is-empty"}`}>
           {!claude?.found ? <MissingClaude claude={claude} onDetect={onDetectClaude} /> : null}
           {!onboarding?.completedAt && !hasRealMessages ? (

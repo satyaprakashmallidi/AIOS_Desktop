@@ -194,6 +194,7 @@ export interface ApiResponse<T> {
 
 export interface AiosApi {
   invoke<T = unknown>(cmd: AiosCommand, args?: Record<string, unknown>): Promise<ApiResponse<T>>;
+  getPathForFile: (file: File) => string;
   onHostEvent: (callback: (event: HostEvent) => void) => () => void;
   onCursorPosition: (callback: (pos: { x: number; y: number }) => void) => () => void;
   onCursorColor: (callback: (color: string) => void) => () => void;
