@@ -202,7 +202,17 @@ export function AutoTasksScreen() {
           ) : tasks.length === 0 ? (
             <EmptyState
               title="No auto-tasks yet"
-              body="Click ‘New auto-task’ to schedule your first recurring Claude prompt."
+              body="Auto-tasks are recurring prompts AIOS runs on a schedule — daily briefs, weekly summaries, midnight syncs. Create one and pick a cadence."
+              action={
+                <button
+                  type="button"
+                  className="button button-primary compact"
+                  onClick={() => setShowForm(true)}
+                  disabled={busy}
+                >
+                  <Plus size={13} /> Schedule your first auto-task
+                </button>
+              }
             />
           ) : (
             tasks.map((task) => (

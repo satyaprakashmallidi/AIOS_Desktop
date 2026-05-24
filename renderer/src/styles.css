@@ -1770,6 +1770,7 @@ body.is-mac .sidebar-brand {
 }
 .empty-state strong { display: block; font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: var(--space-2); }
 .empty-state p { font-size: 12px; color: var(--text-soft); }
+.empty-state-action { margin-top: 12px; }
 
 /* ─── Loading Screen ───────────────────────────────────────────────────────── */
 .app-loading {

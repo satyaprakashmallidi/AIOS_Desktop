@@ -119,11 +119,12 @@ export function MetricCard({
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
+export function EmptyState({ title, body, action }: { title: string; body: string; action?: React.ReactNode }) {
   return (
     <div className="empty-state">
       <strong>{title}</strong>
       <p>{body}</p>
+      {action ? <div className="empty-state-action">{action}</div> : null}
     </div>
   );
 }
