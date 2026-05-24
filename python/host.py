@@ -404,6 +404,12 @@ _COMPOSIO_SYSTEM_PROMPT_BASE = (
     "genuinely closed-set choices (model picks, yes/no, A vs B). For open "
     "questions, just ask in plain prose — don't force-fit options. The marker "
     "is stripped from the displayed text.\n"
+    "• Subagents (v0.2.39+): the workspace ships three Claude Code subagents "
+    "in `.claude/agents/`: **code-reviewer** (finds real bugs in diffs), "
+    "**brief-writer** (tight daily briefs), **researcher** (multi-source "
+    "structured research with citations). Delegate to one with the Task tool "
+    "when the request matches — fresh context window, focused system prompt, "
+    "constrained tools. They beat trying to do everything in this turn.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"
 

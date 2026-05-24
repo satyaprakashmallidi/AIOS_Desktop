@@ -75,3 +75,7 @@ releases:
   - tag: v0.2.38
     features:
       - aios-ask-option-buttons
+
+  - tag: v0.2.39
+    features:
+      - claude-code-subagents-bundled
