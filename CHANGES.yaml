@@ -1,0 +1,59 @@
+# CHANGES.yaml — per-release feature inventory for VerifierOS.
+#
+# The verifier reads this file from the tagged commit to decide which feature
+# probes to run beyond the always-on smoke set. Feature tags are free-form
+# strings matching keys in verifier/probes.config.yaml — keep them stable
+# across releases so historical data remains comparable.
+
+releases:
+  - tag: v0.2.23
+    features: []
+    notes: First release from everyai-com (migrated from satyaprakashmallidi).
+
+  - tag: v0.2.24
+    features:
+      - skip-onboarding
+      - model-selector
+      - activity-strip-timer
+
+  - tag: v0.2.25
+    features:
+      - editable-composer-queue
+      - builtin-commit-command
+
+  - tag: v0.2.26
+    features:
+      - connector-state-in-prompt
+
+  - tag: v0.2.27
+    features:
+      - tool-error-probe-log
+
+  - tag: v0.2.28
+    features:
+      - check-for-updates-clarity
+
+  - tag: v0.2.29
+    features:
+      - tasks-empty-hero
+
+  - tag: v0.2.30
+    features:
+      - folder-chip-preview
+      - list-external-directory-ipc
+
+  - tag: v0.2.31
+    features:
+      - drag-drop-folder-attach
+
+  - tag: v0.2.32
+    features:
+      - drag-drop-file-attach
+
+  - tag: v0.2.33
+    features:
+      - autotasks-empty-hero
+
+  - tag: v0.2.34
+    features:
+      - tasks-recent-outputs-strip

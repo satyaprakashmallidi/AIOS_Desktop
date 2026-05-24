@@ -1781,6 +1781,7 @@ export function CommandScreen({
                 }}
                 placeholder={effectiveBusy ? "Type your next message — it'll send when Claude finishes" : "Ask anything — type / for commands or @ to mention"}
                 disabled={!claude?.found || !claude.runtimeOk}
+                data-testid="chat-input"
               />
             </div>
             <div className="aios-composer-underbar">

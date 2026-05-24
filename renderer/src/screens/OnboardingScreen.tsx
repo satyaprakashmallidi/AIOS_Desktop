@@ -605,7 +605,7 @@ export function OnboardingScreen({
             ) : null}
 
             <div className="onboarding-v2-foot">
-              <button className="btn-pill-ghost" onClick={skipConnect} disabled={saving}>
+              <button className="btn-pill-ghost" onClick={skipConnect} disabled={saving} data-testid="onboarding-skip">
                 Skip and start using AIOS
               </button>
               <button
