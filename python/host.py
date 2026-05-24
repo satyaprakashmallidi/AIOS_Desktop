@@ -184,13 +184,38 @@ def tool_results_from_stream_message(payload: dict[str, Any]) -> list[dict[str, 
     result: list[dict[str, Any]] = []
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_result":
+            is_error = bool(block.get("is_error"))
+            if is_error:
+                # v0.2.27 probe — capture the exact tool-error format so the
+                # next release can pattern-match Composio "service not
+                # connected" errors and render an inline connector chip.
+                # Logs to <workspace>/logs/tool-errors.log. Safe to leave on
+                # in the meantime; only fires on errors.
+                _debug_log_tool_error(block)
             result.append(
                 {
                     "toolUseId": str(block.get("tool_use_id") or ""),
-                    "isError": bool(block.get("is_error")),
+                    "isError": is_error,
                 }
             )
     return result
+
+
+def _debug_log_tool_error(block: dict[str, Any]) -> None:
+    try:
+        from workspace import workspace_root
+        from datetime import datetime, timezone
+        log_path = workspace_root() / "logs" / "tool-errors.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "block": block,
+        }
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, default=str) + "\n")
+    except Exception:
+        # Never break the stream because logging failed.
+        pass
 
 
 def run_claude_stream(
