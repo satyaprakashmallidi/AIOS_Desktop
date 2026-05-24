@@ -32,6 +32,8 @@ supabase/.temp/
 supabase/supabase/.temp/
 __pycache__/
 aios_app/
+.venv/
+venv/
 
 # Local Claude Code config (contains shell command history with secrets)
 .claude/settings.local.json
