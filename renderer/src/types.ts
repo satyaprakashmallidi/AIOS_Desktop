@@ -337,6 +337,11 @@ export interface ChatMessage {
   // the option text as the user's next message and clears askOptions on this
   // bubble so the buttons disappear (prevents double-pick).
   askOptions?: { question: string; options: string[] };
+  // When set, Claude flagged that a connector is needed. Parsed from
+  // `[AIOS_CONNECT: <slug>]` marker. Renderer renders an inline Connect
+  // chip — click navigates to Connectors so the user can complete OAuth
+  // without manually hunting the page.
+  connectRequest?: { service: string };
 }
 
 export interface ChatSession {

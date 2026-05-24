@@ -3221,6 +3221,46 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
 }
 
+/* Inline Connect chip rendered when Claude flagged a service is needed
+   via the [AIOS_CONNECT: slug] marker. Click jumps to Connectors. */
+.aios-connect-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--sage-soft);
+  border: 1px solid var(--sage-line);
+  border-radius: var(--radius-md);
+}
+.aios-connect-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--sage);
+  flex-shrink: 0;
+}
+.aios-connect-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.aios-connect-card-body strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+.aios-connect-card-body p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
 /* Queued-message preview strip above the composer. Shows what's about
    to send once the current turn finishes. Each chip is removable. */
 .aios-composer-queue {

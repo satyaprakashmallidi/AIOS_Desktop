@@ -1094,9 +1094,19 @@ export function CommandScreen({
           };
         }
       }
+      // AIOS_CONNECT marker: `[AIOS_CONNECT: slack]` → render an inline
+      // Connect chip that jumps to the Connectors page. Slug must be a
+      // simple lowercase token (matches Composio slug convention).
+      const connectMarkerRe = /\[AIOS_CONNECT:\s*([a-z][a-z0-9_-]*)\s*\]/i;
+      const connectMatch = result.response.match(connectMarkerRe);
+      let connectRequest: { service: string } | null = null;
+      if (connectMatch) {
+        connectRequest = { service: connectMatch[1].toLowerCase() };
+      }
       const cleanedResponse = result.response
         .replace(/\[AIOS_EXPORT_PDF:[^\]\r\n]+\]/gi, "")
         .replace(/\[AIOS_ASK:[^\]\r\n]+\]/gi, "")
+        .replace(/\[AIOS_CONNECT:[^\]\r\n]+\]/gi, "")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
       let pdfAttachment: import("../types").ChatAttachment | null = null;
@@ -1131,6 +1141,7 @@ export function CommandScreen({
                   ? [...(message.attachments ?? []), pdfAttachment]
                   : message.attachments,
                 askOptions: askOptions ?? message.askOptions,
+                connectRequest: connectRequest ?? message.connectRequest,
               }
             : message
         ),
@@ -1631,6 +1642,22 @@ export function CommandScreen({
                           <span className="aios-attachment-kind">{att.kind === "plan" ? "Plan" : "Output"}</span>
                         </button>
                       ))}
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && message.connectRequest ? (
+                    <div className="aios-connect-card" data-testid="connect-chip">
+                      <span className="aios-connect-card-icon"><Plug size={14} /></span>
+                      <div className="aios-connect-card-body">
+                        <strong>Connect {message.connectRequest.service}</strong>
+                        <p>Opens the Connectors page so you can authorize this service. Once connected, ask again and Claude will use it.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-primary compact"
+                        onClick={() => onNavigate("connectors")}
+                      >
+                        Connect
+                      </button>
                     </div>
                   ) : null}
                   {message.role === "assistant" && message.askOptions && message.askOptions.options.length > 0 ? (

@@ -109,3 +109,7 @@ releases:
   - tag: v0.2.46
     features:
       - composer-queue-chips
+
+  - tag: v0.2.47
+    features:
+      - aios-connect-inline-chip

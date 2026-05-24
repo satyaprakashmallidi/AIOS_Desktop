@@ -455,6 +455,14 @@ _COMPOSIO_SYSTEM_PROMPT_BASE = (
     "structured research with citations). Delegate to one with the Task tool "
     "when the request matches — fresh context window, focused system prompt, "
     "constrained tools. They beat trying to do everything in this turn.\n"
+    "• Connect a service inline (v0.2.47+): when the user asks for something "
+    "that needs a service that isn't connected, instead of just saying 'open "
+    "the Connectors page', end your reply with: `[AIOS_CONNECT: <slug>]` "
+    "(e.g. `[AIOS_CONNECT: slack]`, `[AIOS_CONNECT: gmail]`). AIOS renders "
+    "an inline Connect button under your message — one click jumps the user "
+    "to the Connectors page so they don't have to hunt for it. Use the "
+    "Composio service slug, lowercase. Use this for AT MOST one service per "
+    "turn — pick the most important.\n"
 
     "User is non-technical. Be brief, plain, direct.\n"
 
