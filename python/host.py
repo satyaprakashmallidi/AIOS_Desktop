@@ -387,24 +387,36 @@ def _build_composio_system_prompt() -> str:
         from workspace import (
             CONNECTOR_DISPLAY_NAMES,
             KNOWN_CONNECTORS,
-            list_connected_service_slugs,
+            list_connector_status,
         )
     except Exception:
         return _COMPOSIO_SYSTEM_PROMPT_BASE
     available = ", ".join(
         CONNECTOR_DISPLAY_NAMES.get(slug, slug) for slug in KNOWN_CONNECTORS
     )
-    connected_slugs = list_connected_service_slugs()
-    connected_names = [
-        CONNECTOR_DISPLAY_NAMES.get(slug, slug) for slug in connected_slugs
-    ]
-    if connected_names:
-        connected_str = ", ".join(connected_names)
+    # Build "Gmail (satya@x.com), GitHub (@user)" — including account labels
+    # is the key thing that stops Claude from asking "do you have Gmail?" or
+    # "which account?" mid-conversation. The label is whatever the identify
+    # task wrote at connect time.
+    statuses = list_connector_status().get("connectors", {})
+    connected_entries: list[str] = []
+    for slug in KNOWN_CONNECTORS:
+        info = statuses.get(slug, {})
+        if not info.get("connected"):
+            continue
+        display = CONNECTOR_DISPLAY_NAMES.get(slug, slug)
+        label = info.get("label")
+        connected_entries.append(f"{display} ({label})" if label else display)
+    if connected_entries:
+        connected_str = ", ".join(connected_entries)
         scope_block = (
             "\n• Allowed services (the ONLY ones AIOS supports — never name any "
             "other external service, even if it exists in the world): "
             f"{available}.\n"
             f"• Currently connected for this user: {connected_str}.\n"
+            "• Never ask the user whether they have one of these services "
+            "connected — the list above is authoritative. Never ask which "
+            "account; the email/handle in parentheses IS the account.\n"
             "• If the user asks for a capability and the right connector is in the "
             "allowed list but NOT connected, say: 'That's available — open the "
             "Connectors page and connect <Service> first.' Then stop. Never "
