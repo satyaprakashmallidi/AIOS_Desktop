@@ -327,6 +327,11 @@ export function CommandScreen({
     requiresTccPrompt?: boolean;
   };
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
+  // Messages typed while a Claude turn is in flight are pushed here and
+  // auto-sent in FIFO order when the current turn finishes. Lets the user
+  // queue up follow-ups without waiting for the agent to finish thinking.
+  const [pendingQueue, setPendingQueue] = useState<Array<{ text: string; attachments: ChatAttachmentInput[] }>>([]);
+  const lastBusyRef = useRef(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
@@ -552,6 +557,20 @@ export function CommandScreen({
     }, 1000);
     return () => window.clearInterval(id);
   }, [busy]);
+
+  // Drain the queue when a turn finishes. We detect the busy true→false
+  // transition via lastBusyRef so we don't accidentally fire on first mount
+  // (busy starts false). FIFO order: take the head, restore its snapshotted
+  // attachments, send.
+  useEffect(() => {
+    if (lastBusyRef.current && !busy && pendingQueue.length > 0) {
+      const [next, ...rest] = pendingQueue;
+      setPendingQueue(rest);
+      setAttachments(next.attachments);
+      void sendPrompt(next.text);
+    }
+    lastBusyRef.current = busy;
+  }, [busy, pendingQueue]);
 
   useEffect(() => {
     return () => {
@@ -870,7 +889,15 @@ export function CommandScreen({
 
   async function sendPrompt(text: string) {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || !claude?.found || busy || !activeSession) return;
+    if ((!trimmed && attachments.length === 0) || !claude?.found || !activeSession) return;
+    // If a turn is already in flight, queue this message + clear the composer
+    // and let the drain effect send it once busy flips back to false.
+    if (busy) {
+      setPendingQueue((current) => [...current, { text, attachments: [...attachments] }]);
+      setPrompt("");
+      setAttachments([]);
+      return;
+    }
     const fileAttachments = attachments.filter((a) => a.kind === "file");
     const folderAttachments = attachments.filter((a) => a.kind === "folder");
     // Build a single attachment block listing files and folders separately,
@@ -1659,8 +1686,8 @@ export function CommandScreen({
                   // Defer so click-to-select in the palette still fires.
                   window.setTimeout(closePalette, 100);
                 }}
-                placeholder="Ask anything — type / for commands or @ to mention"
-                disabled={!claude?.found || !claude.runtimeOk || effectiveBusy}
+                placeholder={effectiveBusy ? "Type your next message — it'll send when Claude finishes" : "Ask anything — type / for commands or @ to mention"}
+                disabled={!claude?.found || !claude.runtimeOk}
               />
             </div>
             <div className="aios-composer-underbar">
@@ -1744,7 +1771,7 @@ export function CommandScreen({
                   </div>
                 ) : null}
               </div>
-              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : effectiveBusy ? `${activity ? friendlyActivityLabel(activity) : "Claude is thinking…"}${elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}` : "")}</span>
+              <span className="aios-composer-hint">{voiceError ?? (listening ? "Listening... click mic to stop" : transcribing ? "Transcribing..." : effectiveBusy ? `${activity ? friendlyActivityLabel(activity) : "Claude is thinking…"}${elapsedSeconds >= 2 ? ` · ${elapsedSeconds}s` : ""}${pendingQueue.length > 0 ? ` · ${pendingQueue.length} queued` : ""}` : "")}</span>
               <div className="aios-composer-right">
                 <button
                   className={`aios-composer-tool ${listening ? "active" : ""}`}
@@ -1757,11 +1784,12 @@ export function CommandScreen({
                 </button>
                 <button
                   className="aios-send-btn"
-                  disabled={!prompt.trim() || !claude?.found || !claude.runtimeOk || effectiveBusy}
+                  disabled={!prompt.trim() || !claude?.found || !claude.runtimeOk}
                   type="submit"
-                  aria-label="Send message"
+                  aria-label={effectiveBusy ? "Queue message — sends when Claude finishes" : "Send message"}
+                  title={effectiveBusy ? `Queue (${pendingQueue.length + 1} pending after send)` : "Send"}
                 >
-                  {effectiveBusy ? <Loader2 size={15} className="spin" /> : <ArrowUp size={15} />}
+                  <ArrowUp size={15} />
                 </button>
               </div>
             </div>

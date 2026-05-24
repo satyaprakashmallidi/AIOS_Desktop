@@ -552,21 +552,15 @@ Should show `_index.md` and `_templates/`.
 
 You'll run this at the end of every work session, or after completing a meaningful piece of work."
 
-Create the command:
-
-```bash
-mkdir -p .claude/commands
-```
-
-Write the `/commit` command from `commands/commit.md` into `.claude/commands/commit.md`.
+**`/commit` ships pre-installed** with AIOS Desktop (v0.2.25+) — it's already in `.claude/commands/commit.md` from the moment the workspace exists. No file to write.
 
 [VERIFY]
 ```bash
 cat .claude/commands/commit.md | head -3
 ```
-Should show the command header.
+Should show the command header (already present).
 
-"Your `/commit` command is installed. Let me show you how it works in the test section."
+"Your `/commit` command is ready to use — it ships with AIOS so you don't have to wait for an install step."
 
 ---
 

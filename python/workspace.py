@@ -48,10 +48,12 @@ MODULE_REGISTRY: dict[str, dict[str, Any]] = {
         "requiredConnectors": ["github"],
         "artifacts": [".git/", ".claude/commands/commit.md", "HISTORY.md"],
         "connections": ["GitHub"],
+        # /commit ships pre-installed with the workspace from v0.2.25; it's no
+        # longer used as an install marker — InfraOS is "installed" only once
+        # git is initialized and HISTORY.md exists.
         "installedMarkers": [
             ".git",
             "HISTORY.md",
-            ".claude/commands/commit.md",
         ],
     },
     "data-os": {
