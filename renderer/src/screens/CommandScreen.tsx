@@ -890,39 +890,52 @@ export function CommandScreen({
     setAttachments((current) => current.filter((a) => a.path !== path));
   }
 
-  // Drag-and-drop folder onto the chat surface → attach as folder.
-  // Uses webUtils.getPathForFile via preload because Electron 32+ removed
-  // the File.path property. webkitGetAsEntry().isDirectory tells us
-  // whether the dropped item is a folder vs a file.
-  function attachDroppedFolders(items: DataTransferItemList | null) {
-    if (!items || !window.aios?.getPathForFile) return;
+  // Drag-and-drop onto the chat surface → folders attach as folder
+  // attachments (reference an absolute path); files go through the same
+  // upload flow as the paperclip button (copied into imports/ via
+  // write_binary_file). webkitGetAsEntry().isDirectory is the cross-
+  // platform "is this a folder?" check; Electron 32+ requires
+  // webUtils.getPathForFile for the absolute path resolution.
+  function handleDroppedItems(items: DataTransferItemList | null) {
+    if (!items) return;
     const folderPaths: Array<{ name: string; path: string }> = [];
+    const filesToUpload: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.kind !== "file") continue;
       const entry = (item as any).webkitGetAsEntry?.();
-      if (!entry || !entry.isDirectory) continue;
       const file = item.getAsFile();
       if (!file) continue;
-      try {
-        const absolutePath = window.aios.getPathForFile(file);
-        if (!absolutePath) continue;
-        const segments = absolutePath.split(/[\\/]/).filter(Boolean);
-        const basename = segments.length ? segments[segments.length - 1] : absolutePath;
-        folderPaths.push({ name: basename, path: absolutePath });
-      } catch {
-        // Skip folders we can't resolve a path for.
+      if (entry?.isDirectory) {
+        if (!window.aios?.getPathForFile) continue;
+        try {
+          const absolutePath = window.aios.getPathForFile(file);
+          if (!absolutePath) continue;
+          const segments = absolutePath.split(/[\\/]/).filter(Boolean);
+          const basename = segments.length ? segments[segments.length - 1] : absolutePath;
+          folderPaths.push({ name: basename, path: absolutePath });
+        } catch {
+          // Skip folders we can't resolve a path for.
+        }
+      } else {
+        filesToUpload.push(file);
       }
     }
-    if (folderPaths.length === 0) return;
-    setAttachments((current) => {
-      const next = [...current];
-      for (const f of folderPaths) {
-        if (next.some((a) => a.kind === "folder" && a.path === f.path)) continue;
-        next.push({ kind: "folder", name: f.name, path: f.path });
-      }
-      return next;
-    });
+    if (folderPaths.length > 0) {
+      setAttachments((current) => {
+        const next = [...current];
+        for (const f of folderPaths) {
+          if (next.some((a) => a.kind === "folder" && a.path === f.path)) continue;
+          next.push({ kind: "folder", name: f.name, path: f.path });
+        }
+        return next;
+      });
+    }
+    if (filesToUpload.length > 0) {
+      // Build a synthetic FileList-shaped object so uploadAttachments
+      // (which iterates Array.from(fileList)) consumes it unchanged.
+      void uploadAttachments(filesToUpload as unknown as FileList);
+    }
   }
 
   function handleDragEnter(event: React.DragEvent<HTMLElement>) {
@@ -946,7 +959,7 @@ export function CommandScreen({
     event.preventDefault();
     dragCounterRef.current = 0;
     setDragActive(false);
-    attachDroppedFolders(event.dataTransfer.items);
+    handleDroppedItems(event.dataTransfer.items);
   }
 
   async function sendPrompt(text: string) {
@@ -1475,8 +1488,8 @@ export function CommandScreen({
         <div className="aios-chat-drop-overlay" aria-hidden="true">
           <div className="aios-chat-drop-card">
             <Folder size={28} />
-            <strong>Drop folder to attach</strong>
-            <span>Claude will read its contents in your next message.</span>
+            <strong>Drop to attach</strong>
+            <span>Folders attach as references; files upload into your chat.</span>
           </div>
         </div>
       ) : null}
