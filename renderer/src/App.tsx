@@ -35,6 +35,7 @@ import { buildConnections, buildContextSections } from "./lib/workspace-view";
 import { NavItem, StatusBadge, ConfirmModal } from "./components/ui";
 import { BrandMark } from "./components/BrandMark";
 import { AutoUpdateBanner } from "./components/AutoUpdateBanner";
+import { WhatsNewBanner } from "./components/WhatsNewBanner";
 import { CommandScreen } from "./screens/CommandScreen";
 import { AutoTasksScreen } from "./screens/AutoTasksScreen";
 import { ContextScreen } from "./screens/ContextScreen";
@@ -969,6 +970,7 @@ function App() {
           platform={workspace?.platform ?? null}
           onNavigateToSettings={() => setScreen("settings")}
         />
+        <WhatsNewBanner />
 
         {error ? <div className="banner banner-danger">{error}</div> : null}
 

@@ -3279,6 +3279,49 @@ body.is-mac .sidebar-brand {
   line-height: 1.4;
 }
 
+/* "What's new" banner — shown post-auto-update so users know the app
+   changed. Slim sage strip, single line, dismissible. Setting persists
+   the dismissal so it only ever shows once per version. */
+.aios-whatsnew-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--sage-soft);
+  border: 1px solid var(--sage-line);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--ink);
+  margin: 0 24px 8px;
+  animation: jumpFadeIn 180ms ease;
+}
+.aios-whatsnew-icon { color: var(--sage); display: inline-flex; }
+.aios-whatsnew-text { flex: 1; }
+.aios-whatsnew-text strong { font-weight: 600; }
+.aios-whatsnew-link {
+  background: none;
+  border: none;
+  color: var(--sage);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 2px 4px;
+  font-family: inherit;
+}
+.aios-whatsnew-link:hover { opacity: 0.78; }
+.aios-whatsnew-close {
+  background: transparent;
+  border: none;
+  color: var(--gray-500);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 4px;
+}
+.aios-whatsnew-close:hover { background: rgba(0,0,0,0.05); color: var(--ink); }
+
 /* "Jump to latest" pill — appears when the user scrolled up >120px
    from the bottom. Pairs with the v0.2.56 smart auto-scroll: we no
    longer yank the user down on every delta, so they need a manual

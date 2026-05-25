@@ -162,3 +162,7 @@ releases:
   - tag: v0.2.57
     features:
       - jump-to-latest-pill
+
+  - tag: v0.2.58
+    features:
+      - whats-new-banner-post-update
