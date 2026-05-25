@@ -199,3 +199,9 @@ releases:
     features:
       - onboarding-name-only
       - chat-greets-by-name
+
+  - tag: v0.2.66
+    features:
+      - chat-empty-context-os-cards
+      - proactive-import-folder-card
+      - proactive-interview-card

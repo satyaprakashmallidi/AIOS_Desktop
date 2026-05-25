@@ -1636,36 +1636,70 @@ export function CommandScreen({
                 <div className="aios-chat-orb" aria-hidden="true">A</div>
                 <p className="aios-chat-kicker">AIOS · Command</p>
                 <h2>
-                  {displayName ? <>Hi {displayName} — what should we <em>work on</em>?</> : <>What should we <em>work on</em>?</>}
+                  {displayName ? <>Hi {displayName} — let's set up your <em>context</em>.</> : <>Let's set up your <em>context</em>.</>}
                 </h2>
-                <p>{displayName ? `Tell me what you do or what you're building, and I'll get going. Or pick a starter below.` : `Start with a summary, review your context, or ask AIOS to turn a rough idea into the next action.`}</p>
-                <div className="aios-chat-empty-actions">
-                  {starterPrompts.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        className="aios-chat-chip"
-                        key={item.label}
-                        onClick={() => {
-                          setPrompt(item.prompt);
-                          // Focus + caret-to-end so the user can immediately
-                          // edit or just hit Enter. Previously they had to
-                          // click into the composer first.
-                          window.setTimeout(() => {
-                            const ta = composerRef.current;
-                            if (ta) {
-                              ta.focus();
-                              ta.setSelectionRange(item.prompt.length, item.prompt.length);
-                              ta.scrollTop = ta.scrollHeight;
-                            }
-                          }, 0);
-                        }}
-                      >
-                        <Icon size={14} />
-                        {item.label}
-                      </button>
-                    );
-                  })}
+                <p>
+                  {displayName
+                    ? `I'm your AIOS. The more I know about your work, the more useful I get. Pick one to start — or just type below.`
+                    : `I'm your AIOS. The more I know about your work, the more useful I get. Pick one to start — or just type below.`}
+                </p>
+                <div className="aios-chat-onboarding-cards">
+                  <button
+                    className="aios-chat-onboarding-card"
+                    onClick={() => { void pickFolderAttachment(); }}
+                  >
+                    <div className="aios-onboarding-card-icon"><FileText size={16} /></div>
+                    <div className="aios-onboarding-card-body">
+                      <strong>Import a folder</strong>
+                      <span>Point me at your work folder — notes, docs, a project — and I'll read it as context.</span>
+                    </div>
+                  </button>
+                  <button
+                    className="aios-chat-onboarding-card"
+                    onClick={() => {
+                      const seed = "Interview me about what I do, what I'm working on, and what would make me more effective. Ask one question at a time, then save what you learn to my context.";
+                      setPrompt(seed);
+                      window.setTimeout(() => {
+                        const ta = composerRef.current;
+                        if (ta) { ta.focus(); ta.setSelectionRange(seed.length, seed.length); }
+                      }, 0);
+                    }}
+                  >
+                    <div className="aios-onboarding-card-icon"><MessageSquare size={16} /></div>
+                    <div className="aios-onboarding-card-body">
+                      <strong>Interview me</strong>
+                      <span>I'll ask a few questions about your work and write the answers into your context.</span>
+                    </div>
+                  </button>
+                  <button
+                    className="aios-chat-onboarding-card"
+                    onClick={() => {
+                      const seed = "/prime";
+                      setPrompt(seed);
+                      window.setTimeout(() => {
+                        const ta = composerRef.current;
+                        if (ta) { ta.focus(); ta.setSelectionRange(seed.length, seed.length); }
+                      }, 0);
+                    }}
+                  >
+                    <div className="aios-onboarding-card-icon"><Command size={16} /></div>
+                    <div className="aios-onboarding-card-body">
+                      <strong>Show me what AIOS can do</strong>
+                      <span>Run /prime — I'll summarise your workspace and suggest the best next move.</span>
+                    </div>
+                  </button>
+                  <button
+                    className="aios-chat-onboarding-card"
+                    onClick={() => {
+                      window.setTimeout(() => composerRef.current?.focus(), 0);
+                    }}
+                  >
+                    <div className="aios-onboarding-card-icon"><Sparkles size={16} /></div>
+                    <div className="aios-onboarding-card-body">
+                      <strong>Just chat</strong>
+                      <span>Skip setup for now — type anything below and we'll get going.</span>
+                    </div>
+                  </button>
                 </div>
               </div>
             ) : null}
