@@ -178,3 +178,8 @@ releases:
   - tag: v0.2.61
     features:
       - starter-prompts-auto-focus-composer
+
+  - tag: v0.2.62
+    features:
+      - cmd-enter-send
+      - escape-cancels-stream

@@ -1555,6 +1555,24 @@ export function CommandScreen({
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendPrompt(prompt);
+      return;
+    }
+    // Cmd+Enter / Ctrl+Enter — explicit send, also works WITH Shift held
+    // (some users wire Shift+Enter as "send" muscle memory from Slack/etc).
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      sendPrompt(prompt);
+      return;
+    }
+    // Escape while a turn is in flight → cancel the current stream
+    // (calls cancel_chat_stream IPC from v0.2.44). Outside busy, Escape
+    // does nothing — user can still type normally.
+    if (event.key === "Escape" && effectiveBusy) {
+      event.preventDefault();
+      const sid = activeStreamRef.current?.streamId;
+      if (sid) {
+        void invoke("cancel_chat_stream", { streamId: sid }).catch(() => undefined);
+      }
     }
   }
 
