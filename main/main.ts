@@ -1,8 +1,13 @@
 import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, shell, globalShortcut, session } from "electron";
 import { autoUpdater } from "electron-updater";
+import { initSentryMain } from "./sentry";
 import type { AiosCommand } from "./types";
 import { findClaude, validateClaude } from "./claude-finder";
+
+// Init Sentry as early as possible so it catches main-process errors during
+// the rest of bootstrap (autoUpdater wire-up, Python sidecar spawn, etc.).
+initSentryMain();
 import { initLogger, log } from "./logger";
 import { PythonHost } from "./python-host";
 import { AutoTaskScheduler } from "./scheduler";

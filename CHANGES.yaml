@@ -135,3 +135,8 @@ releases:
       - bundle-split-manual-chunks
       - lazy-load-agents-screen
       - defer-analytics-init
+
+  - tag: v0.2.52
+    features:
+      - fix-assistant-avatar-overlap
+      - revert-lazy-agents-screen

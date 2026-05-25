@@ -1,4 +1,8 @@
-import React, { startTransition, useEffect, useMemo, useState, lazy, Suspense } from "react";
+import { initSentryRenderer } from "./sentry";
+// Init Sentry before any other renderer code — wraps subsequent imports' errors.
+initSentryRenderer();
+
+import React, { startTransition, useEffect, useMemo, useState } from "react";
 import { initAnalytics, track } from "./lib/analytics";
 import { invoke as apiInvoke } from "./lib/api";
 import { createRoot } from "react-dom/client";
@@ -44,10 +48,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { BriefsScreen } from "./screens/BriefsScreen";
 import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
-// AgentsScreen pulls in @xyflow/react (~150KB gz). Lazy so it's only
-// fetched the first time the user opens Agents — keeps initial parse
-// fast for the default chat path.
-const AgentsScreen = lazy(() => import("./screens/AgentsScreen").then((m) => ({ default: m.AgentsScreen })));
+import { AgentsScreen } from "./screens/AgentsScreen";
 import { VoiceControlPanel } from "./screens/VoiceControlPanel";
 import { ControlApp } from "./screens/ControlApp";
 import { BubbleApp } from "./screens/BubbleApp";
@@ -1062,9 +1063,7 @@ function App() {
 
         {screen === "agents" && !setupRequired ? (
           <div className="screen-enter">
-            <Suspense fallback={<div style={{ padding: 40, color: "var(--gray-500)", fontSize: 13 }}>Loading agents…</div>}>
-              <AgentsScreen claude={claude} />
-            </Suspense>
+            <AgentsScreen claude={claude} />
           </div>
         ) : null}
 

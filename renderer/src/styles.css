@@ -2860,10 +2860,19 @@ body.is-mac .sidebar-brand {
 
 .aios-message.assistant {
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   column-gap: 0;
   align-self: stretch;
   margin-bottom: 0;
+}
+
+/* v0.2.37 collapsed the avatar column to 0 width but left the avatar
+   DIV rendered — it overflowed into the message body and looked like
+   "an icon is sitting on top of the text". Fixing properly by hiding
+   the whole meta block on assistant messages. The role label + time
+   were already hidden; this catches the avatar div too. */
+.aios-message.assistant .aios-message-meta {
+  display: none;
 }
 
 .aios-message-meta {
