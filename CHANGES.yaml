@@ -213,3 +213,9 @@ releases:
   - tag: v0.2.68
     features:
       - app-icon-minimal-charcoal-dot
+
+  - tag: v0.2.69
+    features:
+      - app-icon-minimal-charcoal-dot
+      - chat-empty-context-os-cards
+    notes: Re-ship of v0.2.66+v0.2.68 features after release-workflow regression in v0.2.68 blocked all 3 platforms from building.
