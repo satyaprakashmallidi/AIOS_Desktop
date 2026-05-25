@@ -174,3 +174,7 @@ releases:
   - tag: v0.2.60
     features:
       - composer-tracks-caret-on-paste
+
+  - tag: v0.2.61
+    features:
+      - starter-prompts-auto-focus-composer

@@ -1618,7 +1618,20 @@ export function CommandScreen({
                       <button
                         className="aios-chat-chip"
                         key={item.label}
-                        onClick={() => setPrompt(item.prompt)}
+                        onClick={() => {
+                          setPrompt(item.prompt);
+                          // Focus + caret-to-end so the user can immediately
+                          // edit or just hit Enter. Previously they had to
+                          // click into the composer first.
+                          window.setTimeout(() => {
+                            const ta = composerRef.current;
+                            if (ta) {
+                              ta.focus();
+                              ta.setSelectionRange(item.prompt.length, item.prompt.length);
+                              ta.scrollTop = ta.scrollHeight;
+                            }
+                          }, 0);
+                        }}
                       >
                         <Icon size={14} />
                         {item.label}
