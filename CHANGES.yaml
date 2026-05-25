@@ -124,3 +124,8 @@ releases:
     features:
       - posthog-default-on
       - analytics-disable-via-off
+
+  - tag: v0.2.50
+    features:
+      - split-repo-release-architecture
+      - public-release-repo
