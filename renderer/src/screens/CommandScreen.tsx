@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowUp,
   Bot,
   Boxes,
@@ -314,6 +315,7 @@ export function CommandScreen({
   const threadRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -1578,7 +1580,15 @@ export function CommandScreen({
             </div>
           </div>
 
-          <div className="aios-chat-thread" ref={threadRef}>
+          <div
+            className="aios-chat-thread"
+            ref={threadRef}
+            onScroll={(event) => {
+              const el = event.currentTarget;
+              const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+              setIsScrolledUp(distanceFromBottom > 120);
+            }}
+          >
             {!hasRealMessages && !busy ? (
               <div className="aios-chat-empty">
                 <div className="aios-chat-orb" aria-hidden="true">A</div>
@@ -1787,6 +1797,20 @@ export function CommandScreen({
             })() }
           </div>
 
+          {isScrolledUp ? (
+            <button
+              type="button"
+              className="aios-jump-to-latest"
+              onClick={() => {
+                const thread = threadRef.current;
+                if (thread) thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+              }}
+              aria-label="Jump to latest message"
+              data-testid="jump-to-latest"
+            >
+              <ArrowDown size={13} /> Latest
+            </button>
+          ) : null}
           {pendingQueue.length > 0 ? (
             <div className="aios-composer-queue" aria-label="Messages queued to send when Claude finishes" data-testid="composer-queue">
               <span className="aios-composer-queue-label">Queued · sends in order</span>

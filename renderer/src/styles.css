@@ -3279,6 +3279,37 @@ body.is-mac .sidebar-brand {
   line-height: 1.4;
 }
 
+/* "Jump to latest" pill — appears when the user scrolled up >120px
+   from the bottom. Pairs with the v0.2.56 smart auto-scroll: we no
+   longer yank the user down on every delta, so they need a manual
+   way to catch up. One click smooth-scrolls to the latest message. */
+.aios-jump-to-latest {
+  position: absolute;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  animation: jumpFadeIn 140ms ease;
+  font-family: inherit;
+}
+.aios-jump-to-latest:hover { opacity: 0.92; transform: translateX(-50%) translateY(-1px); }
+@keyframes jumpFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* Queued-message preview strip above the composer. Shows what's about
    to send once the current turn finishes. Each chip is removable. */
 .aios-composer-queue {
