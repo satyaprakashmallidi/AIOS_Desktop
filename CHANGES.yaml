@@ -154,3 +154,7 @@ releases:
     features:
       - sign-and-notarize-dmg
       - permanent-fix-app-damaged-error
+
+  - tag: v0.2.56
+    features:
+      - smart-chat-auto-scroll

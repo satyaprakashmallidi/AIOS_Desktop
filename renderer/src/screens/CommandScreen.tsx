@@ -515,9 +515,22 @@ export function CommandScreen({
 
   // No-op (previously used for showFullHistory)
 
+  // Smart auto-scroll. Previous behavior smooth-scrolled to bottom on EVERY
+  // message/delta change — even when the user had scrolled UP to read
+  // history mid-stream. That yanked them back to the bottom every ~200ms
+  // during streaming. Now: detect if the user was already near the bottom
+  // (within 80px); only auto-scroll if they were. If they scrolled up,
+  // leave them alone — they can hit End or click into the composer to
+  // jump back manually.
   useEffect(() => {
     const thread = threadRef.current;
-    if (thread) thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+    if (!thread) return;
+    const distanceFromBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    if (distanceFromBottom <= 80) {
+      // Use "auto" during streaming (instant follow), "smooth" on completion
+      // for a nicer settling animation.
+      thread.scrollTo({ top: thread.scrollHeight, behavior: busy ? "auto" : "smooth" });
+    }
   }, [activeSession?.messages, busy]);
 
   useEffect(() => {
