@@ -62,24 +62,10 @@ export function OnboardingScreen({
   const [answers, setAnswers] = useState<Record<string, string>>(state?.answers ?? {});
   // v0.2.63 — single freeform paragraph replaces the 8-question form. State
   // hydrates from any prior saved freeform_intro so re-runs preserve it.
-  const [freeformIntro, setFreeformIntro] = useState<string>(state?.answers?.freeform_intro ?? "");
-  const [seedFolder, setSeedFolder] = useState<{ name: string; path: string } | null>(null);
-  const [pickingFolder, setPickingFolder] = useState(false);
-
-  async function pickSeedFolder() {
-    setPickingFolder(true);
-    try {
-      const result = await invoke<{ canceled: boolean; path: string | null }>("pick_folder");
-      if (!result || result.canceled || !result.path) return;
-      const segments = result.path.split(/[\\/]/).filter(Boolean);
-      const basename = segments.length ? segments[segments.length - 1] : result.path;
-      setSeedFolder({ name: basename, path: result.path });
-    } catch {
-      // Folder pick is optional — swallow errors.
-    } finally {
-      setPickingFolder(false);
-    }
-  }
+  // v0.2.65 — name-only onboarding. The freeform paragraph + folder pick
+  // from v0.2.63/v0.2.64 became a long-form interview by accident; the
+  // proper Claude-style move is to take a name and let chat do the rest.
+  const [displayName, setDisplayName] = useState<string>(state?.answers?.display_name ?? "");
   const [draft, setDraft] = useState(() =>
     onboardingQuestions[initialStep] ? state?.answers?.[onboardingQuestions[initialStep].id] ?? "" : ""
   );
@@ -325,15 +311,18 @@ export function OnboardingScreen({
     setSaving(true);
     setSetupMessage(null);
     try {
+      // v0.2.65 — passes the display name; backend writes a tiny
+      // context/intro.md ("Call them Alex.") and saves user_display_name
+      // setting that the chat empty-state uses to greet by name.
       await invoke("complete_onboarding_freeform", {
-        text: freeformIntro,
-        seedFolderPath: seedFolder?.path ?? "",
-        seedFolderName: seedFolder?.name ?? "",
+        text: displayName.trim(),
+        seedFolderPath: "",
+        seedFolderName: "",
       });
       await onRefreshWorkspace();
       onNavigate("command");
     } catch (err) {
-      setSetupMessage(err instanceof Error ? err.message : "Could not save your intro.");
+      setSetupMessage(err instanceof Error ? err.message : "Could not save.");
     } finally {
       setSaving(false);
     }
@@ -661,53 +650,31 @@ export function OnboardingScreen({
         {stage === "profile" && !completed ? (
           <div className="onboarding-v2-body is-profile">
             <div className="onboarding-v2-intro is-tight">
-              <h1>Tell AIOS <em>about you</em>.</h1>
-              <p>A paragraph or two — what you do, what you're working on, what you'd like Claude to know going forward. Skip if you'd rather just chat; you can fill this in later from Context.</p>
+              <h1>Hi — what should we <em>call you</em>?</h1>
+              <p>Just a name. Claude will get to know the rest of you through chat — no form to fill out.</p>
             </div>
 
             <div className="card onboarding-v2-question is-tight">
-              <p className="eyebrow-rule">Intro · freeform</p>
-              <textarea
-                className="onboarding-v2-answer"
-                value={freeformIntro}
-                onChange={(event) => setFreeformIntro(event.target.value)}
+              <input
+                type="text"
+                className="onboarding-v2-name-input"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  if (event.key === "Enter") {
                     event.preventDefault();
                     void submitFreeform();
                   }
                 }}
-                placeholder="Example: I'm Alex, founder of a 4-person AI agency building voice-first tools for sales teams. We just closed our seed; the next 90 days are about getting to 10 paying customers. Stripe handles billing, Notion is our wiki, calls go through Cal.com. Be terse and skip pleasantries — I prefer direct."
-                rows={8}
+                placeholder="Alex"
                 autoFocus
-                data-testid="onboarding-freeform"
+                maxLength={60}
+                data-testid="onboarding-name"
               />
               <div className="onboarding-v2-question-foot">
-                <span>Cmd+Enter to continue · Shift+Enter for a new line</span>
-                <span>{freeformIntro.trim().length ? `${freeformIntro.trim().length} chars` : "—"}</span>
+                <span>Enter to continue</span>
+                <span>{displayName.trim().length ? `${displayName.trim().length}/60` : "—"}</span>
               </div>
-            </div>
-
-            {/* Optional folder pick — auto-derives context from a real project
-                instead of asking the user to summarize. Path is saved to
-                onboarding_seed_folder; Claude reads it on the first /prime. */}
-            <div className="onboarding-v2-folder-drop">
-              {seedFolder ? (
-                <div className="onboarding-v2-folder-attached">
-                  <span className="onboarding-v2-folder-icon" aria-hidden="true">📁</span>
-                  <div className="onboarding-v2-folder-meta">
-                    <strong>{seedFolder.name}</strong>
-                    <small>{seedFolder.path}</small>
-                  </div>
-                  <button type="button" className="onboarding-v2-folder-remove" onClick={() => setSeedFolder(null)} aria-label="Remove">
-                    Remove
-                  </button>
-                </div>
-              ) : (
-                <button type="button" className="onboarding-v2-folder-pick" onClick={pickSeedFolder} disabled={pickingFolder}>
-                  {pickingFolder ? "Opening…" : "Or attach a folder — Claude will learn from your files"}
-                </button>
-              )}
             </div>
 
             <div className="onboarding-v2-foot">

@@ -489,14 +489,20 @@ def complete_onboarding(answers: dict[str, Any] | None = None) -> dict[str, Any]
 
 def complete_onboarding_freeform(text: str, seed_folder_path: str = "", seed_folder_name: str = "") -> dict[str, Any]:
     """v0.2.63 — replaces the 8-question form with a single paragraph.
-    v0.2.64 — optionally accepts a seed folder the user drops/picks during
-    onboarding. The path + name go into context/intro.md so Claude can read
-    the folder via Glob/Read on the first /prime. Path is also persisted
-    to app_state.onboarding_seed_folder for future use (e.g. auto-index).
-    Empty text + no folder behaves like a Skip."""
+    v0.2.64 — optionally accepts a seed folder during onboarding.
+    v0.2.65 — `text` is now just a display name (Claude.ai-style: take a
+    name, drop to chat, conversation does the rest). The form param keeps
+    its name for IPC compat but stores `user_display_name` setting + a
+    tiny "Call them X" note in intro.md. Long-paragraph freeform support
+    is preserved (handled identically — written to intro.md verbatim)."""
     text = (text or "").strip()
     folder_path = (seed_folder_path or "").strip()
     folder_name = (seed_folder_name or "").strip()
+
+    # Treat a short single-line input as a display name; multi-line or long
+    # text is freeform. Heuristic: <= 60 chars + no newlines.
+    is_display_name = bool(text) and "\n" not in text and len(text) <= 60
+
     if text or folder_path:
         context_dir = workspace_root() / "context"
         context_dir.mkdir(parents=True, exist_ok=True)
@@ -505,12 +511,23 @@ def complete_onboarding_freeform(text: str, seed_folder_path: str = "", seed_fol
             "",
             f"Captured during onboarding · {utc_now()}",
             "",
-            "> Freeform self-introduction. Claude reads this on /prime and uses it",
-            "> to ground every session. Edit anytime from Context → intro.md.",
-            "",
         ]
-        if text:
-            intro_lines.extend([text, ""])
+        if is_display_name:
+            intro_lines.extend([
+                f"Call them **{text}**.",
+                "",
+                "_The user hasn't shared more yet — Claude should naturally invite_",
+                "_them to share what they're working on as the conversation unfolds._",
+                "",
+            ])
+        elif text:
+            intro_lines.extend([
+                "> Freeform self-introduction. Claude reads this on /prime and uses",
+                "> it to ground every session. Edit anytime from Context → intro.md.",
+                "",
+                text,
+                "",
+            ])
         if folder_path:
             intro_lines.extend([
                 "## Seed folder",
@@ -525,11 +542,15 @@ def complete_onboarding_freeform(text: str, seed_folder_path: str = "", seed_fol
             ])
         (context_dir / "intro.md").write_text("\n".join(intro_lines), encoding="utf-8")
 
+    if is_display_name:
+        set_setting("user_display_name", text)
     if folder_path:
         set_setting("onboarding_seed_folder", folder_path)
 
     answers_update: dict[str, Any] = {}
-    if text:
+    if is_display_name:
+        answers_update["display_name"] = text
+    elif text:
         answers_update["freeform_intro"] = text
     if folder_path:
         answers_update["seed_folder"] = folder_path

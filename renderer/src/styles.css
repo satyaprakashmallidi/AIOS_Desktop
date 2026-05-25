@@ -2269,6 +2269,26 @@ body.is-mac .sidebar-brand {
   color: var(--sage);
 }
 
+/* v0.2.65 — onboarding name input. Single-line, minimal Claude.ai-style.
+   The whole "tell me about you" reduces to one field. */
+.onboarding-v2-name-input {
+  width: 100%;
+  padding: 14px 16px;
+  font-family: var(--font-body);
+  font-size: 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+.onboarding-v2-name-input:focus {
+  border-color: var(--sage);
+  background: var(--surface);
+}
+.onboarding-v2-name-input::placeholder { color: var(--gray-400); }
+
 /* v0.2.64 — onboarding seed-folder picker. Sits between the freeform
    textarea card and the foot bar. Ghost button when empty; sage chip
    with name + path + remove when attached. */

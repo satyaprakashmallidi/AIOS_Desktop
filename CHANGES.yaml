@@ -194,3 +194,8 @@ releases:
     features:
       - onboarding-seed-folder-pick
       - auto-derive-context-from-folder
+
+  - tag: v0.2.65
+    features:
+      - onboarding-name-only
+      - chat-greets-by-name

@@ -343,6 +343,14 @@ export function CommandScreen({
   const [pendingQueue, setPendingQueue] = useState<Array<{ text: string; attachments: ChatAttachmentInput[] }>>([]);
   const lastBusyRef = useRef(false);
   const [previewFolder, setPreviewFolder] = useState<ChatAttachmentInput | null>(null);
+  // Display name from onboarding (v0.2.65) — used to personalize the chat
+  // empty state. null = not set or onboarding skipped.
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  useEffect(() => {
+    invoke<{ key: string; value: string | null }>("get_setting", { key: "user_display_name" })
+      .then((res) => { if (res?.value) setDisplayName(res.value); })
+      .catch(() => undefined);
+  }, []);
   const [dragActive, setDragActive] = useState(false);
   const dragCounterRef = useRef(0);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -1627,8 +1635,10 @@ export function CommandScreen({
               <div className="aios-chat-empty">
                 <div className="aios-chat-orb" aria-hidden="true">A</div>
                 <p className="aios-chat-kicker">AIOS · Command</p>
-                <h2>What should we <em>work on</em>?</h2>
-                <p>Start with a summary, review your context, or ask AIOS to turn a rough idea into the next action.</p>
+                <h2>
+                  {displayName ? <>Hi {displayName} — what should we <em>work on</em>?</> : <>What should we <em>work on</em>?</>}
+                </h2>
+                <p>{displayName ? `Tell me what you do or what you're building, and I'll get going. Or pick a starter below.` : `Start with a summary, review your context, or ask AIOS to turn a rough idea into the next action.`}</p>
                 <div className="aios-chat-empty-actions">
                   {starterPrompts.map((item) => {
                     const Icon = item.icon;
