@@ -149,3 +149,8 @@ releases:
     features:
       - fix-app-reopen-stale-sidecar
       - composer-scroll-long-paste
+
+  - tag: v0.2.55
+    features:
+      - sign-and-notarize-dmg
+      - permanent-fix-app-damaged-error

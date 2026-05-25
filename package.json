@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.54",
+  "version": "0.2.55",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -132,8 +132,11 @@
     },
     "dmg": {
       "title": "${productName} ${version}",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "sign": true,
+      "writeUpdateInfo": true
     },
+    "afterAllArtifactBuild": "build/notarize-dmg.cjs",
     "win": {
       "target": [
         {
