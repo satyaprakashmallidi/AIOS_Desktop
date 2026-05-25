@@ -157,7 +157,7 @@
     "publish": {
       "provider": "github",
       "owner": "everyai-com",
-      "repo": "AIOS_Desktop",
+      "repo": "AIOS_Desktop-releases",
       "releaseType": "release"
     }
   }
