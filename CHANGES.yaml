@@ -140,3 +140,7 @@ releases:
     features:
       - fix-assistant-avatar-overlap
       - revert-lazy-agents-screen
+
+  - tag: v0.2.53
+    features:
+      - fix-chat-panel-centering

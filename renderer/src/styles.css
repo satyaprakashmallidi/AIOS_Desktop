@@ -2651,6 +2651,15 @@ body.is-mac .sidebar-brand {
   padding: 18px 24px 22px;
   overflow: hidden;
   background: var(--paper);
+  /* Explicit flex container so the chat-panel centers reliably regardless
+     of margin-auto behavior. The screenshot from v0.2.50 showed the panel
+     pushed to the left on a wide window — happened because margin: 0 auto
+     can be ignored when the parent is a CSS grid item with no defined
+     justify rule. Belt + braces: flex container with center alignment
+     ON TOP OF the panel's max-width + margin auto. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .app-shell[data-screen="command"]:not(.setup-required) .app-main {
