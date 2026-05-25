@@ -29,6 +29,9 @@ import { invoke } from "../lib/api";
 const CLICK_MOVEMENT_THRESHOLD_PX = 8;
 
 function BubbleMark() {
+  // fill="currentColor" so the mark inherits the parent CSS color, which
+  // is theme-tokened via var(--ink). Light theme → black mark on white
+  // circle; dark theme → light mark on near-black circle.
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
       <text
@@ -39,12 +42,40 @@ function BubbleMark() {
         fontStyle="italic"
         fontWeight={400}
         fontSize="22"
-        fill="#ECEEED"
+        fill="currentColor"
       >
         a
       </text>
     </svg>
   );
+}
+
+// Cross-window theme sync. The main window writes `aios-theme` to
+// localStorage on every theme change. We listen via the `storage` event
+// (fires across same-origin BrowserWindows) AND poll localStorage every
+// 1s as a bulletproof fallback in case the event doesn't propagate for
+// some reason (Electron version, session quirks, etc.). First-paint
+// hydration is already handled by the inline script in index.html.
+function useThemeSync(): void {
+  useEffect(() => {
+    function applyFromStorage() {
+      let value: string | null = null;
+      try { value = localStorage.getItem("aios-theme"); } catch { /* ignore */ }
+      const next = value || "light";
+      const current = document.documentElement.getAttribute("data-theme");
+      if (current !== next) document.documentElement.setAttribute("data-theme", next);
+    }
+    const handler = (e: StorageEvent) => {
+      if (e.key !== "aios-theme") return;
+      applyFromStorage();
+    };
+    window.addEventListener("storage", handler);
+    const poll = window.setInterval(applyFromStorage, 1000);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.clearInterval(poll);
+    };
+  }, []);
 }
 
 interface VoiceStateEvent {
@@ -60,6 +91,7 @@ interface VoiceStateEvent {
 }
 
 export function BubbleApp() {
+  useThemeSync();
   const [running, setRunning] = useState(false);
   const downAt = useRef<{ x: number; y: number } | null>(null);
 

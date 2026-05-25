@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, ArrowUp, Bot, CheckCircle2, History, Keyboard, Loader2, Mic, MicOff, MousePointer2, Pin, PinOff, Power, Settings as SettingsIcon, Square, X } from "lucide-react";
+import { AlertCircle, ArrowUp, CheckCircle2, History, Loader2, MessageSquare, Mic, MicOff, MousePointer2, Settings as SettingsIcon, Square, X } from "lucide-react";
 import { invoke } from "../lib/api";
 import type { ClaudeStatus } from "../types";
 
@@ -109,11 +109,13 @@ export function VoiceControlPanel({
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [transcript, setTranscript] = useState("");
   const [inputText, setInputText] = useState("");
-  const [docked, setDocked] = useState(true);
   const [cursorFollow, setCursorFollow] = useState(false);
   const [cursorColor, setCursorColor] = useState<string>("#9caf9b");
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
-  const [activeSection, setActiveSection] = useState<"settings" | "recent" | null>(null);
+  // Top-level tab routing in the popup: Chat (status + composer), Recent
+  // (history list), Settings (cursor companion + Quit). Defaults to Chat
+  // so first-open lands on the primary surface.
+  const [activeTab, setActiveTab] = useState<"chat" | "recent" | "settings">("chat");
   // When the agent BLOCKs with a clarifying question, we stash the original
   // transcript + the question here. The next user message gets prefixed
   // with this context so Claude continues the original task with the
@@ -126,14 +128,12 @@ export function VoiceControlPanel({
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  // In popup mode, sync dock state + cursor-overlay state on mount.
+  // Sync cursor-overlay state on mount so the in-popup toggle reflects
+  // the actual overlay state across reopens. Dock pin button is gone — the
+  // popup always auto-docks to the bubble; drag the popup to free-float.
   useEffect(() => {
     if (!popupMode) return;
     (async () => {
-      try {
-        const dr = await invoke<{ docked: boolean }>("control_panel_get_docked");
-        if (dr?.docked !== undefined) setDocked(!!dr.docked);
-      } catch { /* non-fatal */ }
       try {
         const cr = await invoke<{ active: boolean }>("cursor_overlay_get_active");
         if (cr?.active !== undefined) setCursorFollow(!!cr.active);
@@ -176,17 +176,13 @@ export function VoiceControlPanel({
     await invoke("control_close_all");
   }
 
-  function toggleSection(name: "settings" | "recent") {
-    setActiveSection((current) => (current === name ? null : name));
-  }
-
-  function replayCommand(text: string) {
+  function openCommand(text: string) {
+    // Open (don't auto-execute) a past command — load the text into the
+    // Chat composer and switch tabs so the user can review/edit before
+    // deciding whether to send. Previous behaviour auto-submitted, which
+    // ran agent actions immediately on every click — surprising.
     setInputText(text);
-    // Trigger submit on next frame so the input state has settled.
-    requestAnimationFrame(() => {
-      // Inline submit so we don't depend on inputText timing.
-      void runText(text);
-    });
+    setActiveTab("chat");
   }
 
   async function runText(text: string) {
@@ -229,12 +225,6 @@ export function VoiceControlPanel({
     } catch (err) {
       setPhase({ kind: "error", message: err instanceof Error ? err.message : "Failed to start." });
     }
-  }
-
-  async function toggleDock() {
-    const next = !docked;
-    setDocked(next);
-    try { await invoke("control_panel_set_docked", { docked: next }); } catch { /* non-fatal */ }
   }
 
   async function toggleCursorFollow() {
@@ -473,207 +463,136 @@ export function VoiceControlPanel({
     phase.kind === "thinking" ||
     phase.kind === "executing";
 
+  const placeholder = (() => {
+    if (phase.kind === "listening") return "Listening…";
+    if (phase.kind === "transcribing") return "Transcribing…";
+    if (phase.kind === "thinking") return "Thinking…";
+    if (phase.kind === "executing") return "Working…";
+    return claude?.path ? "Tell Claude what to do…" : "Configure Claude CLI first";
+  })();
+
   return (
-    <div className={`voice-panel${popupMode ? " is-popup" : ""}`} role="dialog" aria-label="Computer Control">
-      <header className="voice-panel-head">
-        <div className="voice-panel-title">
-          <span className={`status-dot ${statusToneClass(phase)}`} aria-hidden="true" />
-          {popupMode ? "Control" : "Computer control"}
-          {popupMode && <span className="voice-panel-status-inline">{statusTextFor(phase)}</span>}
-        </div>
-        <div className="voice-panel-head-actions">
-          {popupMode && (
-            <button
-              type="button"
-              className={`voice-panel-pin${docked ? " is-docked" : ""}`}
-              onClick={toggleDock}
-              aria-label={docked ? "Undock from bubble" : "Dock to bubble"}
-              title={docked ? "Undock — move freely" : "Dock to bubble"}
-            >
-              {docked ? <Pin size={12} /> : <PinOff size={12} />}
-            </button>
-          )}
-          <button
-            type="button"
-            className="voice-panel-close"
-            onClick={() => {
-              if (isActive) abortLoop();
-              onClose();
-            }}
-            aria-label="Close"
-          >
-            <X size={13} />
-          </button>
-        </div>
-      </header>
-
-      <div className="voice-panel-body">
-        {phase.kind === "idle" && !popupMode && (
-          <p className="voice-panel-hint">
-            Type a command or tap the mic — AIOS will drive your screen. Hotkey:{" "}
-            {IS_MAC ? (
-              <><kbd>⌘</kbd>+<kbd>⌥</kbd></>
-            ) : (
-              <><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd></>
-            )}.
-          </p>
-        )}
-
-        {popupMode && phase.kind === "idle" && (
-          <div className="hotkey-hint">
-            <Keyboard size={12} />
-            {IS_MAC ? (
-              <span>Press <kbd>⌘</kbd>+<kbd>⌥</kbd> from any app</span>
-            ) : (
-              <span>Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> from any app</span>
-            )}
-          </div>
-        )}
-
-        {phase.kind === "listening" && (
-          <div className="voice-panel-status listening">
-            <span className="voice-pulse" />
-            Listening… tap mic to send.
-          </div>
-        )}
-        {phase.kind === "transcribing" && (
-          <div className="voice-panel-status">
-            <Loader2 size={14} className="spin" />
-            Transcribing…
-          </div>
-        )}
-        {phase.kind === "thinking" && (
-          <div className="voice-panel-status">
-            <Loader2 size={14} className="spin" />
-            Thinking… <span className="voice-turn">turn {phase.turn}</span>
-          </div>
-        )}
-        {phase.kind === "executing" && (
-          <div className="voice-panel-status executing">
-            <Activity size={14} />
-            <div className="voice-panel-action">
-              <span className="voice-action-line">
-                <ActionLabel action={phase.action} />
-              </span>
-              {phase.rationale && <span className="voice-action-rationale">{phase.rationale}</span>}
-            </div>
-          </div>
-        )}
-        {phase.kind === "done" && (
-          <div className="voice-panel-status done">
-            <CheckCircle2 size={14} />
-            {phase.summary || "Done."}
-          </div>
-        )}
-        {phase.kind === "blocked" && (
-          <div className="voice-panel-status blocked">
-            <AlertCircle size={14} />
-            {phase.reason}
-          </div>
-        )}
-        {phase.kind === "error" && (
-          <div className="voice-panel-status error">
-            <AlertCircle size={14} />
-            {phase.message}
-          </div>
-        )}
-
-        {transcript && phase.kind !== "idle" && (
-          <div className="voice-panel-transcript">
-            <span className="voice-panel-transcript-label">You said:</span>
-            <span className="voice-panel-transcript-text">{transcript}</span>
-          </div>
-        )}
-
-        {popupMode && activeSection === "settings" && (
-          <section className="control-section is-open">
-            <header className="control-section-head">
-              <span className="control-section-label">Settings</span>
-            </header>
-            <ToggleRow
-              icon={<MousePointer2 size={12} />}
-              title="Cursor follower"
-              subtitle={cursorFollow ? "Companion trails your cursor" : "Off — no cursor companion"}
-              value={cursorFollow}
-              onChange={toggleCursorFollow}
-            />
-            {cursorFollow && (
-              <div className="control-color-row">
-                <span className="control-color-label">Color</span>
-                <div className="control-color-swatches">
-                  {[
-                    "#9caf9b", "#60a5fa", "#a78bfa", "#f87171",
-                    "#fbbf24", "#34d399", "#f4f5f7"
-                  ].map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={`cursor-color-option${c.toLowerCase() === cursorColor.toLowerCase() ? " is-selected" : ""}`}
-                      style={{ background: c }}
-                      onClick={() => pickCursorColor(c)}
-                      aria-label={`Set cursor color ${c}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {popupMode && activeSection === "recent" && (
-          <section className="control-section is-open">
-            <header className="control-section-head">
-              <span className="control-section-label"><History size={11} /> Recent</span>
-              {historyEntries.length > 0 && (
-                <button
-                  type="button"
-                  className="control-section-action"
-                  onClick={clearHistory}
-                  aria-label="Clear history"
-                >
-                  Clear
-                </button>
-              )}
-            </header>
-            {historyEntries.length === 0 ? (
-              <div className="control-empty">No commands yet — try typing one below.</div>
-            ) : (
-              <div className="control-history-list">
-                {historyEntries.slice(0, 8).map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className="control-history-item"
-                    onClick={() => replayCommand(entry.text)}
-                    title="Run this command again"
-                  >
-                    <span className="control-history-text">{entry.text}</span>
-                    <span className="control-history-ts">{timeAgo(entry.ts)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+    <div className="voice-popup" role="dialog" aria-label="Computer Control">
+      {/* Slim drag bar: grabber affordance on the left, close X on the right. */}
+      <div className="voice-popup-dragbar">
+        <span className="voice-popup-grabber" aria-hidden="true" />
+        <button
+          type="button"
+          className="voice-popup-close"
+          onClick={() => { if (isActive) abortLoop(); onClose(); }}
+          aria-label="Close"
+        >
+          <X size={12} />
+        </button>
       </div>
 
-      <div className="voice-panel-input-bar">
-        {phase.kind === "listening" ? (
-          <button type="button" className="voice-mic-btn is-recording" onClick={stopListening} aria-label="Stop listening">
-            <Square size={14} fill="currentColor" />
-            Send
-          </button>
-        ) : isActive ? (
-          <button type="button" className="voice-mic-btn is-stop" onClick={abortLoop} aria-label="Abort">
-            <Square size={14} fill="currentColor" />
-            Stop
-          </button>
-        ) : (
-          <div className="voice-panel-input-row">
+      {/* Header — sage italic "Control" heading + a live status row that
+          only renders when something is actually happening. In idle state
+          the heading sits alone (no "Ready" noise). */}
+      <div className="voice-popup-head">
+        <span className="voice-popup-eyebrow">Control</span>
+        {phase.kind !== "idle" ? (
+          <div className="voice-popup-status">
+            <span className={`status-dot ${statusToneClass(phase)}`} aria-hidden="true" />
+            <span className="voice-popup-status-text">{statusTextFor(phase)}</span>
+            {(phase.kind === "thinking" || phase.kind === "executing") && (
+              <span className="voice-popup-status-meta">turn {phase.turn}</span>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Three top-level tabs. Each pane below renders only when its tab
+          is active. Chat (default) holds the conversational surface;
+          Recent holds replayable command history; Settings holds cursor
+          companion + Quit. */}
+      <div className="voice-popup-tabs" role="tablist" aria-label="Computer Control sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "chat"}
+          className={`voice-popup-tab${activeTab === "chat" ? " is-active" : ""}`}
+          onClick={() => setActiveTab("chat")}
+        >
+          <MessageSquare size={13} />
+          <span>Chat</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "recent"}
+          className={`voice-popup-tab${activeTab === "recent" ? " is-active" : ""}`}
+          onClick={() => setActiveTab("recent")}
+        >
+          <History size={13} />
+          <span>Recent</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "settings"}
+          className={`voice-popup-tab${activeTab === "settings" ? " is-active" : ""}`}
+          onClick={() => setActiveTab("settings")}
+        >
+          <SettingsIcon size={13} />
+          <span>Settings</span>
+        </button>
+      </div>
+
+      {/* ─── CHAT TAB ─────────────────────────────────────────────────── */}
+      {activeTab === "chat" ? (
+        <div className="voice-popup-pane is-chat" role="tabpanel">
+          {/* Activity card — transcript + action label + result. Only renders
+              when there's something to show (i.e. not idle with no transcript). */}
+          {(transcript ||
+            phase.kind === "executing" ||
+            phase.kind === "done" ||
+            phase.kind === "blocked" ||
+            phase.kind === "error") ? (
+            <div className="voice-popup-activity">
+              {transcript ? (
+                <div className="voice-popup-transcript">
+                  <span className="voice-popup-transcript-label">You said</span>
+                  <p className="voice-popup-transcript-text">"{transcript}"</p>
+                </div>
+              ) : null}
+              {phase.kind === "executing" ? (
+                <div className="voice-popup-action">
+                  <span className="voice-popup-action-line">
+                    <ActionLabel action={phase.action} />
+                  </span>
+                  {phase.rationale ? (
+                    <span className="voice-popup-action-rationale">{phase.rationale}</span>
+                  ) : null}
+                </div>
+              ) : null}
+              {phase.kind === "done" ? (
+                <p className="voice-popup-result is-done">
+                  <CheckCircle2 size={12} /> {phase.summary || "Done."}
+                </p>
+              ) : null}
+              {phase.kind === "blocked" ? (
+                <p className="voice-popup-result is-blocked">
+                  <AlertCircle size={12} /> {phase.reason}
+                </p>
+              ) : null}
+              {phase.kind === "error" ? (
+                <p className="voice-popup-result is-error">
+                  <AlertCircle size={12} /> {phase.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Spacer pushes composer to bottom of pane. */}
+          <div className="voice-popup-pane-spacer" />
+
+          {/* Composer pill — input + inline mic + send. */}
+          <div className="voice-popup-composer">
             <input
               type="text"
-              className="voice-panel-input"
-              placeholder={claude?.path ? "Type a command…" : "Configure Claude CLI first"}
+              className="voice-popup-input"
+              placeholder={placeholder}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
@@ -682,65 +601,138 @@ export function VoiceControlPanel({
                   submitText();
                 }
               }}
-              disabled={!claude?.path}
+              disabled={!claude?.path || isActive}
               aria-label="Type a command"
             />
+            {isActive ? (
+              <button
+                type="button"
+                className="voice-popup-composer-btn is-stop"
+                onClick={phase.kind === "listening" ? stopListening : abortLoop}
+                aria-label={phase.kind === "listening" ? "Stop listening" : "Stop"}
+                title={phase.kind === "listening" ? "Stop & send" : "Stop"}
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="voice-popup-composer-btn is-mic"
+                  onClick={startListening}
+                  disabled={!claude?.path}
+                  aria-label="Start listening"
+                  title={!claude?.path ? "Claude CLI not configured" : `Talk (${IS_MAC ? "⌘+⌥" : "Ctrl+Alt+V"})`}
+                >
+                  {claude?.path ? <Mic size={13} /> : <MicOff size={13} />}
+                </button>
+                <button
+                  type="button"
+                  className={`voice-popup-composer-btn is-send${inputText.trim().length > 0 ? " is-ready" : ""}`}
+                  onClick={submitText}
+                  disabled={!claude?.path || inputText.trim().length === 0}
+                  aria-label="Send command"
+                  title="Send"
+                >
+                  <ArrowUp size={13} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* ─── RECENT TAB ───────────────────────────────────────────────── */}
+      {activeTab === "recent" ? (
+        <div className="voice-popup-pane is-recent" role="tabpanel">
+          <div className="voice-popup-section-head">
+            <span className="voice-popup-section-eyebrow"><History size={10} /> Recent chats</span>
+            {historyEntries.length > 0 ? (
+              <button
+                type="button"
+                className="voice-popup-section-action"
+                onClick={clearHistory}
+                aria-label="Clear history"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+          {historyEntries.length === 0 ? (
+            <p className="voice-popup-empty">No commands yet — head to Chat and try one.</p>
+          ) : (
+            <ul className="voice-popup-recent">
+              {historyEntries.map((entry) => (
+                <li key={entry.id}>
+                  <button
+                    type="button"
+                    className="voice-popup-recent-item"
+                    onClick={() => openCommand(entry.text)}
+                    title="Open in chat (does not auto-send)"
+                  >
+                    <span className="voice-popup-recent-text">{entry.text}</span>
+                    <span className="voice-popup-recent-ts">{timeAgo(entry.ts)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {/* ─── SETTINGS TAB ─────────────────────────────────────────────── */}
+      {activeTab === "settings" ? (
+        <div className="voice-popup-pane is-settings" role="tabpanel">
+          <div className="voice-popup-section">
             <button
               type="button"
-              className="voice-mic-icon-btn"
-              onClick={startListening}
-              disabled={!claude?.path}
-              aria-label="Start listening"
-              title={!claude?.path ? "Claude CLI not configured" : `Talk (${IS_MAC ? "⌘+⌥" : "Ctrl+Alt+V"})`}
+              className="voice-popup-row-toggle"
+              onClick={toggleCursorFollow}
+              role="switch"
+              aria-checked={cursorFollow}
             >
-              {claude?.path ? <Mic size={14} /> : <MicOff size={14} />}
+              <span className="voice-popup-row-icon"><MousePointer2 size={12} /></span>
+              <span className="voice-popup-row-text">Cursor companion</span>
+              <span className={`voice-popup-switch${cursorFollow ? " is-on" : ""}`}>
+                <span className="voice-popup-switch-knob" />
+              </span>
             </button>
+            {cursorFollow ? (
+              <div className="voice-popup-swatches">
+                {[
+                  "#9caf9b", "#60a5fa", "#a78bfa", "#f87171",
+                  "#fbbf24", "#34d399", "#0d0d0d"
+                ].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`voice-popup-swatch${c.toLowerCase() === cursorColor.toLowerCase() ? " is-selected" : ""}`}
+                    style={{ background: c }}
+                    onClick={() => pickCursorColor(c)}
+                    aria-label={`Set cursor color ${c}`}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="voice-popup-rule" />
+
+          <div className="voice-popup-settings-foot">
+            <span className="voice-popup-hotkey">
+              {IS_MAC ? (<><kbd>⌘</kbd><kbd>⌥</kbd></>) : (<><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd></>)}
+            </span>
             <button
               type="button"
-              className="voice-send-btn"
-              onClick={submitText}
-              disabled={!claude?.path || inputText.trim().length === 0}
-              aria-label="Send command"
-              title="Send"
+              className="voice-popup-quit"
+              onClick={quitControl}
+              title="Hide bubble + panel + cursor companion"
             >
-              <ArrowUp size={14} />
+              Quit
             </button>
           </div>
-        )}
-      </div>
-
-      {popupMode && (
-        <footer className="control-foot-bar">
-          <button
-            type="button"
-            className={`control-foot-btn${activeSection === "settings" ? " is-active" : ""}`}
-            onClick={() => toggleSection("settings")}
-            title="Control settings"
-          >
-            <SettingsIcon size={11} />
-            Settings
-          </button>
-          <button
-            type="button"
-            className={`control-foot-btn${activeSection === "recent" ? " is-active" : ""}`}
-            onClick={() => toggleSection("recent")}
-            title="Recent commands"
-          >
-            <History size={11} />
-            Recent
-          </button>
-          <span className="control-foot-spacer" />
-          <button
-            type="button"
-            className="control-foot-btn is-quit"
-            onClick={quitControl}
-            title="Hide bubble + panel + cursor companion"
-          >
-            <Power size={11} />
-            Quit
-          </button>
-        </footer>
-      )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -771,40 +763,6 @@ function statusToneClass(phase: Phase): string {
     case "error": return "is-error";
     default: return "";
   }
-}
-
-function ToggleRow({
-  icon,
-  title,
-  subtitle,
-  value,
-  onChange
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  value: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <div className="control-toggle-row">
-      <span className="control-toggle-icon">{icon}</span>
-      <div className="control-toggle-text">
-        <span className="control-toggle-title">{title}</span>
-        <span className="control-toggle-subtitle">{subtitle}</span>
-      </div>
-      <button
-        type="button"
-        className={`control-switch${value ? " is-on" : ""}`}
-        onClick={onChange}
-        role="switch"
-        aria-checked={value}
-        aria-label={title}
-      >
-        <span className="control-switch-knob" />
-      </button>
-    </div>
-  );
 }
 
 function ActionLabel({ action }: { action: { type: string; args: Record<string, string> } }) {

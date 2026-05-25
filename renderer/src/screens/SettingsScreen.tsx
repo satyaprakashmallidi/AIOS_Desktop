@@ -624,6 +624,16 @@ function AppearancePanel() {
 
   async function pick(value: string) {
     setTheme(value);
+    // Apply IMMEDIATELY so the user sees the theme change in this frame
+    // instead of waiting up to 10s for App.tsx's `get_setting("theme")`
+    // poll to notice. Mirrors what App.tsx's theme effect does:
+    // data-theme attribute (main window themes), localStorage (instant
+    // hydration on next launch + cross-window broadcast to bubble +
+    // popup via storage event), cacheTheme (disk cache for next cold
+    // start's BrowserWindow backgroundColor).
+    try { document.documentElement.setAttribute("data-theme", value); } catch { /* ignore */ }
+    try { localStorage.setItem("aios-theme", value); } catch { /* ignore */ }
+    try { window.aios?.cacheTheme?.(value); } catch { /* ignore */ }
     await invoke("set_setting", { key: "theme", value }).catch(() => undefined);
   }
 

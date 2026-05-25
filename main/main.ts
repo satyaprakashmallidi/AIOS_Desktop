@@ -143,7 +143,9 @@ const mainHandledCommands = new Set<AiosCommand>([
   "control_open_settings",
   "control_panel_prepare_mic",
   "control_panel_release_mic",
-  "pick_folder"
+  "pick_folder",
+  "open_external_path",
+  "reveal_external_path"
 ]);
 
 // Theme cache lives in userData so the main process can pick the right
@@ -589,6 +591,34 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
       });
     }
     return { canceled: false, path: folderPath, requiresTccPrompt };
+  }
+
+  if (cmd === "open_external_path") {
+    // Open an arbitrary absolute file or folder in the OS default handler.
+    // shell.openPath handles both: files go to the default app for that
+    // extension (.pdf → Preview/Acrobat, .png → Photos, etc.), folders open
+    // in Explorer/Finder. No workspace scoping — the path must already be
+    // one the user explicitly granted access to (e.g. via pick_folder or
+    // by being a Linked Folder they added themselves).
+    const targetPath = String(args.path ?? "");
+    if (!targetPath || !path.isAbsolute(targetPath)) {
+      return { ok: false, error: "Absolute path required" };
+    }
+    const err = await shell.openPath(targetPath);
+    if (err) return { ok: false, error: err };
+    return { ok: true };
+  }
+
+  if (cmd === "reveal_external_path") {
+    // Reveal an arbitrary absolute path in Explorer/Finder with the item
+    // selected. Used by the Linked Folder browser footer when the user
+    // wants to jump out to the OS file manager from the current folder.
+    const targetPath = String(args.path ?? "");
+    if (!targetPath || !path.isAbsolute(targetPath)) {
+      return { ok: false, error: "Absolute path required" };
+    }
+    shell.showItemInFolder(targetPath);
+    return { ok: true };
   }
 
   if (cmd === "run_auto_task_now") {

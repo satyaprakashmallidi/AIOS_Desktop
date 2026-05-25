@@ -2,14 +2,24 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
   ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  File,
+  FileArchive,
+  FileCode,
+  FileSpreadsheet,
+  FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  Image as ImageIcon,
   Inbox,
   Loader2,
+  Music,
   Star,
   Trash2,
   Upload,
+  Video,
   X
 } from "lucide-react";
 import { invoke } from "../lib/api";
@@ -95,6 +105,7 @@ export function ImportsScreen({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [openFolder, setOpenFolder] = useState<ImportFolder | null>(null);
+  const [openLinked, setOpenLinked] = useState<LinkedFolder | null>(null);
   const [creating, setCreating] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -406,6 +417,7 @@ export function ImportsScreen({
                   key={folder.absolutePath}
                   folder={folder}
                   busy={busy}
+                  onOpen={() => setOpenLinked(folder)}
                   onUnlink={() => unlinkFolder(folder)}
                 />
               ))}
@@ -443,6 +455,13 @@ export function ImportsScreen({
           onDelete={() => deleteFolder(openFolder)}
           onAskClaude={onAskClaude}
           deleteFile={(file) => deleteFile(file, openFolder.name)}
+        />
+      ) : null}
+
+      {openLinked ? (
+        <LinkedFolderBrowserModal
+          folder={openLinked}
+          onClose={() => setOpenLinked(null)}
         />
       ) : null}
 
@@ -534,15 +553,17 @@ function FolderCard({
 function LinkedFolderCard({
   folder,
   busy,
+  onOpen,
   onUnlink,
 }: {
   folder: LinkedFolder;
   busy: boolean;
+  onOpen: () => void;
   onUnlink: () => void;
 }) {
   return (
     <article className="import-folder-card is-linked">
-      <div className="import-folder-card-main is-linked">
+      <button type="button" className="import-folder-card-main" onClick={onOpen}>
         <div className="import-folder-card-icon"><FolderOpen size={18} /></div>
         <div className="import-folder-card-text">
           <strong title={folder.absolutePath}>{folder.name}</strong>
@@ -553,7 +574,7 @@ function LinkedFolderCard({
             @mentionable in chat · added {formatDate(folder.addedAt)}
           </span>
         </div>
-      </div>
+      </button>
       <div className="import-folder-card-actions" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
@@ -810,6 +831,233 @@ function FolderDetailModal({
           >
             <Trash2 size={13} />
             Delete folder
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+interface BrowserEntry {
+  name: string;
+  path: string;
+  kind: "file" | "folder";
+  size: number;
+  extension: string;
+  modifiedAt: string;
+}
+
+const IS_MAC = typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh");
+
+function fileIconFor(extension: string) {
+  const ext = extension.toLowerCase();
+  if (["md", "markdown", "txt", "rtf", "log", "rst"].includes(ext)) return FileText;
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "heic", "tiff"].includes(ext)) return ImageIcon;
+  if (["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma"].includes(ext)) return Music;
+  if (["mp4", "mov", "avi", "webm", "mkv", "m4v", "wmv"].includes(ext)) return Video;
+  if (["zip", "tar", "gz", "tgz", "7z", "rar", "bz2", "xz"].includes(ext)) return FileArchive;
+  if (["csv", "tsv", "xls", "xlsx", "numbers", "ods"].includes(ext)) return FileSpreadsheet;
+  if ([
+    "js", "ts", "tsx", "jsx", "py", "go", "rs", "java", "kt", "swift", "c", "cpp", "h", "hpp",
+    "rb", "php", "cs", "scala", "lua", "sh", "ps1", "bat", "json", "yaml", "yml", "toml",
+    "html", "css", "scss", "xml", "sql", "vue", "svelte", "dart", "ex", "exs", "ml"
+  ].includes(ext)) return FileCode;
+  return File;
+}
+
+function pathSeparator(absPath: string): "\\" | "/" {
+  return absPath.includes("\\") && !absPath.includes("/") ? "\\" : (absPath.startsWith("/") ? "/" : "\\");
+}
+
+function splitPath(absPath: string): { segments: string[]; sep: "\\" | "/" } {
+  const sep = pathSeparator(absPath);
+  if (sep === "\\") {
+    // Windows: "C:\Users\foo\bar" → ["C:", "Users", "foo", "bar"]
+    const parts = absPath.replace(/\\+$/, "").split("\\").filter((p) => p.length > 0);
+    return { segments: parts, sep };
+  }
+  // POSIX: "/Users/foo/bar" → ["/", "Users", "foo", "bar"]
+  const parts = absPath.replace(/\/+$/, "").split("/").filter((p) => p.length > 0);
+  return { segments: ["/", ...parts], sep };
+}
+
+function joinSegments(segments: string[], sep: "\\" | "/"): string {
+  if (sep === "\\") return segments.join("\\");
+  if (segments[0] === "/") return "/" + segments.slice(1).join("/");
+  return segments.join("/");
+}
+
+function LinkedFolderBrowserModal({ folder, onClose }: { folder: LinkedFolder; onClose: () => void }) {
+  const rootPath = folder.absolutePath;
+  const [currentPath, setCurrentPath] = useState<string>(rootPath);
+  const [entries, setEntries] = useState<BrowserEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    invoke<{ entries: BrowserEntry[]; error?: string; truncated?: boolean }>(
+      "browse_external_directory",
+      { path: currentPath, limit: 500 }
+    )
+      .then((res) => {
+        if (cancelled) return;
+        setEntries(res?.entries ?? []);
+        setError(res?.error ?? null);
+        setTruncated(!!res?.truncated);
+      })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [currentPath]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const { segments: rootSegments, sep } = splitPath(rootPath);
+  const { segments: currentSegments } = splitPath(currentPath);
+  // Breadcrumb shows the folder name first (instead of "C:" or "/"), then any
+  // subfolders the user has drilled into. Each crumb jumps back to that level.
+  const crumbStartIndex = rootSegments.length - 1;
+  const crumbs = currentSegments.slice(crumbStartIndex).map((name, idx) => {
+    const upTo = currentSegments.slice(0, crumbStartIndex + idx + 1);
+    const fullPath = joinSegments(upTo, sep);
+    const label = idx === 0 ? folder.name : name;
+    return { label, path: fullPath };
+  });
+
+  const canGoUp = currentPath !== rootPath;
+  function goUp() {
+    if (!canGoUp) return;
+    const next = currentSegments.slice(0, -1);
+    setCurrentPath(joinSegments(next, sep));
+  }
+
+  function openEntry(entry: BrowserEntry) {
+    if (entry.kind === "folder") {
+      setCurrentPath(entry.path);
+    } else {
+      invoke<{ ok: boolean; error?: string }>("open_external_path", { path: entry.path }).catch(() => {});
+    }
+  }
+
+  function revealCurrentInNative() {
+    invoke<{ ok: boolean; error?: string }>("open_external_path", { path: currentPath }).catch(() => {});
+  }
+
+  const folderCount = entries.filter((e) => e.kind === "folder").length;
+  const fileCount = entries.length - folderCount;
+  const nativeLabel = IS_MAC ? "Open in Finder" : "Open in Explorer";
+
+  return (
+    <div className="detail-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="detail-modal-card linked-browser-card" onClick={(e) => e.stopPropagation()}>
+        <header className="linked-browser-head">
+          <div className="linked-browser-head-row">
+            <button
+              type="button"
+              className="linked-browser-up"
+              onClick={goUp}
+              disabled={!canGoUp}
+              title="Go up one folder"
+              aria-label="Go up one folder"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <nav className="linked-browser-crumbs" aria-label="Folder path">
+              {crumbs.map((c, idx) => (
+                <span key={c.path} className="linked-browser-crumb-group">
+                  {idx > 0 ? <ChevronRight size={11} className="linked-browser-crumb-sep" /> : null}
+                  <button
+                    type="button"
+                    className={`linked-browser-crumb ${idx === crumbs.length - 1 ? "is-current" : ""}`}
+                    onClick={() => idx < crumbs.length - 1 && setCurrentPath(c.path)}
+                    disabled={idx === crumbs.length - 1}
+                    title={c.path}
+                  >
+                    {c.label}
+                  </button>
+                </span>
+              ))}
+            </nav>
+            <button
+              type="button"
+              className="detail-modal-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <p className="linked-browser-fullpath" title={currentPath}>{currentPath}</p>
+        </header>
+
+        <div className="linked-browser-body">
+          {loading ? (
+            <div className="linked-browser-state">
+              <Loader2 size={16} className="spin" /> Loading…
+            </div>
+          ) : error ? (
+            <div className="linked-browser-state is-error">{error}</div>
+          ) : entries.length === 0 ? (
+            <div className="linked-browser-state">This folder is empty.</div>
+          ) : (
+            <ul className="linked-browser-list">
+              {entries.map((entry) => {
+                const Icon = entry.kind === "folder" ? Folder : fileIconFor(entry.extension);
+                return (
+                  <li key={entry.path}>
+                    <button
+                      type="button"
+                      className={`linked-browser-row is-${entry.kind}`}
+                      onClick={() => openEntry(entry)}
+                      title={entry.kind === "folder" ? "Open folder" : "Open in default app"}
+                    >
+                      <span className="linked-browser-row-icon">
+                        <Icon size={16} />
+                      </span>
+                      <span className="linked-browser-row-name">{entry.name}</span>
+                      <span className="linked-browser-row-meta">
+                        {entry.kind === "file" ? formatBytes(entry.size) : ""}
+                      </span>
+                      <span className="linked-browser-row-date">
+                        {formatDate(entry.modifiedAt)}
+                      </span>
+                      {entry.kind === "folder" ? (
+                        <ChevronRight size={13} className="linked-browser-row-chevron" />
+                      ) : (
+                        <ExternalLink size={12} className="linked-browser-row-open" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {truncated ? (
+            <div className="linked-browser-truncated">Showing first 500 items only.</div>
+          ) : null}
+        </div>
+
+        <footer className="linked-browser-foot">
+          <span className="linked-browser-count">
+            {entries.length > 0
+              ? `${folderCount} ${folderCount === 1 ? "folder" : "folders"} · ${fileCount} ${fileCount === 1 ? "file" : "files"}`
+              : ""}
+          </span>
+          <button
+            type="button"
+            className="button button-ghost compact"
+            onClick={revealCurrentInNative}
+          >
+            <ExternalLink size={13} />
+            {nativeLabel}
           </button>
         </footer>
       </div>

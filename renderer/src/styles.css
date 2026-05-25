@@ -117,63 +117,70 @@ body.window-hidden *, body.window-hidden *::before, body.window-hidden *::after 
 /* ─── Theme Overrides ───────────────────────────────────────────────────── */
 
 /* Dark theme tokens */
+/* Warm-dark palette (v0.2.57) — Claude.ai / Notion family.
+   Hex values ending in `18` / `22` / `2a` have a subtle warm undertone
+   instead of pure neutral gray — reads as "comforting dark" not "void."
+   Borders are slightly LIGHTER than the new --paper so cards keep their
+   depth (in pitch-black mode they were invisible). Ink is warm off-white
+   (#f0ece8) instead of pure white — reduces blue-light fatigue on long
+   sessions, especially in chat. */
 [data-theme="dark"] {
-  --paper:        #0d0d0d;
-  --surface:      #1a1a1a;
-  --surface-soft: #262626;
-  --surface-deep: #333333;
+  --paper:        #1a1a18;
+  --surface:      #242422;
+  --surface-soft: #2d2d2a;
+  --surface-deep: #3a3a36;
 
-  --ink:        #fafaf7;
-  --ink-soft:   #d1d1d1;
-  --gray-700:   #a3a3a3;
-  --gray-500:   #737373;
-  --gray-400:   #525252;
-  --gray-300:   #404040;
-  --gray-200:   #262626;
-  --gray-100:   #1a1a1a;
+  --ink:        #f0ece8;
+  --ink-soft:   #c9c4bf;
+  --gray-700:   #8e8986;
+  --gray-500:   #6b6662;
+  --gray-400:   #4f4b48;
+  --gray-300:   #36332f;
+  --gray-200:   #2d2d2a;
+  --gray-100:   #242422;
 
-  --border:        #262626;
-  --border-strong: #404040;
-  --border-focus:  rgba(156, 175, 165, 0.35);
+  --border:        #36332f;
+  --border-strong: #4f4b48;
+  --border-focus:  rgba(156, 175, 165, 0.40);
 
   --sage:        #9caf9b;
-  --sage-soft:   rgba(156, 175, 165, 0.12);
-  --sage-line:   rgba(156, 175, 165, 0.22);
+  --sage-soft:   rgba(156, 175, 165, 0.14);
+  --sage-line:   rgba(156, 175, 165, 0.26);
 
-  --bg-glass: rgba(13, 13, 13, 0.85);
+  --bg-glass: rgba(26, 26, 24, 0.92);
   --bg-surface: var(--surface);
-  
+
   color-scheme: dark;
 }
 
-/* Auto theme — follows system preference */
+/* Auto theme — follows system preference, same warm-dark palette. */
 @media (prefers-color-scheme: dark) {
   [data-theme="auto"] {
-    --paper:        #0d0d0d;
-    --surface:      #1a1a1a;
-    --surface-soft: #262626;
-    --surface-deep: #333333;
+    --paper:        #1a1a18;
+    --surface:      #242422;
+    --surface-soft: #2d2d2a;
+    --surface-deep: #3a3a36;
 
-    --ink:        #fafaf7;
-    --ink-soft:   #d1d1d1;
-    --gray-700:   #a3a3a3;
-    --gray-500:   #737373;
-    --gray-400:   #525252;
-    --gray-300:   #404040;
-    --gray-200:   #262626;
-    --gray-100:   #1a1a1a;
+    --ink:        #f0ece8;
+    --ink-soft:   #c9c4bf;
+    --gray-700:   #8e8986;
+    --gray-500:   #6b6662;
+    --gray-400:   #4f4b48;
+    --gray-300:   #36332f;
+    --gray-200:   #2d2d2a;
+    --gray-100:   #242422;
 
-    --border:        #262626;
-    --border-strong: #404040;
-    --border-focus:  rgba(156, 175, 165, 0.35);
+    --border:        #36332f;
+    --border-strong: #4f4b48;
+    --border-focus:  rgba(156, 175, 165, 0.40);
 
     --sage:        #9caf9b;
-    --sage-soft:   rgba(156, 175, 165, 0.12);
-    --sage-line:   rgba(156, 175, 165, 0.22);
+    --sage-soft:   rgba(156, 175, 165, 0.14);
+    --sage-line:   rgba(156, 175, 165, 0.26);
 
-    --bg-glass: rgba(13, 13, 13, 0.85);
+    --bg-glass: rgba(26, 26, 24, 0.92);
     --bg-surface: var(--surface);
-    
+
     color-scheme: dark;
   }
 }
@@ -473,8 +480,8 @@ body.is-mac .app-sidebar {
 }
 
 .sidebar-toggle-btn:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #2a2826;
+  background: var(--surface-soft);
+  color: var(--ink);
 }
 
 .sidebar-collapsed .sidebar-toggle-btn {
@@ -583,17 +590,17 @@ body.is-mac .sidebar-brand {
   text-align: left;
 }
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.26);
-  color: #2b2927;
+  background: var(--surface-soft);
+  color: var(--ink);
 }
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.62);
-  color: #232220;
-  box-shadow: inset 0 0 0 1px rgba(26, 26, 26, 0.035), 0 1px 2px rgba(15, 23, 42, 0.025);
+  background: var(--surface-deep);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--border), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .nav-item.active svg {
-  color: #1f1f1f;
+  color: var(--ink);
 }
 
 
@@ -665,7 +672,7 @@ body.is-mac .sidebar-brand {
 }
 
 .window-control:hover {
-  background: rgba(13, 13, 13, 0.05);
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
@@ -810,6 +817,87 @@ body.is-mac .sidebar-brand {
 .banner-warning { border-color: rgba(202, 138, 4, 0.2); background: var(--warning-soft); color: var(--warning); }
 .banner-success { border-color: rgba(22, 163, 74, 0.2); background: var(--success-soft); color: var(--success); }
 .banner-info { border-color: rgba(37, 99, 235, 0.2); background: var(--info-soft); color: var(--info); }
+
+/* "AIOS updated to vX.Y.Z" — slim sage strip below the header.
+   Restrained, editorial; matches the rest of the app's aesthetic. */
+.aios-whatsnew-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: var(--sage-soft);
+  border-bottom: 1px solid var(--sage-line);
+  font-size: 12.5px;
+  color: var(--ink);
+  animation: whatsnewSlideDown 220ms var(--ease-out, ease-out);
+}
+@keyframes whatsnewSlideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.aios-whatsnew-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sage);
+  flex: none;
+}
+.aios-whatsnew-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.aios-whatsnew-text strong {
+  font-family: var(--font-display, "Instrument Serif", Georgia, serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--sage);
+  letter-spacing: 0;
+  margin: 0 2px;
+}
+.aios-whatsnew-link {
+  flex: none;
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sage);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease);
+}
+.aios-whatsnew-link:hover {
+  background: var(--sage-line);
+  color: var(--ink);
+}
+.aios-whatsnew-link::after {
+  content: " →";
+  font-family: var(--font-body);
+}
+.aios-whatsnew-close {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--gray-500);
+  cursor: pointer;
+  flex: none;
+  transition: background 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease);
+}
+.aios-whatsnew-close:hover {
+  background: var(--sage-line);
+  color: var(--ink);
+}
 
 /* ─── Workspace Screen ──────────────────────────────────────────────────────── */
 .workspace-screen {
@@ -1191,8 +1279,8 @@ body.is-mac .sidebar-brand {
   box-shadow: none;
 }
 .file-row:hover {
-  border-color: rgba(26, 26, 26, 0.08);
-  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--border-strong);
+  background: var(--surface);
 }
 .file-row.active, .file-row.selected {
   border-color: var(--border-accent);
@@ -2430,7 +2518,7 @@ body.is-mac .sidebar-brand {
   transition: background var(--duration-base) var(--ease-out);
 }
 .onboarding-v2-link:hover {
-  background: rgba(61, 90, 74, 0.14);
+  background: var(--sage-soft);
 }
 .onboarding-v2-copy-row {
   display: flex;
@@ -2825,10 +2913,10 @@ body.is-mac .sidebar-brand {
 }
 .aios-chat-thread:hover::-webkit-scrollbar-thumb,
 .aios-chat-thread:focus-within::-webkit-scrollbar-thumb {
-  background: rgba(13, 13, 13, 0.18);
+  background: var(--gray-400);
   background-clip: padding-box;
 }
-.aios-chat-thread::-webkit-scrollbar-thumb:hover { background: rgba(13, 13, 13, 0.32); background-clip: padding-box; }
+.aios-chat-thread::-webkit-scrollbar-thumb:hover { background: var(--gray-500); background-clip: padding-box; }
 
 .aios-chat-panel.is-empty .aios-chat-thread { justify-content: center; }
 
@@ -3055,7 +3143,7 @@ body.is-mac .sidebar-brand {
 
 .aios-message.assistant .aios-message-body,
 .aios-message.assistant .message-actions {
-  grid-column: 2;
+  grid-column: 1;
 }
 
 /* Claude-style assistant bubble — restraint over decoration.
@@ -3124,8 +3212,8 @@ body.is-mac .sidebar-brand {
 }
 
 .aios-attachment-chip:hover {
-  background: rgba(61, 90, 74, 0.09);
-  border-color: rgba(61, 90, 74, 0.32);
+  background: var(--sage-soft);
+  border-color: var(--sage-line);
 }
 
 .aios-attachment-chip:active {
@@ -3257,6 +3345,206 @@ body.is-mac .sidebar-brand {
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--gray-500);
+}
+
+/* Linked-folder browser modal — in-app file/folder browser for Linked Folders
+   on the Imports page. Reuses .detail-modal-overlay / .detail-modal-card.
+   Per-row interactions: folder rows drill in, file rows open in OS default
+   app via shell.openPath. Footer button hands off to Explorer / Finder. */
+.linked-browser-card {
+  max-width: 720px;
+  width: 100%;
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+.linked-browser-head {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.linked-browser-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.linked-browser-up {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  cursor: pointer;
+  flex: none;
+  transition: background 120ms var(--ease-out), opacity 120ms var(--ease-out);
+}
+.linked-browser-up:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+.linked-browser-up:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.linked-browser-crumbs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+}
+.linked-browser-crumb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.linked-browser-crumb {
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--sage);
+  cursor: pointer;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 120ms var(--ease-out);
+}
+.linked-browser-crumb:hover:not(:disabled) {
+  background: var(--surface-soft);
+  text-decoration: underline;
+}
+.linked-browser-crumb.is-current {
+  color: var(--ink);
+  font-weight: 500;
+  cursor: default;
+}
+.linked-browser-crumb-sep {
+  color: var(--gray-400);
+  flex: none;
+}
+.linked-browser-fullpath {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gray-500);
+  margin: 0;
+  padding-left: 36px;
+  word-break: break-all;
+}
+.linked-browser-body {
+  flex: 1;
+  overflow-y: auto;
+}
+.linked-browser-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  font-size: 13px;
+  color: var(--gray-500);
+}
+.linked-browser-state.is-error {
+  color: var(--danger, #c0392b);
+}
+.linked-browser-list {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+}
+.linked-browser-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 80px 110px 16px;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  padding: 8px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background 100ms var(--ease-out);
+}
+.linked-browser-row:hover {
+  background: var(--surface-soft);
+}
+.linked-browser-row.is-folder .linked-browser-row-icon {
+  color: var(--sage);
+}
+.linked-browser-row.is-file .linked-browser-row-icon {
+  color: var(--gray-500);
+}
+.linked-browser-row-icon {
+  display: grid;
+  place-items: center;
+}
+.linked-browser-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linked-browser-row.is-folder .linked-browser-row-name {
+  font-weight: 500;
+}
+.linked-browser-row-meta,
+.linked-browser-row-date {
+  font-size: 11px;
+  color: var(--gray-500);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.linked-browser-row-chevron {
+  color: var(--gray-400);
+}
+.linked-browser-row-open {
+  color: var(--gray-400);
+  opacity: 0;
+  transition: opacity 100ms var(--ease-out);
+}
+.linked-browser-row:hover .linked-browser-row-open {
+  opacity: 0.8;
+}
+.linked-browser-truncated {
+  padding: 12px 20px;
+  font-size: 11px;
+  color: var(--gray-500);
+  font-style: italic;
+  text-align: center;
+}
+.linked-browser-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.linked-browser-count {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+@media (max-width: 640px) {
+  .linked-browser-row {
+    grid-template-columns: 24px 1fr 60px 14px;
+  }
+  .linked-browser-row-date {
+    display: none;
+  }
 }
 
 .aios-attachment-name {
@@ -3610,11 +3898,13 @@ body.is-mac .sidebar-brand {
 }
 .aios-ask-option:active { transform: translateY(1px); }
 
-/* Claude-style blockquote — gray rule, no background fill. */
+/* Claude-style blockquote — gray rule, no background fill.
+   Uses --gray-400 not --gray-300 so the left rule stays visible in dark mode
+   (gray-300 is too close to --paper in the warm-dark palette). */
 .aios-message.assistant .aios-markdown blockquote {
   margin: 12px 0;
   padding: 4px 0 4px 14px;
-  border-left: 2px solid var(--gray-300);
+  border-left: 2px solid var(--gray-400);
   background: transparent;
   color: var(--ink-soft);
 }
@@ -4289,24 +4579,38 @@ body.is-mac .sidebar-brand {
   margin: 4px 0 10px;
   border: 0;
   border-radius: 10px;
-  background: #111827;
-  color: #ffffff;
+  background: var(--ink);
+  color: var(--paper);
   font-size: 13.5px;
   font-weight: 600;
   letter-spacing: -0.005em;
   cursor: pointer;
-  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.10);
+  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
   font-family: inherit;
 }
 .sidebar-quick-action:hover {
-  background: #1d2939;
-  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.18);
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
   transform: translateY(-1px);
+}
+/* Dark mode — full-white primary button felt blinding against the warm-dark
+   sidebar. Lift to a deep surface tile instead; reads as "primary" without
+   the stark contrast slap. */
+[data-theme="dark"] .sidebar-quick-action {
+  background: var(--surface-deep);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+[data-theme="dark"] .sidebar-quick-action:hover {
+  filter: none;
+  background: var(--border-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 .sidebar-quick-action:active {
   transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.10);
+  filter: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
 }
 .sidebar-quick-action svg { width: 15px; height: 15px; flex: none; }
 
@@ -4714,7 +5018,7 @@ body.is-mac .sidebar-brand {
   outline: none;
   transition: border-color var(--duration-base) var(--ease-out);
 }
-.settings-content .field input:focus { border-color: var(--gray-400); box-shadow: 0 0 0 3px rgba(13, 13, 13, 0.04); }
+.settings-content .field input:focus { border-color: var(--gray-400); box-shadow: 0 0 0 3px var(--sage-soft); }
 
 .settings-content .banner {
   margin-top: 12px;
@@ -7406,6 +7710,13 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .confirm-modal-actions .button-ghost:hover {
   background: #e5e7eb;
 }
+[data-theme="dark"] .confirm-modal-actions .button-ghost {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+[data-theme="dark"] .confirm-modal-actions .button-ghost:hover {
+  background: var(--surface-deep);
+}
 
 .confirm-modal-actions .button-primary {
   background: #111111;
@@ -7414,6 +7725,14 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 }
 .confirm-modal-actions .button-primary:hover {
   background: #000000;
+}
+[data-theme="dark"] .confirm-modal-actions .button-primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+[data-theme="dark"] .confirm-modal-actions .button-primary:hover {
+  background: var(--ink);
+  filter: brightness(0.92);
 }
 
 .confirm-modal-actions .button-danger {
@@ -9776,7 +10095,10 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
 .agents-hero {
   padding: 8px 22px 9px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0));
+  /* Token-based gradient — in light theme the soft surface fades to nothing
+     (gives a subtle highlight); in dark theme the same token reads as a soft
+     lift instead of the previous milky-white stripe across the canvas. */
+  background: linear-gradient(180deg, var(--surface-soft), transparent);
 }
 .agents-hero-text {
   display: flex;
@@ -9882,7 +10204,10 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   pointer-events: none;
 }
 .agents-canvas .react-flow__edge-path {
-  stroke: rgba(17, 17, 17, 0.28);
+  stroke: var(--border-strong);
+}
+[data-theme="dark"] .agents-canvas .react-flow__edge-path {
+  stroke: rgba(156, 175, 155, 0.35);
 }
 .agents-canvas .react-flow__node {
   cursor: pointer;
@@ -10354,10 +10679,15 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Computer Control bubble window (v0.2.2+) ─────────────────────────────
+/* ── Computer Control bubble window (v0.2.2+, themed v0.2.56) ─────────────
    56x56 transparent BrowserWindow that lives at the top-right of the
-   user's primary display. Inside is a 44px circular button (ink fill,
-   bot icon). Click → toggles the panel window below. */
+   user's primary display. Inside is a 44px circular button with the
+   italic "a" brand mark.
+
+   Contrast against the app, not match: light theme renders a BLACK
+   circle with a light mark; dark theme renders a near-WHITE circle with
+   a dark mark. The bubble is meant to read as a system-tray dot — it
+   should stand out from the canvas, not blend in. */
 .control-bubble {
   position: fixed;
   inset: 6px;            /* leaves a 6px margin inside the 56px window
@@ -10365,13 +10695,14 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #14161a;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: #f4f5f7;
+  background: var(--ink);
+  color: var(--surface);
+  border: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08);
   /* Drag is implemented manually via pointer events in BubbleApp.tsx
      (mousedown → control_bubble_drag_start IPC, pointermove →
      control_bubble_drag_to, pointerup → either control_panel_toggle if
@@ -10380,25 +10711,33 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
      drag region still fires onClick on quick taps — that turned out
      to be unreliable on macOS in Electron 39+. The OS-native drag
      intercepted every mouse event and the popup never opened. */
-  transition: transform 120ms ease, background 140ms ease;
+  transition: transform 120ms var(--ease-out, ease), box-shadow 140ms var(--ease-out, ease), filter 120ms var(--ease-out, ease);
+}
+[data-theme="dark"] .control-bubble {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 .control-bubble:active { cursor: grabbing; }
 .control-bubble:hover {
-  background: #1d2026;
-  transform: scale(1.05);
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.12);
+}
+[data-theme="dark"] .control-bubble:hover {
+  filter: brightness(0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.35);
 }
 .control-bubble:active { transform: scale(0.97); }
+/* Running — soft sage halo around the bubble so it reads as "active".
+   Bubble color stays inverted so the spinner remains readable. */
 .control-bubble.is-running {
-  background: #2c3340;
-  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 2px var(--sage-soft), 0 4px 12px rgba(0, 0, 0, 0.18);
 }
 .control-bubble .spin { animation: spin 1s linear infinite; }
 
-/* ── Computer Control popup window root (v0.2.2+) ──────────────────────────
+/* ── Computer Control popup window root (v0.2.2+, redesign v0.2.56) ──────
    Loaded inside a borderless transparent BrowserWindow positioned at the
-   top right of the user's primary display. The .voice-panel.is-popup
-   variant below fills this root so the panel IS the popup chrome —
-   TipTour-style dark, rounded, click-and-drag header. */
+   top right of the user's primary display. The .voice-popup variant
+   below fills this root and is the visible chrome. */
 .control-popup-root {
   position: fixed;
   inset: 0;
@@ -10406,6 +10745,603 @@ aside.aios-sb-v2 .aios-sidebar-settings svg {
   background: transparent;
   /* Soft drop-shadow lives on the inner panel so the transparent margin
      around the rounded corners passes through cleanly. */
+}
+
+/* ── Redesigned popup (v0.2.56) ─────────────────────────────────────────────
+   Theme-aware via the same var(--*) tokens the rest of the app uses.
+   Light theme renders a paper-white panel with ink text; dark renders
+   surface-dark with ink-light. Layout (top→bottom):
+
+     dragbar     thin top strip with grabber affordance + close X
+     head        sage italic "Control" eyebrow + status row (dot + text)
+     body        scrollable area: activity card, Cursor section, Recent
+     composer    pinned above the footer (chat-app convention)
+     foot        hotkey hint left, Quit link right
+*/
+.voice-popup {
+  position: static;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif);
+  font-size: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  animation: voicePopupIn 160ms var(--ease-out, ease-out);
+}
+[data-theme="dark"] .voice-popup {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes voicePopupIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Drag bar — top strip, draggable region. The grabber is decorative; the
+   X close button restores no-drag so it remains clickable. */
+.voice-popup-dragbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px;
+  -webkit-app-region: drag;
+  flex: none;
+}
+.voice-popup-grabber {
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong, var(--border));
+  opacity: 0.55;
+}
+.voice-popup-close {
+  -webkit-app-region: no-drag;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--gray-500);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease);
+}
+.voice-popup-close:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+/* Header — sage italic eyebrow + live status row. Sits between the drag
+   bar and the tab bar so it's visible on every tab. */
+.voice-popup-head {
+  flex: none;
+  padding: 4px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.voice-popup-eyebrow {
+  font-family: var(--font-display, "Instrument Serif", Georgia, serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--sage);
+  letter-spacing: -0.015em;
+  line-height: 1;
+}
+
+/* Tab bar — segmented pill toggle (Apple/Notion-style). Container is a
+   soft pill, active tab lifts into a white card with subtle shadow. */
+.voice-popup-tabs {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin: 4px 14px 10px;
+  padding: 4px;
+  background: var(--surface-soft);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.voice-popup-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-500);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 140ms var(--ease-out, ease), background 140ms var(--ease-out, ease), box-shadow 140ms var(--ease-out, ease);
+}
+.voice-popup-tab svg {
+  flex: none;
+  opacity: 0.85;
+  transition: opacity 140ms var(--ease-out, ease);
+}
+.voice-popup-tab:hover:not(.is-active) {
+  color: var(--ink);
+}
+.voice-popup-tab:hover:not(.is-active) svg {
+  opacity: 1;
+}
+.voice-popup-tab.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+.voice-popup-tab.is-active svg {
+  opacity: 1;
+  color: var(--ink);
+}
+[data-theme="dark"] .voice-popup-tab.is-active {
+  background: var(--surface-deep);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+/* Tab panes — one of three shown at a time based on activeTab state. */
+.voice-popup-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  gap: 12px;
+  overflow-y: auto;
+  animation: voicePopupPaneIn 160ms var(--ease-out, ease-out);
+}
+.voice-popup-pane::-webkit-scrollbar { width: 6px; }
+.voice-popup-pane::-webkit-scrollbar-thumb {
+  background: var(--border-strong, var(--border));
+  border-radius: 3px;
+}
+.voice-popup-pane::-webkit-scrollbar-track { background: transparent; }
+@keyframes voicePopupPaneIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Pushes the composer to the bottom of the Chat pane regardless of how
+   much activity content sits above it. */
+.voice-popup-pane-spacer {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Settings tab footer — hotkey hint + Quit. Sits at bottom of the
+   Settings pane (not a global footer anymore). */
+.voice-popup-settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.voice-popup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--gray-500);
+  line-height: 1;
+}
+.voice-popup-status-text {
+  color: var(--ink);
+  font-weight: 500;
+}
+.voice-popup-status-meta {
+  color: var(--gray-500);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+/* status-dot tone classes — defined globally elsewhere with hardcoded
+   semantic colors. Soften them slightly in light theme so they don't
+   blast against the paper surface. */
+[data-theme="light"] .status-dot.is-listening { background: #d97706; box-shadow: 0 0 6px rgba(217, 119, 6, 0.35); }
+[data-theme="light"] .status-dot.is-active    { background: #4d705c; box-shadow: 0 0 6px rgba(77, 112, 92, 0.35); }
+[data-theme="light"] .status-dot.is-done      { background: #16a34a; }
+[data-theme="light"] .status-dot.is-blocked   { background: #d97706; }
+[data-theme="light"] .status-dot.is-error     { background: #dc2626; }
+[data-theme="light"] .status-dot.is-idle      { background: #9ca3af; }
+
+/* Scrollable body. */
+.voice-popup-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.voice-popup-body::-webkit-scrollbar { width: 6px; }
+.voice-popup-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong, var(--border));
+  border-radius: 3px;
+}
+.voice-popup-body::-webkit-scrollbar-track { background: transparent; }
+
+/* Activity card — only renders when there's transcript or non-idle state. */
+.voice-popup-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.voice-popup-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.voice-popup-transcript-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gray-500);
+}
+.voice-popup-transcript-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink);
+  font-style: italic;
+}
+.voice-popup-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.voice-popup-action-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.voice-popup-action-line em {
+  font-style: normal;
+  color: var(--sage);
+}
+.voice-popup-action-rationale {
+  font-size: 10.5px;
+  color: var(--gray-500);
+  line-height: 1.4;
+  padding-left: 18px;
+}
+.voice-popup-result {
+  margin: 0;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.voice-popup-result.is-done    { color: #16a34a; }
+.voice-popup-result.is-blocked { color: #d97706; }
+.voice-popup-result.is-error   { color: #dc2626; }
+[data-theme="dark"] .voice-popup-result.is-done    { color: #86efac; }
+[data-theme="dark"] .voice-popup-result.is-blocked { color: #fcd34d; }
+[data-theme="dark"] .voice-popup-result.is-error   { color: #fca5a5; }
+
+/* Hairline divider between body sections. */
+.voice-popup-rule {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+  flex: none;
+}
+
+/* Body sections (Cursor + Recent). */
+.voice-popup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.voice-popup-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease);
+}
+.voice-popup-row-toggle:hover { background: var(--surface-soft); }
+.voice-popup-row-icon {
+  display: grid;
+  place-items: center;
+  color: var(--gray-500);
+  flex: none;
+}
+.voice-popup-row-text {
+  flex: 1;
+  min-width: 0;
+}
+.voice-popup-switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  flex: none;
+  transition: background 160ms var(--ease-out, ease), border-color 160ms var(--ease-out, ease);
+}
+.voice-popup-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.55;
+  transition: transform 160ms var(--ease-out, ease), background 160ms var(--ease-out, ease), opacity 160ms var(--ease-out, ease);
+}
+.voice-popup-switch.is-on {
+  background: var(--sage);
+  border-color: var(--sage);
+}
+.voice-popup-switch.is-on .voice-popup-switch-knob {
+  background: var(--surface);
+  opacity: 1;
+  transform: translateX(12px);
+}
+
+/* Cursor color swatches — render when toggle is on. */
+.voice-popup-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 4px;
+}
+.voice-popup-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 120ms var(--ease-out, ease), border-color 120ms var(--ease-out, ease);
+}
+.voice-popup-swatch:hover { transform: scale(1.1); }
+.voice-popup-swatch.is-selected {
+  border-color: var(--ink);
+  transform: scale(1.15);
+}
+
+/* Section head (eyebrow + Clear action). */
+.voice-popup-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+}
+.voice-popup-section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gray-500);
+}
+.voice-popup-section-action {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--gray-500);
+  cursor: pointer;
+  transition: color 120ms var(--ease-out, ease);
+}
+.voice-popup-section-action:hover { color: var(--ink); }
+.voice-popup-empty {
+  margin: 0;
+  padding: 8px 8px;
+  font-size: 11px;
+  color: var(--gray-500);
+  font-style: italic;
+}
+
+/* Recent list. */
+.voice-popup-recent {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.voice-popup-recent-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease);
+}
+.voice-popup-recent-item:hover { background: var(--surface-soft); }
+.voice-popup-recent-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-popup-recent-ts {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--gray-500);
+}
+
+/* Composer pill — pinned to bottom of the Chat pane via the spacer above. */
+.voice-popup-composer {
+  flex: none;
+  margin: 0;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: border-color 140ms var(--ease-out, ease), background 140ms var(--ease-out, ease);
+  -webkit-app-region: no-drag;
+}
+.voice-popup-composer:focus-within {
+  border-color: var(--sage-line, var(--sage));
+  background: var(--surface);
+}
+.voice-popup-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 6px 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.voice-popup-input::placeholder { color: var(--gray-500); }
+.voice-popup-input:disabled { color: var(--gray-500); cursor: not-allowed; }
+.voice-popup-composer-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--gray-500);
+  cursor: pointer;
+  flex: none;
+  transition: background 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease), opacity 120ms var(--ease-out, ease);
+}
+.voice-popup-composer-btn:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+[data-theme="dark"] .voice-popup-composer-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+.voice-popup-composer-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.voice-popup-composer-btn.is-send.is-ready {
+  background: var(--sage);
+  color: var(--surface);
+  opacity: 1;
+}
+.voice-popup-composer-btn.is-send.is-ready:hover:not(:disabled) {
+  background: var(--sage);
+  filter: brightness(1.05);
+  color: var(--surface);
+}
+[data-theme="dark"] .voice-popup-composer-btn.is-send.is-ready {
+  color: var(--paper);
+}
+.voice-popup-composer-btn.is-stop {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+}
+.voice-popup-composer-btn.is-stop:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.16);
+  color: #dc2626;
+}
+[data-theme="dark"] .voice-popup-composer-btn.is-stop {
+  background: rgba(252, 165, 165, 0.10);
+  color: #fca5a5;
+}
+[data-theme="dark"] .voice-popup-composer-btn.is-stop:hover:not(:disabled) {
+  background: rgba(252, 165, 165, 0.18);
+  color: #fca5a5;
+}
+
+/* Footer — hotkey hint + Quit link. */
+.voice-popup-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px 10px;
+}
+.voice-popup-hotkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--gray-500);
+}
+.voice-popup-hotkey kbd {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  color: var(--gray-500);
+  line-height: 1;
+}
+.voice-popup-quit {
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--gray-500);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease);
+}
+.voice-popup-quit:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+}
+[data-theme="dark"] .voice-popup-quit:hover {
+  background: rgba(252, 165, 165, 0.08);
+  color: #fca5a5;
 }
 .control-popup-root .voice-panel.is-popup {
   position: static;

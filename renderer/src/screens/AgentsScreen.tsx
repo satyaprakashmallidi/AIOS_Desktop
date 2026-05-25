@@ -132,6 +132,25 @@ function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
 
 const NODE_TYPES = { agent: AgentNode };
 
+// Tracks the current `data-theme` attribute on <html> so canvas-side colors
+// (ReactFlow Background dots) can flip with the app theme. App.tsx writes the
+// attribute directly when the user picks a theme — same-window writes don't
+// fire `storage` events, so we use a MutationObserver on the html attribute.
+function useCurrentTheme(): string {
+  const [theme, setTheme] = useState<string>(() => {
+    if (typeof document === "undefined") return "light";
+    return document.documentElement.getAttribute("data-theme") || "light";
+  });
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setTheme(document.documentElement.getAttribute("data-theme") || "light");
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
+}
+
 export function AgentsScreen({ claude }: { claude: ClaudeStatus | null }) {
   return (
     <ReactFlowProvider>
@@ -149,6 +168,10 @@ function AgentsCanvas({ claude }: { claude: ClaudeStatus | null }) {
   const positionsRef = useRef<StoredPositions>(loadStoredPositions());
   const rf = useReactFlow();
   const persistTimer = useRef<number | null>(null);
+  const theme = useCurrentTheme();
+  const dotsColor = theme === "dark"
+    ? "rgba(156, 175, 165, 0.10)"   // sage-with-alpha — visible on warm-dark paper
+    : "rgba(17, 17, 17, 0.08)";      // existing light value
 
   useEffect(() => {
     void refresh();
@@ -246,7 +269,10 @@ function AgentsCanvas({ claude }: { claude: ClaudeStatus | null }) {
         target: a.id,
         type: "smoothstep",
         animated: false,
-        style: { stroke: "rgba(17, 17, 17, 0.28)", strokeWidth: 1.5 }
+        // Stroke color comes from CSS — `.agents-canvas .react-flow__edge-path`
+        // is theme-tokened (border-strong in light, sage-alpha in dark).
+        // Passing stroke here would override the CSS and break dark mode.
+        style: { strokeWidth: 1.5 }
       }));
   }, [agents]);
 
@@ -402,7 +428,7 @@ function AgentsCanvas({ claude }: { claude: ClaudeStatus | null }) {
             elementsSelectable
             className="agents-canvas"
           >
-            <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="rgba(17,17,17,0.08)" />
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1} color={dotsColor} />
             <Controls showInteractive={false} showFitView={false} />
           </ReactFlow>
         )}

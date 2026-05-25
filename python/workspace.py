@@ -704,6 +704,63 @@ def list_external_directory(path: str, limit: int = 200) -> dict[str, Any]:
     return {"path": str(target), "entries": _list_files(target, recursive=False, limit=limit)}
 
 
+def browse_external_directory(path: str, limit: int = 500) -> dict[str, Any]:
+    """List BOTH files and subfolders at an arbitrary absolute path —
+    backs the in-app file browser for linked folders on the Imports page.
+    Folders sort first (alphabetical), then files (alphabetical). Each
+    entry carries an absolute `path` so the renderer can drill in or
+    hand off to shell.openPath. Hidden Mac cruft (.DS_Store, __MACOSX)
+    is skipped. Read-only; refuses non-existent or non-directory paths.
+    """
+    target = Path(path).expanduser()
+    if not target.is_absolute():
+        return {"path": path, "entries": [], "error": "Path must be absolute"}
+    if not target.exists() or not target.is_dir():
+        return {"path": path, "entries": [], "error": "Folder not found"}
+    folders: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    try:
+        iterator = target.iterdir()
+    except PermissionError:
+        return {"path": str(target), "entries": [], "error": "Permission denied"}
+    for child in iterator:
+        if child.name in {".DS_Store", "__MACOSX"}:
+            continue
+        try:
+            stat = child.stat()
+        except (OSError, PermissionError):
+            continue
+        modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+        if child.is_dir():
+            folders.append({
+                "name": child.name,
+                "path": str(child),
+                "kind": "folder",
+                "size": 0,
+                "extension": "",
+                "modifiedAt": modified,
+            })
+        elif child.is_file():
+            files.append({
+                "name": child.name,
+                "path": str(child),
+                "kind": "file",
+                "size": stat.st_size,
+                "extension": child.suffix.lower().lstrip("."),
+                "modifiedAt": modified,
+            })
+    folders.sort(key=lambda item: item["name"].lower())
+    files.sort(key=lambda item: item["name"].lower())
+    combined = folders + files
+    truncated = len(combined) > limit
+    return {
+        "path": str(target),
+        "entries": combined[:limit],
+        "truncated": truncated,
+        "totalCount": len(combined),
+    }
+
+
 def list_workspace_section(section: str) -> dict[str, Any]:
     mapping = {
         "context": ("context", False),
