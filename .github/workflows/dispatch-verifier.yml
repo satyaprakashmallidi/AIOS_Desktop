@@ -1,0 +1,37 @@
+# Fires a repository_dispatch event at AIOS_Desktop_Verifier whenever a release
+# is published. The verifier downloads the shipped artifact, installs it on
+# fresh mac+win runners, runs probes, and comments a report back on a
+# `Verification: <tag>` issue in this repo.
+#
+# Required secret: VERIFIER_DISPATCH_TOKEN — a PAT with `repository_dispatch`
+# permission on everyai-com/AIOS_Desktop_Verifier (one-time setup).
+
+name: Dispatch Verifier
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to verify (defaults to the latest release)
+        required: false
+        type: string
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fire repository_dispatch
+        env:
+          GH_TOKEN: ${{ secrets.VERIFIER_DISPATCH_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag resolved (neither release event nor manual input)"
+            exit 1
+          fi
+          echo "Dispatching verifier for $TAG"
+          gh api repos/everyai-com/AIOS_Desktop_Verifier/dispatches \
+            -f event_type=aios-release \
+            -F client_payload[tag]="$TAG"
