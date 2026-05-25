@@ -191,6 +191,33 @@ function GeneralPanel({
     await invoke("set_setting", { key: "chat_model", value }).catch(() => undefined);
   }
 
+  const [posthogKey, setPosthogKey] = useState<string>("");
+  const [posthogKeySaved, setPosthogKeySaved] = useState<boolean>(false);
+  const [posthogDraft, setPosthogDraft] = useState<string>("");
+  useEffect(() => {
+    invoke<{ key: string; value: string | null }>("get_setting", { key: "posthog_api_key" })
+      .then((res) => {
+        if (res?.value) {
+          setPosthogKey(res.value);
+          setPosthogDraft(res.value);
+          setPosthogKeySaved(true);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  async function savePosthogKey() {
+    const value = posthogDraft.trim();
+    await invoke("set_setting", { key: "posthog_api_key", value }).catch(() => undefined);
+    setPosthogKey(value);
+    setPosthogKeySaved(true);
+  }
+  async function clearPosthogKey() {
+    await invoke("set_setting", { key: "posthog_api_key", value: "" }).catch(() => undefined);
+    setPosthogKey("");
+    setPosthogDraft("");
+    setPosthogKeySaved(false);
+  }
+
   async function resetOnboarding() {
     setResetting(true);
     try {
@@ -393,6 +420,32 @@ function GeneralPanel({
             }
           />
         ) : null}
+      </SettingsSection>
+
+      <SettingsSection
+        eyebrow="Analytics"
+        title="Product analytics (PostHog)"
+        detail="Optional. Paste a PostHog project key (starts with phc_) to send anonymous usage events: app launches, chat messages, connector adds, module installs. Disabled by default — no data is sent without a key. Reload the app after saving for events to start firing."
+      >
+        <SettingsRow
+          title="PostHog project key"
+          description={posthogKeySaved && posthogKey ? `Active — sending events to PostHog Cloud. Key: ${posthogKey.slice(0, 8)}…` : "No key set — analytics are off. Get one from app.posthog.com → Project settings."}
+          control={
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="password"
+                value={posthogDraft}
+                onChange={(e) => setPosthogDraft(e.target.value)}
+                placeholder="phc_xxxxxxxxxxxxxxxxxxxxxxxx"
+                style={{ width: 240, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, fontFamily: "var(--font-mono)" }}
+              />
+              <button type="button" className="button button-primary compact" onClick={savePosthogKey} disabled={!posthogDraft.trim() || posthogDraft.trim() === posthogKey}>Save</button>
+              {posthogKeySaved ? (
+                <button type="button" className="button button-secondary compact" onClick={clearPosthogKey}>Clear</button>
+              ) : null}
+            </div>
+          }
+        />
       </SettingsSection>
 
       {savedHint ? <div className="settings-toast">{savedHint}</div> : null}

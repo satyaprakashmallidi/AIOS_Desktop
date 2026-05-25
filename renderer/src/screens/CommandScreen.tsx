@@ -47,6 +47,7 @@ import {
   X
 } from "lucide-react";
 import { invoke, newId } from "../lib/api";
+import { track } from "../lib/analytics";
 import { formatRelativeTime } from "../lib/workspace-view";
 import { PanelHeader, StatusBadge } from "../components/ui";
 import type {
@@ -1039,6 +1040,14 @@ export function CommandScreen({
     setRuntimeMeta(null);
     try {
       const command = trimmed === "/prime" ? "run_prime" : "run_task";
+      track("chat_message_sent", {
+        command,
+        text_length: trimmed.length,
+        attachment_count: attachments.length,
+        attachment_kinds: Array.from(new Set(attachments.map((a) => a.kind))),
+        is_prime: trimmed === "/prime",
+        model: selectedModel,
+      });
       const claudeSessionId = activeSession.claudeSessionId ?? undefined;
       const baseArgs: Record<string, unknown> = { claudePath: claude.path, streamId };
       if (claudeSessionId) baseArgs.sessionId = claudeSessionId;

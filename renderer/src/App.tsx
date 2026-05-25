@@ -1,4 +1,6 @@
 import React, { startTransition, useEffect, useMemo, useState } from "react";
+import { initAnalytics, track } from "./lib/analytics";
+import { invoke as apiInvoke } from "./lib/api";
 import { createRoot } from "react-dom/client";
 import {
   Boxes,
@@ -405,6 +407,29 @@ function App() {
         window.clearTimeout(slowTimer);
         setLoading(false);
       });
+  }, []);
+
+  // Analytics — read posthog_api_key from settings and lazily init. Fires
+  // app_launched with version + platform so we can measure activation,
+  // retention, and version distribution. No-op until the user pastes a
+  // phc_... key into Settings → Analytics.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [keyRes, version] = await Promise.all([
+          apiInvoke<{ key: string; value: string | null }>("get_setting", { key: "posthog_api_key" }),
+          window.aios.getVersion?.().catch(() => "unknown") ?? Promise.resolve("unknown"),
+        ]);
+        if (cancelled) return;
+        const key = keyRes?.value || "";
+        await initAnalytics(key);
+        track("app_launched", { version, platform: navigator.platform });
+      } catch {
+        // Analytics is never load-bearing.
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Rotate the React splash subtitle through the same staged messages the

@@ -113,3 +113,9 @@ releases:
   - tag: v0.2.47
     features:
       - aios-connect-inline-chip
+
+  - tag: v0.2.48
+    features:
+      - posthog-analytics-optin
+      - app-launched-event
+      - chat-message-sent-event

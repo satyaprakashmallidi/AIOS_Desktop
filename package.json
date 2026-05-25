@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.47",
+  "version": "0.2.48",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -33,6 +33,7 @@
     "keytar": "^7.9.0",
     "lucide-react": "^0.561.0",
     "pino": "^9.5.0",
+    "posthog-js": "^1.376.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
