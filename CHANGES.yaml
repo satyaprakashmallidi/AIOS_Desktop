@@ -170,3 +170,7 @@ releases:
   - tag: v0.2.59
     features:
       - keyboard-shortcut-cmd-k-new-chat
+
+  - tag: v0.2.60
+    features:
+      - composer-tracks-caret-on-paste

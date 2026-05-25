@@ -517,6 +517,22 @@ export function CommandScreen({
 
   // No-op (previously used for showFullHistory)
 
+  // After any prompt change (typing, paste, slash-command insert), keep the
+  // caret in view inside the composer textarea. Browsers handle this for
+  // single-character typing, but programmatic value changes (paste of a
+  // long block, paste from clipboard via cmd, palette insert) leave
+  // scrollTop at 0 and the caret below the visible area. v0.2.54 made the
+  // textarea scrollable; this makes it auto-track the caret on paste.
+  useEffect(() => {
+    const ta = composerRef.current;
+    if (!ta) return;
+    // Only snap when caret is at the end — don't interrupt mid-edit scrolling.
+    if (ta.selectionStart === ta.value.length) {
+      ta.scrollTop = ta.scrollHeight;
+      if (mirrorRef.current) mirrorRef.current.scrollTop = mirrorRef.current.scrollHeight;
+    }
+  }, [prompt]);
+
   // Smart auto-scroll. Previous behavior smooth-scrolled to bottom on EVERY
   // message/delta change — even when the user had scrolled UP to read
   // history mid-stream. That yanked them back to the bottom every ~200ms
