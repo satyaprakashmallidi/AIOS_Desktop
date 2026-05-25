@@ -487,14 +487,17 @@ def complete_onboarding(answers: dict[str, Any] | None = None) -> dict[str, Any]
     return {"completedAt": completed_at, "context": get_context_summary()}
 
 
-def complete_onboarding_freeform(text: str) -> dict[str, Any]:
+def complete_onboarding_freeform(text: str, seed_folder_path: str = "", seed_folder_name: str = "") -> dict[str, Any]:
     """v0.2.63 — replaces the 8-question form with a single paragraph.
-    Writes the raw text into context/intro.md (Claude reads this on /prime
-    and synthesizes the other 4 context files later, or the user edits
-    them by hand from the Context screen). Empty text is allowed —
-    behaves like a Skip in that case."""
+    v0.2.64 — optionally accepts a seed folder the user drops/picks during
+    onboarding. The path + name go into context/intro.md so Claude can read
+    the folder via Glob/Read on the first /prime. Path is also persisted
+    to app_state.onboarding_seed_folder for future use (e.g. auto-index).
+    Empty text + no folder behaves like a Skip."""
     text = (text or "").strip()
-    if text:
+    folder_path = (seed_folder_path or "").strip()
+    folder_name = (seed_folder_name or "").strip()
+    if text or folder_path:
         context_dir = workspace_root() / "context"
         context_dir.mkdir(parents=True, exist_ok=True)
         intro_lines = [
@@ -505,11 +508,32 @@ def complete_onboarding_freeform(text: str) -> dict[str, Any]:
             "> Freeform self-introduction. Claude reads this on /prime and uses it",
             "> to ground every session. Edit anytime from Context → intro.md.",
             "",
-            text,
-            "",
         ]
+        if text:
+            intro_lines.extend([text, ""])
+        if folder_path:
+            intro_lines.extend([
+                "## Seed folder",
+                "",
+                f"The user attached `{folder_name or folder_path}` during onboarding.",
+                f"Path: `{folder_path}`",
+                "",
+                "Use Glob/Read to skim its contents on the next /prime so you have",
+                "concrete grounding (project shape, recent changes, business context).",
+                "Don't read every file — sample broadly first.",
+                "",
+            ])
         (context_dir / "intro.md").write_text("\n".join(intro_lines), encoding="utf-8")
-    return complete_onboarding({"freeform_intro": text} if text else None)
+
+    if folder_path:
+        set_setting("onboarding_seed_folder", folder_path)
+
+    answers_update: dict[str, Any] = {}
+    if text:
+        answers_update["freeform_intro"] = text
+    if folder_path:
+        answers_update["seed_folder"] = folder_path
+    return complete_onboarding(answers_update or None)
 
 
 def write_context_files(answers: dict[str, Any]) -> None:

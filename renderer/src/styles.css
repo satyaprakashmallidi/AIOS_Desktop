@@ -2269,6 +2269,63 @@ body.is-mac .sidebar-brand {
   color: var(--sage);
 }
 
+/* v0.2.64 — onboarding seed-folder picker. Sits between the freeform
+   textarea card and the foot bar. Ghost button when empty; sage chip
+   with name + path + remove when attached. */
+.onboarding-v2-folder-drop {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-start;
+}
+.onboarding-v2-folder-pick {
+  appearance: none;
+  background: transparent;
+  border: 1px dashed var(--sage-line);
+  color: var(--sage);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.onboarding-v2-folder-pick:hover { background: var(--sage-soft); border-color: var(--sage); }
+.onboarding-v2-folder-pick:disabled { opacity: 0.55; cursor: progress; }
+.onboarding-v2-folder-attached {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--sage-soft);
+  border: 1px solid var(--sage-line);
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+.onboarding-v2-folder-icon { font-size: 18px; flex-shrink: 0; }
+.onboarding-v2-folder-meta { flex: 1; min-width: 0; }
+.onboarding-v2-folder-meta strong { display: block; font-size: 13px; color: var(--ink); }
+.onboarding-v2-folder-meta small {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--gray-500);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onboarding-v2-folder-remove {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--sage);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+.onboarding-v2-folder-remove:hover { background: rgba(61, 90, 74, 0.08); }
+
 /* Foot bar */
 .onboarding-v2-foot {
   display: flex;

@@ -63,6 +63,23 @@ export function OnboardingScreen({
   // v0.2.63 — single freeform paragraph replaces the 8-question form. State
   // hydrates from any prior saved freeform_intro so re-runs preserve it.
   const [freeformIntro, setFreeformIntro] = useState<string>(state?.answers?.freeform_intro ?? "");
+  const [seedFolder, setSeedFolder] = useState<{ name: string; path: string } | null>(null);
+  const [pickingFolder, setPickingFolder] = useState(false);
+
+  async function pickSeedFolder() {
+    setPickingFolder(true);
+    try {
+      const result = await invoke<{ canceled: boolean; path: string | null }>("pick_folder");
+      if (!result || result.canceled || !result.path) return;
+      const segments = result.path.split(/[\\/]/).filter(Boolean);
+      const basename = segments.length ? segments[segments.length - 1] : result.path;
+      setSeedFolder({ name: basename, path: result.path });
+    } catch {
+      // Folder pick is optional — swallow errors.
+    } finally {
+      setPickingFolder(false);
+    }
+  }
   const [draft, setDraft] = useState(() =>
     onboardingQuestions[initialStep] ? state?.answers?.[onboardingQuestions[initialStep].id] ?? "" : ""
   );
@@ -308,7 +325,11 @@ export function OnboardingScreen({
     setSaving(true);
     setSetupMessage(null);
     try {
-      await invoke("complete_onboarding_freeform", { text: freeformIntro });
+      await invoke("complete_onboarding_freeform", {
+        text: freeformIntro,
+        seedFolderPath: seedFolder?.path ?? "",
+        seedFolderName: seedFolder?.name ?? "",
+      });
       await onRefreshWorkspace();
       onNavigate("command");
     } catch (err) {
@@ -665,6 +686,28 @@ export function OnboardingScreen({
                 <span>Cmd+Enter to continue · Shift+Enter for a new line</span>
                 <span>{freeformIntro.trim().length ? `${freeformIntro.trim().length} chars` : "—"}</span>
               </div>
+            </div>
+
+            {/* Optional folder pick — auto-derives context from a real project
+                instead of asking the user to summarize. Path is saved to
+                onboarding_seed_folder; Claude reads it on the first /prime. */}
+            <div className="onboarding-v2-folder-drop">
+              {seedFolder ? (
+                <div className="onboarding-v2-folder-attached">
+                  <span className="onboarding-v2-folder-icon" aria-hidden="true">📁</span>
+                  <div className="onboarding-v2-folder-meta">
+                    <strong>{seedFolder.name}</strong>
+                    <small>{seedFolder.path}</small>
+                  </div>
+                  <button type="button" className="onboarding-v2-folder-remove" onClick={() => setSeedFolder(null)} aria-label="Remove">
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="onboarding-v2-folder-pick" onClick={pickSeedFolder} disabled={pickingFolder}>
+                  {pickingFolder ? "Opening…" : "Or attach a folder — Claude will learn from your files"}
+                </button>
+              )}
             </div>
 
             <div className="onboarding-v2-foot">

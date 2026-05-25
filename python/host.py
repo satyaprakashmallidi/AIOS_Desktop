@@ -2072,7 +2072,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> Any:
             int(a["step"]) if "step" in a and a["step"] is not None else None,
         ),
         "complete_onboarding": lambda a: complete_onboarding(a.get("answers") if isinstance(a.get("answers"), dict) else None),
-        "complete_onboarding_freeform": lambda a: complete_onboarding_freeform(str(a.get("text") or "")),
+        "complete_onboarding_freeform": lambda a: complete_onboarding_freeform(str(a.get("text") or ""), str(a.get("seedFolderPath") or ""), str(a.get("seedFolderName") or "")),
         "reset_onboarding": lambda _a: reset_onboarding(),
         "reset_workspace": lambda _a: reset_workspace(),
         "read_file": lambda a: read_file(require_str(a, "path")),
