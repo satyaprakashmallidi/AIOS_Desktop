@@ -3532,8 +3532,13 @@ body.is-mac .sidebar-brand {
   color: var(--ink);
   white-space: pre-wrap;
   word-wrap: break-word;
-  overflow: hidden;
+  /* overflow-y auto so the mirror scrolls in lockstep with the textarea.
+     Scrollbar is hidden via -webkit-scrollbar; the textarea's native
+     scrollbar is the visible one. */
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+.aios-composer-mirror::-webkit-scrollbar { display: none; }
 /* User-bubble text — plain paragraph, preserves whitespace, allows the
    mention-token inline chips to render between words. */
 .aios-user-text {
@@ -3757,7 +3762,11 @@ body.is-mac .sidebar-brand {
   z-index: 1;
   width: 100%;
   min-height: 32px;
-  max-height: 160px;
+  max-height: 240px;
+  /* When content exceeds max-height, native scrollbar appears so users
+     can see and edit long pasted prompts. Mirror layer syncs scrollTop
+     via onScroll handler in CommandScreen.tsx. */
+  overflow-y: auto;
   padding: 6px 0;
   resize: none;
   border: 0;

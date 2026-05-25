@@ -154,9 +154,43 @@ export class PythonHost {
     throw new Error(`Python interpreter was not found. Set AIOS_PYTHON or install one of: ${tried}`);
   }
 
-  stop(): void {
-    this.child?.kill();
+  // Aggressive termination — the previous version sent SIGTERM and returned
+  // synchronously. PyInstaller-bundled Python ignores SIGTERM during startup
+  // and spawns helper subprocesses that need to die individually. Worst-case
+  // symptom (reported v0.2.51): after closing the app, the next launch can't
+  // start because a stale aios-host process is still holding the SQLite WAL
+  // lock. User had to restart their laptop to recover.
+  //
+  // Fix: SIGTERM → wait 300ms → SIGKILL if still alive → wait for exit event
+  // up to 800ms. On Windows, taskkill /F /T /pid kills the whole process tree
+  // (PyInstaller bootloader + child).
+  async stop(): Promise<void> {
+    const child = this.child;
     this.child = null;
+    if (!child || child.killed) return;
+    const pid = child.pid;
+    try {
+      if (process.platform === "win32" && pid) {
+        // Single hard kill of the whole tree; ignore non-zero exit (process
+        // may already be dead).
+        const { spawn } = await import("node:child_process");
+        spawn("taskkill", ["/F", "/T", "/pid", String(pid)], { windowsHide: true, stdio: "ignore" }).unref();
+      } else {
+        child.kill("SIGTERM");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (!child.killed && child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+      // Wait for actual exit (up to 800ms) so we don't return while the
+      // process still holds file locks.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 800);
+        child.once("exit", () => { clearTimeout(timer); resolve(); });
+      });
+    } catch {
+      // Never throw from cleanup — the app is quitting anyway.
+    }
   }
 
   onEvent(callback: (event: HostEvent) => void): () => void {

@@ -899,6 +899,25 @@ app.whenReady().then(() => {
   const workspaceRoot = ensureRuntimeWorkspace();
   const starterKitRoot = getSourceStarterKit();
   initLogger(workspaceRoot);
+
+  // Defense in depth — if a prior launch crashed or was force-killed before
+  // its before-quit handler could run, an orphan aios-host subprocess may
+  // still be holding the SQLite WAL lock. The new launch's host.start would
+  // then fail and the user would have to reboot to recover. Kill any
+  // orphan now, before spawning our own. Sync spawn so it completes before
+  // PythonHost spawns a fresh sidecar.
+  try {
+    const { spawnSync } = require("node:child_process");
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/F", "/IM", "aios-host.exe"], { windowsHide: true, stdio: "ignore" });
+    } else {
+      // pkill returns non-zero if no match — that's fine, swallow.
+      spawnSync("pkill", ["-9", "-f", "aios-host"], { stdio: "ignore" });
+    }
+  } catch {
+    // Never block launch on cleanup.
+  }
+
   host = new PythonHost(workspaceRoot, starterKitRoot);
   host.onEvent((event) => {
     broadcastHostEvent(event);
@@ -1169,10 +1188,13 @@ app.on("before-quit", (event) => {
   destroyControlBubble();
   destroyControlPopup();
   destroyCursorOverlay();
-  // host.stop() may be async — fire it, then exit on settle. Give it a 1.5s
-  // ceiling so a wedged Python sidecar can't keep the app from quitting.
+  // host.stop() is async (SIGTERM → wait → SIGKILL → wait for exit). Give
+  // it a 2.5s ceiling — enough for the new aggressive teardown to actually
+  // wait for the subprocess to exit before we hard-exit the app. Otherwise
+  // the next launch hits a stale aios-host still holding the SQLite WAL
+  // lock and fails until the user reboots.
   const stopHost = Promise.resolve(host?.stop()).catch(() => undefined);
-  const watchdog = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+  const watchdog = new Promise<void>((resolve) => setTimeout(resolve, 2500));
   Promise.race([stopHost, watchdog]).finally(() => app.exit(0));
 });
 

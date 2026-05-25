@@ -313,6 +313,7 @@ export function CommandScreen({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -1900,7 +1901,7 @@ export function CommandScreen({
                   })}
                 </div>
               ) : null}
-              <div className="aios-composer-mirror" aria-hidden="true">
+              <div className="aios-composer-mirror" aria-hidden="true" ref={mirrorRef}>
                 {renderHighlightedPrompt(prompt, mirrorEntities, slashIds)}
                 {/* Trailing zero-width char keeps the mirror's height in sync
                     with the textarea when the prompt ends with a newline. */}
@@ -1909,6 +1910,15 @@ export function CommandScreen({
               <textarea
                 ref={composerRef}
                 value={prompt}
+                onScroll={(event) => {
+                  // Sync mirror scroll position with textarea so the highlighted
+                  // glyphs stay aligned with the visible textarea content when a
+                  // long pasted prompt scrolls. Without this, the mirror sits
+                  // static while textarea content moves — caret + chips desync.
+                  if (mirrorRef.current) {
+                    mirrorRef.current.scrollTop = event.currentTarget.scrollTop;
+                  }
+                }}
                 onChange={(event) => {
                   const cursor = event.target.selectionStart ?? event.target.value.length;
                   handlePromptChange(event.target.value, cursor);

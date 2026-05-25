@@ -144,3 +144,8 @@ releases:
   - tag: v0.2.53
     features:
       - fix-chat-panel-centering
+
+  - tag: v0.2.54
+    features:
+      - fix-app-reopen-stale-sidecar
+      - composer-scroll-long-paste
