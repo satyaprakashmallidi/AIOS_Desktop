@@ -205,3 +205,7 @@ releases:
       - chat-empty-context-os-cards
       - proactive-import-folder-card
       - proactive-interview-card
+
+  - tag: v0.2.67
+    features:
+      - app-icon-redesign-geometric-monoline

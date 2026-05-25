@@ -1,13 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <title>AIOS</title>
-  <!-- Ink ring (filled) -->
-  <circle cx="128" cy="128" r="120" fill="#0d0d0d"/>
-  <!-- Italic Instrument Serif "A" -->
-  <text x="128" y="184"
-        text-anchor="middle"
-        font-family="'Instrument Serif', 'Times New Roman', serif"
-        font-style="italic"
-        font-weight="400"
-        font-size="168"
-        fill="#fafaf7">A</text>
+  <!-- AIOS Desktop app icon.
+       Mac-native squircle background, geometric monoline "A".
+       Minimalist: reads as both the letter and a peak. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1B1B1E"/>
+      <stop offset="100%" stop-color="#0A0A0C"/>
+    </linearGradient>
+    <clipPath id="squircle">
+      <path d="M 512 0
+               C 880 0, 1024 144, 1024 512
+               C 1024 880, 880 1024, 512 1024
+               C 144 1024, 0 880, 0 512
+               C 0 144, 144 0, 512 0 Z"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect x="0.5" y="0.5" width="1023" height="1023" fill="none" stroke="#FFFFFF" stroke-opacity="0.04" stroke-width="1"/>
+  </g>
+
+  <g fill="none" stroke="#FAFAF7" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="276" y1="776" x2="512" y2="248"/>
+    <line x1="512" y1="248" x2="748" y2="776"/>
+    <line x1="372" y1="566" x2="652" y2="566"/>
+  </g>
 </svg>
