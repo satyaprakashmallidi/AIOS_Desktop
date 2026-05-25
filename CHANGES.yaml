@@ -216,6 +216,12 @@ releases:
 
   - tag: v0.2.69
     features:
+      - dark-theme-warm-tokens
+      - control-popup-rework
+      - linked-folder-browser
+
+  - tag: v0.2.70
+    features:
       - app-icon-minimal-charcoal-dot
       - chat-empty-context-os-cards
-    notes: Re-ship of v0.2.66+v0.2.68 features after release-workflow regression in v0.2.68 blocked all 3 platforms from building.
+    notes: Re-ship of v0.2.66+v0.2.68 content (icon + onboarding cards) after release-workflow regression in v0.2.68 blocked all 3 platforms from building. Workflow reverted to single-step Build+Publish.
