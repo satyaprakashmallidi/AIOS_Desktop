@@ -1,30 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <title>AIOS</title>
-  <!-- AIOS Desktop app icon.
-       Mac-native squircle background, geometric monoline "A".
-       Minimalist: reads as both the letter and a peak. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#1B1B1E"/>
-      <stop offset="100%" stop-color="#0A0A0C"/>
-    </linearGradient>
-    <clipPath id="squircle">
-      <path d="M 512 0
-               C 880 0, 1024 144, 1024 512
-               C 1024 880, 880 1024, 512 1024
-               C 144 1024, 0 880, 0 512
-               C 0 144, 144 0, 512 0 Z"/>
+    <clipPath id="sq">
+      <path d="M 512 0 C 880 0, 1024 144, 1024 512 C 1024 880, 880 1024, 512 1024 C 144 1024, 0 880, 0 512 C 0 144, 144 0, 512 0 Z"/>
     </clipPath>
   </defs>
-
-  <g clip-path="url(#squircle)">
-    <rect width="1024" height="1024" fill="url(#bg)"/>
-    <rect x="0.5" y="0.5" width="1023" height="1023" fill="none" stroke="#FFFFFF" stroke-opacity="0.04" stroke-width="1"/>
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="#F3EFE8"/>
+    <rect x="0.5" y="0.5" width="1023" height="1023" fill="none" stroke="#000" stroke-opacity="0.06" stroke-width="1"/>
   </g>
-
-  <g fill="none" stroke="#FAFAF7" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="276" y1="776" x2="512" y2="248"/>
-    <line x1="512" y1="248" x2="748" y2="776"/>
-    <line x1="372" y1="566" x2="652" y2="566"/>
-  </g>
+  <circle cx="512" cy="512" r="133" fill="#1A1A1C"/>
 </svg>

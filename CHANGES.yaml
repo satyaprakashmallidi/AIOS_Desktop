@@ -209,3 +209,7 @@ releases:
   - tag: v0.2.67
     features:
       - app-icon-redesign-geometric-monoline
+
+  - tag: v0.2.68
+    features:
+      - app-icon-minimal-charcoal-dot
