@@ -232,7 +232,7 @@ export function MacPermissionsModal({ onClose }: { onClose: () => void }): React
               <button type="button" className="mac-permissions-grant" onClick={grant}>
                 Grant
               </button>
-              <button type="button" className="mac-permissions-skip" onClick={skip}>
+              <button type="button" className="mac-permissions-skip" onClick={skip} data-testid="mac-permissions-skip">
                 Skip for now
               </button>
             </>

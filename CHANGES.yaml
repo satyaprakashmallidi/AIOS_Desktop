@@ -166,3 +166,7 @@ releases:
   - tag: v0.2.58
     features:
       - whats-new-banner-post-update
+
+  - tag: v0.2.59
+    features:
+      - keyboard-shortcut-cmd-k-new-chat

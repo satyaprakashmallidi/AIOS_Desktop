@@ -634,6 +634,33 @@ function App() {
     window.aios?.window?.onShortcutPreferences?.(() => setScreen("settings"));
   }, []);
 
+  // Cmd+K (Mac) / Ctrl+K (Win) — new chat from anywhere. Matches the
+  // ChatGPT / Slack / Linear / Cursor convention; the muscle memory most
+  // chat-app power users have. Navigates to the chat screen + creates a
+  // fresh thread + focuses the composer via the existing set-prompt
+  // dispatch path.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const cmdOrCtrl = e.metaKey || e.ctrlKey;
+      if (!cmdOrCtrl || e.key.toLowerCase() !== "k" || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      void (async () => {
+        try {
+          const created = await invoke<ChatSession>("create_thread", { title: "New chat" });
+          setSessions((current) => [created, ...current]);
+          setActiveSessionId(created.id);
+          setScreen("command");
+          // Empty set-prompt dispatch just focuses the composer.
+          window.setTimeout(() => {
+            document.dispatchEvent(new CustomEvent("aios:set-prompt", { detail: "" }));
+          }, 60);
+        } catch { /* swallow — non-critical */ }
+      })();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   // Mac-only first-launch permissions modal. The MacPermissionsModal
   // (rendered below) walks the user through the 4 macOS TCC permissions
   // ONE AT A TIME, gated by an explicit "Grant" or "Skip" click for each.
