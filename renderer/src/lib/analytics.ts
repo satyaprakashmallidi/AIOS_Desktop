@@ -1,7 +1,8 @@
-// Thin PostHog wrapper. No-ops until the user pastes a project key into
-// Settings → Analytics. Key (phc_...) is safe in client code; we never
-// load posthog at all when the key is empty so first-launch cold-start
-// isn't taxed by the SDK.
+// Thin PostHog wrapper. Ships with a baked-in project token so every
+// install measures from day one — `phc_` tokens are explicitly safe in
+// client code per PostHog's docs (write-only, no read access). Users
+// who want to point at their own PostHog instance can override via
+// Settings → Analytics.
 //
 // One module-level posthog reference is set by `initAnalytics`; `track`
 // is the only API surface the rest of the app uses.
@@ -15,12 +16,20 @@ let initialized = false;
 // we add a region picker (eu.i.posthog.com).
 const DEFAULT_HOST = "https://us.i.posthog.com";
 
+// AIOS Desktop's PostHog project (everyai-com workspace, project 438685).
+// Write-only public key — safe to embed in shipped client code.
+// Replace via Settings → Analytics for personal forks.
+const DEFAULT_PUBLIC_KEY = "phc_nVdMCfPuSut5yVX9rS6JBooYjuFv8UdcrcADv7wtNwq8";
+
 export async function initAnalytics(apiKey: string | null | undefined, host?: string): Promise<void> {
   if (initialized) return;
-  const key = (apiKey ?? "").trim();
-  if (!key || !key.startsWith("phc_")) {
-    // No key (or wrong shape — phx_ is a personal key, NOT for client init).
-    // Silent no-op so unconfigured installs don't log noise.
+  // Empty user setting falls back to the AIOS default project. Users can
+  // explicitly disable by setting the string "disabled" (or anything that
+  // doesn't start with phc_) via Settings → Analytics.
+  const userKey = (apiKey ?? "").trim();
+  const key = userKey || DEFAULT_PUBLIC_KEY;
+  if (!key.startsWith("phc_")) {
+    // User explicitly opted out (or pasted a phx_ personal key by mistake).
     return;
   }
   initialized = true;

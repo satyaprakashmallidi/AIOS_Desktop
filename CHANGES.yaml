@@ -119,3 +119,8 @@ releases:
       - posthog-analytics-optin
       - app-launched-event
       - chat-message-sent-event
+
+  - tag: v0.2.49
+    features:
+      - posthog-default-on
+      - analytics-disable-via-off

@@ -425,23 +425,29 @@ function GeneralPanel({
       <SettingsSection
         eyebrow="Analytics"
         title="Product analytics (PostHog)"
-        detail="Optional. Paste a PostHog project key (starts with phc_) to send anonymous usage events: app launches, chat messages, connector adds, module installs. Disabled by default — no data is sent without a key. Reload the app after saving for events to start firing."
+        detail="AIOS ships with anonymous usage events on by default (app launches, chat sends, connector adds) so the team can measure what's working. Paste your own PostHog project key (phc_…) to send events to your own instance instead, or type 'off' and Save to disable."
       >
         <SettingsRow
           title="PostHog project key"
-          description={posthogKeySaved && posthogKey ? `Active — sending events to PostHog Cloud. Key: ${posthogKey.slice(0, 8)}…` : "No key set — analytics are off. Get one from app.posthog.com → Project settings."}
+          description={
+            posthogKeySaved && posthogKey.startsWith("phc_")
+              ? `Custom — sending to your PostHog. Key: ${posthogKey.slice(0, 12)}…`
+              : posthogKeySaved && !posthogKey.startsWith("phc_")
+              ? "Disabled — no events are being sent."
+              : "Using AIOS default — events go to the project Satya monitors. Paste your own key or 'off' to change."
+          }
           control={
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="password"
                 value={posthogDraft}
                 onChange={(e) => setPosthogDraft(e.target.value)}
-                placeholder="phc_xxxxxxxxxxxxxxxxxxxxxxxx"
+                placeholder="phc_xxxx… or 'off' to disable"
                 style={{ width: 240, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, fontFamily: "var(--font-mono)" }}
               />
               <button type="button" className="button button-primary compact" onClick={savePosthogKey} disabled={!posthogDraft.trim() || posthogDraft.trim() === posthogKey}>Save</button>
               {posthogKeySaved ? (
-                <button type="button" className="button button-secondary compact" onClick={clearPosthogKey}>Clear</button>
+                <button type="button" className="button button-secondary compact" onClick={clearPosthogKey}>Reset to default</button>
               ) : null}
             </div>
           }
