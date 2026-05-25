@@ -487,6 +487,31 @@ def complete_onboarding(answers: dict[str, Any] | None = None) -> dict[str, Any]
     return {"completedAt": completed_at, "context": get_context_summary()}
 
 
+def complete_onboarding_freeform(text: str) -> dict[str, Any]:
+    """v0.2.63 — replaces the 8-question form with a single paragraph.
+    Writes the raw text into context/intro.md (Claude reads this on /prime
+    and synthesizes the other 4 context files later, or the user edits
+    them by hand from the Context screen). Empty text is allowed —
+    behaves like a Skip in that case."""
+    text = (text or "").strip()
+    if text:
+        context_dir = workspace_root() / "context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+        intro_lines = [
+            "# Intro",
+            "",
+            f"Captured during onboarding · {utc_now()}",
+            "",
+            "> Freeform self-introduction. Claude reads this on /prime and uses it",
+            "> to ground every session. Edit anytime from Context → intro.md.",
+            "",
+            text,
+            "",
+        ]
+        (context_dir / "intro.md").write_text("\n".join(intro_lines), encoding="utf-8")
+    return complete_onboarding({"freeform_intro": text} if text else None)
+
+
 def write_context_files(answers: dict[str, Any]) -> None:
     context_dir = workspace_root() / "context"
     context_dir.mkdir(parents=True, exist_ok=True)

@@ -183,3 +183,9 @@ releases:
     features:
       - cmd-enter-send
       - escape-cancels-stream
+
+  - tag: v0.2.63
+    features:
+      - freeform-onboarding-replaces-8-question-form
+      - complete-onboarding-freeform-ipc
+      - context-intro-md

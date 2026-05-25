@@ -3,6 +3,7 @@ export type AiosCommand =
   | "get_onboarding_state"
   | "save_onboarding_answer"
   | "complete_onboarding"
+  | "complete_onboarding_freeform"
   | "reset_onboarding"
   | "reset_workspace"
   | "read_file"

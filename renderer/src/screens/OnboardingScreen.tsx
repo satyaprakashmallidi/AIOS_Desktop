@@ -60,6 +60,9 @@ export function OnboardingScreen({
   );
   const [step, setStep] = useState(initialStep);
   const [answers, setAnswers] = useState<Record<string, string>>(state?.answers ?? {});
+  // v0.2.63 — single freeform paragraph replaces the 8-question form. State
+  // hydrates from any prior saved freeform_intro so re-runs preserve it.
+  const [freeformIntro, setFreeformIntro] = useState<string>(state?.answers?.freeform_intro ?? "");
   const [draft, setDraft] = useState(() =>
     onboardingQuestions[initialStep] ? state?.answers?.[onboardingQuestions[initialStep].id] ?? "" : ""
   );
@@ -299,6 +302,20 @@ export function OnboardingScreen({
     await onRefreshWorkspace();
     setSaving(false);
     onNavigate("command");
+  }
+
+  async function submitFreeform() {
+    setSaving(true);
+    setSetupMessage(null);
+    try {
+      await invoke("complete_onboarding_freeform", { text: freeformIntro });
+      await onRefreshWorkspace();
+      onNavigate("command");
+    } catch (err) {
+      setSetupMessage(err instanceof Error ? err.message : "Could not save your intro.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function goBackQuestion() {
@@ -620,71 +637,44 @@ export function OnboardingScreen({
           </div>
         ) : null}
 
-        {stage === "profile" && !completed && question ? (
+        {stage === "profile" && !completed ? (
           <div className="onboarding-v2-body is-profile">
             <div className="onboarding-v2-intro is-tight">
-              <h1>Build <em>your context</em>.</h1>
-              <p>A few short answers so AIOS knows who you are and what you're moving. Refine later in Context.</p>
+              <h1>Tell AIOS <em>about you</em>.</h1>
+              <p>A paragraph or two — what you do, what you're working on, what you'd like Claude to know going forward. Skip if you'd rather just chat; you can fill this in later from Context.</p>
             </div>
 
-            <nav className="onboarding-v2-layers" aria-label="Profile layers">
-              {grouped.map((layer, idx) => {
-                const active = layer.source === activeLayer.source;
-                const done = layer.answered >= layer.total;
-                const unlocked = grouped.slice(0, idx).every((p) => p.answered >= p.total);
-                return (
-                  <button
-                    key={layer.source}
-                    type="button"
-                    className={`onboarding-v2-layer ${active ? "is-active" : ""} ${done ? "is-done" : ""} ${unlocked ? "" : "is-locked"}`}
-                    onClick={() => jumpToLayer(layer)}
-                    disabled={!unlocked && !active}
-                    title={unlocked ? layer.label : "Complete the previous section first"}
-                  >
-                    <strong>{layer.label}</strong>
-                    <small>{layer.answered}/{layer.total}</small>
-                  </button>
-                );
-              })}
-            </nav>
-
-            <div className="card onboarding-v2-question is-tight" key={question.id}>
-              <p className="eyebrow-rule">{activeLayer.eyebrow} · {questionIndexInLayer + 1} of {layerQuestions.length}</p>
-              <h2>{question.question}</h2>
+            <div className="card onboarding-v2-question is-tight">
+              <p className="eyebrow-rule">Intro · freeform</p>
               <textarea
                 className="onboarding-v2-answer"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                value={freeformIntro}
+                onChange={(event) => setFreeformIntro(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
-                    submitAnswer();
+                    void submitFreeform();
                   }
                 }}
-                placeholder="A short, plain-English answer is perfect."
+                placeholder="Example: I'm Alex, founder of a 4-person AI agency building voice-first tools for sales teams. We just closed our seed; the next 90 days are about getting to 10 paying customers. Stripe handles billing, Notion is our wiki, calls go through Cal.com. Be terse and skip pleasantries — I prefer direct."
+                rows={8}
                 autoFocus
+                data-testid="onboarding-freeform"
               />
               <div className="onboarding-v2-question-foot">
-                <span>Enter to continue · Shift + Enter for a new line</span>
-                <span>{draft.trim().length ? `${draft.trim().length} chars` : "—"}</span>
+                <span>Cmd+Enter to continue · Shift+Enter for a new line</span>
+                <span>{freeformIntro.trim().length ? `${freeformIntro.trim().length} chars` : "—"}</span>
               </div>
             </div>
 
             <div className="onboarding-v2-foot">
-              <div className="onboarding-v2-foot-group">
-                <button className="btn-pill-ghost" onClick={goBackQuestion} disabled={saving}>
-                  <ArrowLeft size={14} />
-                  Back
-                </button>
-                <button className="btn-pill-ghost" onClick={skipProfile} disabled={saving}>
-                  Skip for now
-                </button>
-              </div>
-              <span className="onboarding-v2-foot-hint">{answeredCount}/{onboardingQuestions.length} answered</span>
-              <button className="btn-pill" onClick={submitAnswer} disabled={saving || !draft.trim()}>
+              <button className="btn-pill-ghost" onClick={skipProfile} disabled={saving}>
+                Skip
+              </button>
+              <button className="btn-pill" onClick={() => void submitFreeform()} disabled={saving}>
                 {saving ? <Loader2 size={14} className="spin" /> : null}
-                {step + 1 >= onboardingQuestions.length ? "Save and finish" : "Next"}
-                {!saving && step + 1 < onboardingQuestions.length ? <ArrowRight size={14} /> : null}
+                {saving ? "Saving…" : "Continue"}
+                {!saving ? <ArrowRight size={14} /> : null}
               </button>
             </div>
           </div>
