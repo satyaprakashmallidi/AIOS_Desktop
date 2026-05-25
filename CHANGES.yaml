@@ -129,3 +129,9 @@ releases:
     features:
       - split-repo-release-architecture
       - public-release-repo
+
+  - tag: v0.2.51
+    features:
+      - bundle-split-manual-chunks
+      - lazy-load-agents-screen
+      - defer-analytics-init

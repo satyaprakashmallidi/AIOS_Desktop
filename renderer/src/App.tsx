@@ -1,4 +1,4 @@
-import React, { startTransition, useEffect, useMemo, useState } from "react";
+import React, { startTransition, useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { initAnalytics, track } from "./lib/analytics";
 import { invoke as apiInvoke } from "./lib/api";
 import { createRoot } from "react-dom/client";
@@ -44,7 +44,10 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { BriefsScreen } from "./screens/BriefsScreen";
 import { ConnectorsScreen } from "./screens/ConnectorsScreen";
 import { TasksScreen } from "./screens/TasksScreen";
-import { AgentsScreen } from "./screens/AgentsScreen";
+// AgentsScreen pulls in @xyflow/react (~150KB gz). Lazy so it's only
+// fetched the first time the user opens Agents — keeps initial parse
+// fast for the default chat path.
+const AgentsScreen = lazy(() => import("./screens/AgentsScreen").then((m) => ({ default: m.AgentsScreen })));
 import { VoiceControlPanel } from "./screens/VoiceControlPanel";
 import { ControlApp } from "./screens/ControlApp";
 import { BubbleApp } from "./screens/BubbleApp";
@@ -409,27 +412,28 @@ function App() {
       });
   }, []);
 
-  // Analytics — read posthog_api_key from settings and lazily init. Fires
-  // app_launched with version + platform so we can measure activation,
-  // retention, and version distribution. No-op until the user pastes a
-  // phc_... key into Settings → Analytics.
+  // Analytics — deferred 800ms past mount so the SDK fetch + init never
+  // sits on the critical path. The chat is interactive long before this
+  // fires. No-op when the posthog key is intentionally disabled.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const [keyRes, version] = await Promise.all([
-          apiInvoke<{ key: string; value: string | null }>("get_setting", { key: "posthog_api_key" }),
-          window.aios.getVersion?.().catch(() => "unknown") ?? Promise.resolve("unknown"),
-        ]);
-        if (cancelled) return;
-        const key = keyRes?.value || "";
-        await initAnalytics(key);
-        track("app_launched", { version, platform: navigator.platform });
-      } catch {
-        // Analytics is never load-bearing.
-      }
-    })();
-    return () => { cancelled = true; };
+    const timer = window.setTimeout(() => {
+      (async () => {
+        try {
+          const [keyRes, version] = await Promise.all([
+            apiInvoke<{ key: string; value: string | null }>("get_setting", { key: "posthog_api_key" }),
+            window.aios.getVersion?.().catch(() => "unknown") ?? Promise.resolve("unknown"),
+          ]);
+          if (cancelled) return;
+          const key = keyRes?.value || "";
+          await initAnalytics(key);
+          track("app_launched", { version, platform: navigator.platform });
+        } catch {
+          // Analytics is never load-bearing.
+        }
+      })();
+    }, 800);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, []);
 
   // Rotate the React splash subtitle through the same staged messages the
@@ -1058,7 +1062,9 @@ function App() {
 
         {screen === "agents" && !setupRequired ? (
           <div className="screen-enter">
-          <AgentsScreen claude={claude} />
+            <Suspense fallback={<div style={{ padding: 40, color: "var(--gray-500)", fontSize: 13 }}>Loading agents…</div>}>
+              <AgentsScreen claude={claude} />
+            </Suspense>
           </div>
         ) : null}
 

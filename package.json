@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.50",
+  "version": "0.2.51",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -26,6 +26,7 @@
     "release:no-python": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
+    "@sentry/electron": "^7.13.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@whiskeysockets/baileys": "^6.7.18",
     "@xyflow/react": "^12.10.2",
