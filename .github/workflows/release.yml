@@ -1,11 +1,11 @@
-name: Dispatch release to public repo
+name: Release
 
-# Tag push on this private source repo fires a `release-tag` event at
-# everyai-com/AIOS_Desktop-releases (public). That repo runs the actual
-# build (it has unlimited Actions minutes because it's public).
+# Builds + publishes Windows (x64), macOS (arm64), and macOS (x64/Intel)
+# installers directly to this repo's Releases when a v*.*.* tag is pushed.
 #
-# This dispatcher workflow runs in ~5 seconds — well under any free-tier
-# quota even for private repos.
+# Was previously split across two repos (this one fired a dispatch event
+# at AIOS_Desktop-releases which ran the actual build) — both repos are
+# public, so the split bought us nothing. Now everything lives here.
 
 on:
   push:
@@ -14,13 +14,32 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to dispatch (e.g. v0.2.49)"
+        description: "Tag to build (e.g. v0.2.71)"
         required: true
         type: string
 
+permissions:
+  contents: write
+
 jobs:
-  dispatch:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+            pyinstallerArch: x64
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+            pyinstallerArch: arm64
+          - os: macos-latest
+            platform: mac
+            arch: x64
+            pyinstallerArch: x86_64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Resolve tag
         id: tag
@@ -29,14 +48,142 @@ jobs:
           if [ -n "${{ inputs.tag }}" ]; then
             echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           else
-            # github.ref is "refs/tags/v0.2.49" for tag pushes — strip the prefix.
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Dispatch to AIOS_Desktop-releases
-        uses: peter-evans/repository-dispatch@v3
+      - name: Checkout source at tag
+        uses: actions/checkout@v4
         with:
-          token: ${{ secrets.RELEASES_DISPATCH_TOKEN }}
-          repository: everyai-com/AIOS_Desktop-releases
-          event-type: release-tag
-          client-payload: '{"tag": "${{ steps.tag.outputs.tag }}"}'
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python build tools + sidecar deps
+        run: |
+          pip install pyinstaller
+          pip install -r python/requirements.txt
+
+      - name: Install universal2 Python + x86_64 deps (Intel Mac only)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          curl -L -o /tmp/python-universal2.pkg https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg /tmp/python-universal2.pkg -target /
+          PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11
+          echo "AIOS_X64_PYTHON=$PY" >> $GITHUB_ENV
+          arch -x86_64 $PY -m pip install --upgrade pip
+          arch -x86_64 $PY -m pip install pyinstaller
+          arch -x86_64 $PY -m pip install -r python/requirements.txt
+          arch -x86_64 $PY -m pip uninstall -y Pillow
+          mkdir -p /tmp/x86_64-wheels
+          arch -x86_64 $PY -m pip download --no-deps --platform=macosx_10_10_x86_64 --python-version=3.11 --implementation=cp --abi=cp311 --only-binary=:all: --dest=/tmp/x86_64-wheels Pillow
+          arch -x86_64 $PY -m pip install --no-deps --force-reinstall /tmp/x86_64-wheels/*.whl
+          PIL_SO=/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/PIL/_imaging.cpython-311-darwin.so
+          file "$PIL_SO"
+          file "$PIL_SO" | grep -q x86_64 || { echo "Pillow _imaging.so is not x86_64 — aborting"; exit 1; }
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Release gate (build + tests + Python sidecar dispatch check)
+        run: npm run check
+
+      - name: Build Python sidecar
+        if: '!(matrix.platform == ''mac'' && matrix.arch == ''x64'')'
+        env:
+          AIOS_PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstallerArch }}
+        run: npm run build:python
+
+      - name: Build Python sidecar (Intel via Rosetta)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        env:
+          AIOS_PYINSTALLER_TARGET_ARCH: x86_64
+        run: arch -x86_64 "$AIOS_X64_PYTHON" -m PyInstaller --noconfirm --clean build/aios-host.spec
+
+      - name: Bundle modern flac into Mac sidecar (arm64)
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        run: |
+          set -euo pipefail
+          brew install flac
+          SRC=$(brew --prefix flac)/bin/flac
+          DEST=./dist/aios-host/_internal/speech_recognition/flac-mac
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST"
+
+      - name: Bundle modern flac into Mac sidecar (Intel)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/local/bin/brew ]; then
+            arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          arch -x86_64 /usr/local/bin/brew install flac
+          SRC=/usr/local/bin/flac
+          DEST=./dist/aios-host/_internal/speech_recognition/flac-mac
+          cp "$SRC" "$DEST"
+          chmod +x "$DEST"
+
+      - name: Bundle smoke test (every module imports)
+        if: matrix.platform != 'mac' || matrix.arch != 'x64'
+        run: npm run test:bundle
+
+      - name: Bundle smoke test (Intel via Rosetta)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: arch -x86_64 ./dist/aios-host/aios-host --smoke-import
+
+      - name: Publish (Windows)
+        if: matrix.platform == 'win'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          npm run build
+          npx electron-builder --win --publish always
+
+      - name: Publish (macOS arm64)
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm run build
+          npx electron-builder --mac --arm64 --publish always
+
+      - name: Publish (macOS x64 / Intel)
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm run build
+          npx electron-builder --mac --x64 --publish always
+
+      - name: Upload installer artifacts (debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/latest*.yml
+          if-no-files-found: ignore

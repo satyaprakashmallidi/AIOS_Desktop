@@ -1,6 +1,6 @@
 {
   "name": "aios-desktop",
-  "version": "0.2.70",
+  "version": "0.2.71",
   "private": true,
   "description": "AIOS Desktop Command Center",
   "author": {
@@ -161,7 +161,7 @@
     "publish": {
       "provider": "github",
       "owner": "everyai-com",
-      "repo": "AIOS_Desktop-releases",
+      "repo": "AIOS_Desktop",
       "releaseType": "release"
     }
   }

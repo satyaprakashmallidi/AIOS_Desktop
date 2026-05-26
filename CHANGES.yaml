@@ -225,3 +225,8 @@ releases:
       - app-icon-minimal-charcoal-dot
       - chat-empty-context-os-cards
     notes: Re-ship of v0.2.66+v0.2.68 content (icon + onboarding cards) after release-workflow regression in v0.2.68 blocked all 3 platforms from building. Workflow reverted to single-step Build+Publish.
+
+  - tag: v0.2.71
+    features:
+      - release-pipeline-consolidation
+    notes: Merged release pipeline back into the source repo (AIOS_Desktop). Builds + publishes now happen in one workflow here. AIOS_Desktop-releases is frozen as an archive of v0.2.50-v0.2.70; existing installs on those versions continue auto-updating from there.
