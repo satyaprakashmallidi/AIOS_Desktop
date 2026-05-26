@@ -182,13 +182,19 @@ def tool_uses_from_stream_message(payload: dict[str, Any]) -> list[dict[str, Any
                 if isinstance(value, str) and value.strip():
                     summary_parts.append(value.strip())
                     break
-            result.append(
-                {
-                    "id": str(block.get("id") or ""),
-                    "name": str(block.get("name") or ""),
-                    "summary": (summary_parts[0] if summary_parts else "")[:240],
-                }
-            )
+            entry: dict[str, Any] = {
+                "id": str(block.get("id") or ""),
+                "name": str(block.get("name") or ""),
+                "summary": (summary_parts[0] if summary_parts else "")[:240],
+            }
+            # Plan-mode: surface the full plan markdown so the renderer can
+            # render a Plan card with Accept / Reject buttons instead of a
+            # normal assistant bubble.
+            if entry["name"] == "ExitPlanMode":
+                plan = inp.get("plan")
+                if isinstance(plan, str) and plan.strip():
+                    entry["plan"] = plan
+            result.append(entry)
     return result
 
 
@@ -548,6 +554,50 @@ def _get_composio_system_prompt() -> str:
     return _build_composio_system_prompt()
 
 
+_ALLOWED_PERMISSION_MODES = {"bypassPermissions", "plan", "acceptEdits"}
+
+
+# Coaching appended ONLY when permission_mode == "plan". The user is in plan
+# mode, so Claude can read but can't write. Goal: get Claude to ASK clarifying
+# questions before producing a plan based on guesses. AIOS renders `[AIOS_ASK:
+# question | A | B | C]` as clickable buttons under the message, so closed-set
+# questions get a slick UI. Open-ended questions stay as plain prose.
+_PLAN_MODE_HINT = (
+    "You are in Plan mode. You can read code/files freely, but you cannot edit, "
+    "run commands, or call write tools. Your job is to produce a clear plan the "
+    "user will approve before any work happens.\n"
+    "\n"
+    "BEFORE calling ExitPlanMode with a final plan, check whether anything is "
+    "ambiguous about what the user wants:\n"
+    "- Multiple reasonable interpretations of the goal\n"
+    "- Architectural choices the user should weigh in on (library X vs Y, "
+    "approach A vs B)\n"
+    "- Scope questions (just this file, or the whole module?)\n"
+    "- Missing inputs you can't reasonably guess\n"
+    "\n"
+    "If anything's ambiguous, ASK FIRST. Two ways:\n"
+    "1. Closed-set choice (2-5 options) → end your reply with: "
+    "`[AIOS_ASK: brief question | Option A | Option B | Option C]`. AIOS "
+    "renders clickable buttons; clicking sends the option text as the user's "
+    "next message. Do NOT call ExitPlanMode in the same turn — just ask.\n"
+    "2. Open-ended question → just ask in plain prose at the end of your reply. "
+    "Don't call ExitPlanMode this turn; wait for the user's answer.\n"
+    "\n"
+    "Only call ExitPlanMode when the plan is unambiguous and you've answered "
+    "your own remaining questions from reading the code. Keep plans concrete: "
+    "numbered steps, file paths, and what changes where.\n"
+    "\n"
+    "If you also write the plan to a file (preferred for anything non-trivial), "
+    "save it INSIDE the user's AIOS workspace at `plans/<short-slug>.md` "
+    "(relative path). Do NOT save plans to `~/.claude/plans/` or any other "
+    "outside-workspace path — AIOS's Plans page only sees files inside the "
+    "workspace, so an outside path is invisible to the user. When you save a "
+    "plan to disk, ALSO end your reply with one line on its own: "
+    "`[AIOS_ARTIFACT: plans/<short-slug>.md]`. AIOS renders a clickable chip "
+    "under your message — one click opens the file in the user's default app."
+)
+
+
 def run_claude(
     prompt: str,
     claude_path: str | None = None,
@@ -558,10 +608,15 @@ def run_claude(
     model: str | None = None,
     system_prompt: str | None = None,
     add_dirs: list[str] | None = None,
+    permission_mode: str = "bypassPermissions",
 ) -> dict[str, Any]:
     path = claude_path or get_setting("claude_path")
     if not path:
         raise HostError("CLAUDE_NOT_CONFIGURED", "Claude Code path is not configured.")
+    # Fall back to bypass for any unknown / malformed mode so a renderer bug
+    # can't accidentally land us in interactive-prompt mode (which hangs in
+    # --print headless).
+    pmode = permission_mode if permission_mode in _ALLOWED_PERMISSION_MODES else "bypassPermissions"
 
     cwd = str(workspace_root())
     resume = _resume_flags(session_id)
@@ -603,9 +658,18 @@ def run_claude(
     # Stacks on top of the Composio hint, so the agent persona wraps inside the
     # tool-use guardrails. Empty / missing = chat default behavior.
     agent_overlay = ["--append-system-prompt", system_prompt] if system_prompt else []
+    # Plan-mode coaching: tell Claude to ask clarifying questions BEFORE calling
+    # ExitPlanMode if anything's ambiguous. Without this, plan-mode replies are
+    # often based on assumptions and the resulting plan is wrong. For closed-set
+    # choices Claude uses the AIOS_ASK marker (rendered as clickable buttons by
+    # the renderer); for open questions, just plain prose. Only added when
+    # pmode == "plan" so it doesn't bloat the prompt for normal turns.
+    plan_mode_hint: list[str] = []
+    if pmode == "plan":
+        plan_mode_hint = ["--append-system-prompt", _PLAN_MODE_HINT]
     attempts = [
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, *add_dir_flags, "--output-format", "json", "--permission-mode", "bypassPermissions", prompt],
-        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *model_flags, *add_dir_flags, "--output-format", "text", "--permission-mode", "bypassPermissions", prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *plan_mode_hint, *model_flags, *add_dir_flags, "--output-format", "json", "--permission-mode", pmode, prompt],
+        [path, "--print", *resume, *mcp_isolation, *composio_hint, *agent_overlay, *plan_mode_hint, *model_flags, *add_dir_flags, "--output-format", "text", "--permission-mode", pmode, prompt],
     ]
     if stream_id:
         stream_command = [
@@ -615,6 +679,7 @@ def run_claude(
             *mcp_isolation,
             *composio_hint,
             *agent_overlay,
+            *plan_mode_hint,
             *model_flags,
             *add_dir_flags,
             "--verbose",
@@ -622,7 +687,7 @@ def run_claude(
             "stream-json",
             "--include-partial-messages",
             "--permission-mode",
-            "bypassPermissions",
+            pmode,
             prompt,
         ]
         try:
@@ -1051,6 +1116,7 @@ def run_task(args: dict[str, Any]) -> dict[str, Any]:
             model=str(args.get("model") or "") or None,
             system_prompt=str(args.get("systemPrompt") or "") or None,
             add_dirs=add_dirs or None,
+            permission_mode=str(args.get("permissionMode") or "") or "bypassPermissions",
         )
     finally:
         for p in image_paths:

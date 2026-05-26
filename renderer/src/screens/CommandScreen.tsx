@@ -45,12 +45,15 @@ import {
   Users,
   Wand2,
   Wrench,
-  X
+  X,
+  Zap,
+  FileCheck
 } from "lucide-react";
 import { invoke, newId } from "../lib/api";
 import { track } from "../lib/analytics";
 import { formatRelativeTime } from "../lib/workspace-view";
 import { PanelHeader, StatusBadge } from "../components/ui";
+import { GoalProgressBanner } from "../components/GoalProgressBanner";
 import type {
   AgentInfo,
   ChatMessage,
@@ -254,6 +257,16 @@ const MARKDOWN_COMPONENTS = {
     // with a hint. Strip the prefix so CSS sees "python".
     const lang = className?.replace(/^language-/, "") || "";
     return <CodeBlock lang={lang}>{String(children).replace(/\n$/, "")}</CodeBlock>;
+  },
+  // Wrap tables in a scrollable container so wide tables get a horizontal
+  // scroll instead of breaking the chat column layout. The <table> itself
+  // stays a proper `display: table` element so cell-alignment works.
+  table({ children, ...props }: { children?: React.ReactNode }) {
+    return (
+      <div className="aios-markdown-table-wrap">
+        <table {...props}>{children}</table>
+      </div>
+    );
   }
 } as const;
 const MARKDOWN_PLUGINS = [remarkGfm] as const;
@@ -365,6 +378,24 @@ export function CommandScreen({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  // Permission mode pill (default / plan / acceptEdits). Mirrors Claude Code
+  // CLI's Shift+Tab cycle. Persisted per session in SQLite via save_session.
+  // Default = today's behavior (bypassPermissions); Plan = read-only + plan
+  // card with Accept; Accept Edits = edits flow freely, shell blocked.
+  type ModeId = "default" | "plan" | "acceptEdits";
+  const [mode, setMode] = useState<ModeId>((activeSession?.permissionMode as ModeId) ?? "default");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const modeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  // Plan card capture — when Claude calls ExitPlanMode mid-stream we stash
+  // the plan markdown here. On run_task resolve we attach it to the assistant
+  // message as planProposal so the renderer shows a Plan card. Ref (not state)
+  // so capture doesn't trigger re-render mid-stream.
+  const pendingPlanRef = useRef<string | null>(null);
+  // User can dismiss the goal banner via the X button. Reset when a new
+  // session is selected OR when a new goal starts (latter handled by the
+  // host-event listener below).
+  const [goalBannerDismissed, setGoalBannerDismissed] = useState(false);
 
   // Composer slash / @ palette state. `from` is the character offset of the
   // trigger character (the "/" or "@") in the current prompt — we need it so
@@ -513,6 +544,100 @@ export function CommandScreen({
     await invoke("set_setting", { key: "chat_model", value: id }).catch(() => undefined);
   }
 
+  // Click-away for the mode dropdown.
+  useEffect(() => {
+    if (!modeMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (modeButtonRef.current?.contains(target)) return;
+      if (modeMenuRef.current?.contains(target)) return;
+      setModeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [modeMenuOpen]);
+
+  // Sync local mode state when the user switches between chat sessions.
+  // Each session has its own persisted mode; switching threads should reflect.
+  useEffect(() => {
+    const sessionMode = (activeSession?.permissionMode as ModeId) ?? "default";
+    setMode(sessionMode);
+    setGoalBannerDismissed(false);
+  }, [activeSession?.id]);
+
+  function pickMode(id: ModeId) {
+    setMode(id);
+    setModeMenuOpen(false);
+    if (!activeSession) return;
+    // Update session in parent state + persist via save_session IPC. Mirrors
+    // the pattern used elsewhere (claudeSessionId updates after each turn).
+    const updated = { ...activeSession, permissionMode: id };
+    onSessionsChange((current) => current.map((s) => (s.id === updated.id ? updated : s)));
+    void invoke("save_session", { session: updated }).catch(() => undefined);
+  }
+
+  function cycleMode() {
+    const order: ModeId[] = ["default", "plan", "acceptEdits"];
+    const next = order[(order.indexOf(mode) + 1) % order.length];
+    pickMode(next);
+  }
+
+  // Plan card actions. Three options matching Claude Code CLI's interactive
+  // plan-approval flow: "yes auto" / "yes edits only" / "no keep planning".
+  // Accepting also switches the session into that mode so the next message
+  // doesn't replan — exactly what the CLI's "switch mode going forward" does.
+  function acceptPlanWithMode(message: ChatMessage, newMode: ModeId) {
+    const sessionId = activeSession?.id;
+    if (!sessionId || !message.planProposal) return;
+    const replay = message.planProposal.promptToReplay;
+    onSessionsChange((current) => current.map((s) => {
+      if (s.id !== sessionId) return s;
+      return {
+        ...s,
+        permissionMode: newMode,
+        messages: s.messages.map((m) => m.id === message.id && m.planProposal
+          ? { ...m, planProposal: { ...m.planProposal, status: "accepted" as const } }
+          : m
+        ),
+      };
+    }));
+    setMode(newMode);
+    // Persist mode change asynchronously (best-effort; harmless on failure).
+    void invoke("save_session", { session: { ...activeSession, permissionMode: newMode } }).catch(() => undefined);
+    void sendPrompt(replay, { permissionModeOverride: modeToWire(newMode) });
+  }
+
+  function rejectPlan(message: ChatMessage) {
+    const sessionId = activeSession?.id;
+    if (!sessionId) return;
+    onSessionsChange((current) => current.map((s) => {
+      if (s.id !== sessionId) return s;
+      return {
+        ...s,
+        messages: s.messages.map((m) => m.id === message.id && m.planProposal
+          ? { ...m, planProposal: { ...m.planProposal, status: "rejected" as const } }
+          : m
+        ),
+      };
+    }));
+  }
+
+  // Translate the renderer-side mode name into the value the Python sidecar
+  // wants on the wire. "default" maps to the historical bypassPermissions
+  // flag — keep that string so any future cross-check against
+  // _ALLOWED_PERMISSION_MODES in host.py succeeds.
+  function modeToWire(id: ModeId): "bypassPermissions" | "plan" | "acceptEdits" {
+    if (id === "plan") return "plan";
+    if (id === "acceptEdits") return "acceptEdits";
+    return "bypassPermissions";
+  }
+
+  const MODE_OPTIONS: { id: ModeId; label: string; description: string; Icon: React.ComponentType<{ size?: number }> }[] = [
+    { id: "default", label: "Auto", description: "Claude runs everything for you — fastest, no prompts", Icon: Zap },
+    { id: "plan", label: "Plan", description: "Claude proposes a plan first — you review before anything runs", Icon: ClipboardList },
+    { id: "acceptEdits", label: "Edits only", description: "Claude can edit files but won't run shell commands", Icon: FileCheck },
+  ];
+
   // Are any messages in the active session still streaming? If yes, the chat
   // is busy even after CommandScreen remounts (the local `busy` flag would be
   // false on a fresh mount). This keeps the Send button disabled and the
@@ -567,6 +692,53 @@ export function CommandScreen({
     // indicator + runtime meta footer. When CommandScreen is unmounted these
     // are irrelevant anyway.
     return window.aios.onHostEvent((event) => {
+      if (event.event === "goal_progress") {
+        const data = event.data as (import("../types").ActiveGoal & { sessionId?: string }) | undefined;
+        if (!data || !data.sessionId) return;
+        const targetSessionId = data.sessionId;
+        // Strip sessionId before storing; ActiveGoal type doesn't carry it.
+        const { sessionId: _strip, ...goalState } = data;
+        onSessionsChange((current) => current.map((s) =>
+          s.id === targetSessionId ? { ...s, activeGoal: goalState as import("../types").ActiveGoal } : s
+        ));
+        // A new active goal should always show the banner (un-dismiss).
+        if (goalState.status === "active" && goalState.turn <= 1) {
+          setGoalBannerDismissed(false);
+        }
+        return;
+      }
+      if (event.event === "goal_turn_message") {
+        const data = event.data as {
+          sessionId: string;
+          turn: number;
+          role: "assistant";
+          content: string;
+          artifacts?: { kind: "plan" | "output"; path: string; filename: string }[];
+          verifierReason?: string;
+        } | undefined;
+        if (!data || !data.sessionId) return;
+        const attachments: import("../types").ChatAttachment[] = (data.artifacts ?? []).map((a) => ({
+          kind: a.kind,
+          path: a.path,
+          filename: a.filename,
+        }));
+        const note: ChatMessage = {
+          id: newId("msg"),
+          role: "assistant",
+          content: data.content,
+          createdAt: new Date().toISOString(),
+          attachments: attachments.length ? attachments : undefined,
+        };
+        onSessionsChange((current) => current.map((s) => {
+          if (s.id !== data.sessionId) return s;
+          const updated = { ...s, messages: [...s.messages, note], updatedAt: new Date().toISOString() };
+          // Persist asynchronously inside the setter so we have the freshest
+          // session reference (including any prior turn's just-appended msgs).
+          void invoke("save_session", { session: updated }).catch(() => undefined);
+          return updated;
+        }));
+        return;
+      }
       if (event.event !== "claude_stream") return;
       const payload = event.data as ClaudeStreamEvent;
       const activeStream = activeStreamRef.current;
@@ -580,6 +752,13 @@ export function CommandScreen({
       }
       if (payload.toolUse) {
         setActivity({ tool: payload.toolUse.name, summary: payload.toolUse.summary });
+        // Plan-mode: ExitPlanMode tool call carries the plan markdown in
+        // input.plan. Stash for the turn's resolver to wrap into a Plan card
+        // on the assistant message. Last write wins if Claude proposes
+        // multiple plans in one turn (rare).
+        if (payload.toolUse.name === "ExitPlanMode" && payload.toolUse.plan) {
+          pendingPlanRef.current = payload.toolUse.plan;
+        }
       }
       if (payload.toolResult) {
         setActivity(null);
@@ -1009,9 +1188,95 @@ export function CommandScreen({
     handleDroppedItems(event.dataTransfer.items);
   }
 
-  async function sendPrompt(text: string) {
+  // Append a synthetic assistant note to the current session — used by /goal
+  // commands so the user sees a confirmation in the chat ("Goal started",
+  // "Goal cleared", etc.) without firing run_task.
+  function appendAssistantNote(content: string) {
+    if (!activeSession) return;
+    const note: ChatMessage = {
+      id: newId("msg"),
+      role: "assistant",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    onSessionsChange((current) => current.map((s) =>
+      s.id === activeSession.id
+        ? { ...s, messages: [...s.messages, note], updatedAt: new Date().toISOString() }
+        : s
+    ));
+  }
+
+  // Append the user's literal message text so /goal commands show up in the
+  // chat history just like normal messages (otherwise the user types
+  // `/goal X` and only sees the assistant note appear out of nowhere).
+  function appendUserNote(content: string) {
+    if (!activeSession) return;
+    const note: ChatMessage = {
+      id: newId("msg"),
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    onSessionsChange((current) => current.map((s) =>
+      s.id === activeSession.id
+        ? { ...s, messages: [...s.messages, note], updatedAt: new Date().toISOString() }
+        : s
+    ));
+  }
+
+  function describeActiveGoal(goal: import("../types").ActiveGoal | null): string {
+    if (!goal) return "No active goal in this chat. Start one with `/goal <verifiable condition>` — e.g. `/goal fix all TypeScript errors in renderer/`.";
+    const tokens = goal.tokensSpent.toLocaleString();
+    const cost = goal.costUsd ? ` · ~$${goal.costUsd.toFixed(2)}` : "";
+    const lastLine = goal.lastReason ? `\n\n_Latest:_ ${goal.lastReason}` : "";
+    if (goal.status === "active") return `**Goal active** — turn ${goal.turn} of ${goal.maxTurns} · ${tokens} tokens${cost}\n\n_${goal.condition}_${lastLine}`;
+    if (goal.status === "met") return `**Goal met** — finished in ${goal.turn} turns · ${tokens} tokens${cost}\n\n_${goal.condition}_${lastLine}`;
+    if (goal.status === "exhausted") return `**Goal exhausted** — hit a cap at turn ${goal.turn} · ${tokens} tokens${cost}\n\n_${goal.condition}_${lastLine}`;
+    return `**Goal stopped** — at turn ${goal.turn} · ${tokens} tokens${cost}\n\n_${goal.condition}_${lastLine}`;
+  }
+
+  async function sendPrompt(text: string, options?: { permissionModeOverride?: "bypassPermissions" | "plan" | "acceptEdits" }) {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || !claude?.found || !activeSession) return;
+
+    // Intercept /goal commands BEFORE the queue check — these don't go
+    // through run_task at all. /goal <condition> starts an autonomous loop;
+    // /goal clear stops it; /goal alone reports status.
+    if (trimmed.startsWith("/goal")) {
+      const rest = trimmed.slice("/goal".length).trim();
+      setPrompt("");
+      // Always show the user's command in the thread so they can see what
+      // they sent (matches how /clear / /new feel today).
+      appendUserNote(trimmed);
+      if (rest === "" || rest === "status") {
+        const summary = describeActiveGoal(activeSession.activeGoal ?? null);
+        appendAssistantNote(summary);
+        return;
+      }
+      if (rest === "clear" || rest === "stop" || rest === "abort") {
+        try {
+          await invoke("goal_abort", { sessionId: activeSession.id });
+          appendAssistantNote("Goal cleared. No more automatic turns.");
+        } catch (err) {
+          appendAssistantNote(`Couldn't clear the goal: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+      // Anything else is the condition. Start a new goal.
+      try {
+        await invoke("goal_start", {
+          sessionId: activeSession.id,
+          condition: rest,
+          claudePath: claude.path,
+          claudeSessionId: activeSession.claudeSessionId ?? null,
+        });
+        appendAssistantNote(`Goal started: "${rest}". Watch the banner above for progress.`);
+      } catch (err) {
+        appendAssistantNote(`Couldn't start the goal: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // If a turn is already in flight, queue this message + clear the composer
     // and let the drain effect send it once busy flips back to false.
     if (busy) {
@@ -1094,6 +1359,14 @@ export function CommandScreen({
       // Pass the user-picked model through as --model <alias>. "default" means
       // omit the flag so Claude CLI uses whatever's configured globally.
       if (selectedModel && selectedModel !== "default") baseArgs.model = selectedModel;
+      // Permission mode (default / plan / acceptEdits). Wire value differs
+      // from UI: "default" → bypassPermissions on the spawn flag. Plan-card
+      // Accept passes options.permissionModeOverride = "bypassPermissions"
+      // so the re-run executes regardless of the session's current mode.
+      baseArgs.permissionMode = options?.permissionModeOverride ?? modeToWire(mode);
+      // Clear any stale plan proposal from a prior turn before this turn's
+      // stream listener has a chance to populate it.
+      pendingPlanRef.current = null;
       // Scan the prompt for @AgentName mentions and overlay each addressed
       // agent's effective prompt as a system prompt for THIS chat turn. The
       // shim tells Claude to answer in-character (single agent) or as the
@@ -1152,10 +1425,24 @@ export function CommandScreen({
       if (connectMatch) {
         connectRequest = { service: connectMatch[1].toLowerCase() };
       }
+      // AIOS_ARTIFACT marker: `[AIOS_ARTIFACT: plans/<slug>.md]` or
+      // `[AIOS_ARTIFACT: outputs/<slug>.md]` — Claude is pointing at a file
+      // it saved inside the workspace. Renderer attaches a clickable chip
+      // (same shape as the PDF export attachment, just opened externally).
+      const artifactMarkerRe = /\[AIOS_ARTIFACT:\s*((?:plans|outputs)\/[A-Za-z0-9._\/-]+\.[A-Za-z0-9]+)\s*\]/i;
+      const artifactMatch = result.response.match(artifactMarkerRe);
+      let artifactAttachment: import("../types").ChatAttachment | null = null;
+      if (artifactMatch) {
+        const relPath = artifactMatch[1];
+        const filename = relPath.split("/").pop() ?? relPath;
+        const kind: "plan" | "output" = relPath.startsWith("plans/") ? "plan" : "output";
+        artifactAttachment = { kind, path: relPath, filename };
+      }
       const cleanedResponse = result.response
         .replace(/\[AIOS_EXPORT_PDF:[^\]\r\n]+\]/gi, "")
         .replace(/\[AIOS_ASK:[^\]\r\n]+\]/gi, "")
         .replace(/\[AIOS_CONNECT:[^\]\r\n]+\]/gi, "")
+        .replace(/\[AIOS_ARTIFACT:[^\]\r\n]+\]/gi, "")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
       let pdfAttachment: import("../types").ChatAttachment | null = null;
@@ -1173,6 +1460,14 @@ export function CommandScreen({
           /* PDF rendering is best-effort; chat still shows the text answer */
         }
       }
+      // Plan mode: if Claude called ExitPlanMode this turn, the captured
+      // plan markdown lives in pendingPlanRef. Wrap it as planProposal on
+      // the assistant message; the renderer will show a Plan card instead
+      // of the normal markdown bubble.
+      const planProposal = pendingPlanRef.current
+        ? { content: pendingPlanRef.current, promptToReplay: finalText, status: "pending" as const }
+        : null;
+      pendingPlanRef.current = null;
       const saved = {
         ...nextSession,
         messages: nextSession.messages.map((message) =>
@@ -1186,11 +1481,15 @@ export function CommandScreen({
                 ...message,
                 content: cleanedResponse,
                 streamId: null,
-                attachments: pdfAttachment
-                  ? [...(message.attachments ?? []), pdfAttachment]
-                  : message.attachments,
+                attachments: (() => {
+                  let next = message.attachments ?? [];
+                  if (pdfAttachment) next = [...next, pdfAttachment];
+                  if (artifactAttachment) next = [...next, artifactAttachment];
+                  return next.length ? next : undefined;
+                })(),
                 askOptions: askOptions ?? message.askOptions,
                 connectRequest: connectRequest ?? message.connectRequest,
+                planProposal: planProposal ?? message.planProposal,
               }
             : message
         ),
@@ -1263,6 +1562,7 @@ export function CommandScreen({
       { id: "next", label: "/next", hint: "Find the single highest-leverage next action", icon: ArrowUp, prompt: "Based on my AIOS workspace, what is the single highest-leverage next action I should take this week? Explain why in one sentence." },
       { id: "plan", label: "/plan", hint: "Generate a practical plan from my workspace", icon: ClipboardList, prompt: "Create a practical plan from my current AIOS workspace context. Group by 'this week', 'this month', and 'this quarter'. Keep each item concrete and owned by me." },
       { id: "goals", label: "/goals", hint: "Surface your top goals from the context layer", icon: Target, prompt: "Read my context files and tell me the top 3 goals I'm working toward in the next 90 days, in order of urgency." },
+      { id: "goal", label: "/goal", hint: "Run autonomously until a condition is met (Claude Code-style)", icon: Target, prompt: "/goal " },
       { id: "audit", label: "/audit", hint: "Audit tasks, blockers, and progress", icon: ListChecks, prompt: "Audit my current Tasks (Kanban) and AutoTasks. Tell me what's stuck, what's at risk, and what's quietly succeeding. Be blunt." },
       { id: "brief-today", label: "/today", hint: "Generate today's daily brief", icon: Sun, prompt: "Generate today's daily brief: priorities, blockers, what's due, what's at risk. Pull from my workspace and recent activity. Tight and skimmable." },
       { id: "help", label: "/help", hint: "Show what AIOS can do for you", icon: HelpCircle, prompt: "Explain what AIOS Desktop can do for me right now given my current connectors, agents, and workspace context. Give me 5 concrete things I should try this week." },
@@ -1560,6 +1860,14 @@ export function CommandScreen({
         return;
       }
     }
+    // Shift+Tab — cycle permission mode (Default → Plan → Accept edits).
+    // Mirrors Claude Code CLI behavior. Palette-block already returned above
+    // if palette is open, so this only fires in normal composer state.
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      cycleMode();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendPrompt(prompt);
@@ -1621,6 +1929,26 @@ export function CommandScreen({
               <StatusBadge tone={claude?.found && claude.runtimeOk ? "success" : "warning"} label={claude?.found && claude.runtimeOk ? "Connected" : "Check Claude"} />
             </div>
           </div>
+
+          {activeSession?.activeGoal && !goalBannerDismissed ? (
+            <GoalProgressBanner
+              goal={activeSession.activeGoal}
+              onAbort={() => {
+                void invoke("goal_abort", { sessionId: activeSession.id }).catch(() => undefined);
+              }}
+              onResume={() => {
+                if (!activeSession.activeGoal || !claude?.path) return;
+                void invoke("goal_start", {
+                  sessionId: activeSession.id,
+                  condition: activeSession.activeGoal.condition,
+                  claudePath: claude.path,
+                  resumeFromTurn: activeSession.activeGoal.turn,
+                  claudeSessionId: activeSession.claudeSessionId ?? null,
+                }).catch(() => undefined);
+              }}
+              onDismiss={() => setGoalBannerDismissed(true)}
+            />
+          ) : null}
 
           <div
             className="aios-chat-thread"
@@ -1782,6 +2110,65 @@ export function CommandScreen({
                       >
                         Connect
                       </button>
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && message.planProposal ? (
+                    <div className={`aios-plan-card status-${message.planProposal.status ?? "pending"}`} data-testid="plan-card">
+                      <div className="aios-plan-card-eyebrow">Ready to code?</div>
+                      <p className="aios-plan-card-intro">Here is Claude's plan:</p>
+                      <div className="aios-plan-card-panel">
+                        <MessageMarkdown content={message.planProposal.content} />
+                      </div>
+                      {(message.planProposal.status ?? "pending") === "pending" ? (
+                        <>
+                          <p className="aios-plan-card-prompt">What do you want to do?</p>
+                          <div className="aios-plan-card-options" role="menu">
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="aios-plan-option"
+                              onClick={() => acceptPlanWithMode(message, "default")}
+                            >
+                              <span className="aios-plan-option-arrow" aria-hidden="true">❯</span>
+                              <span className="aios-plan-option-digit">1.</span>
+                              <span className="aios-plan-option-text">
+                                <span className="aios-plan-option-label">Run the full plan</span>
+                                <span className="aios-plan-option-sub">Claude does everything: edits files and runs commands.</span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="aios-plan-option"
+                              onClick={() => acceptPlanWithMode(message, "acceptEdits")}
+                            >
+                              <span className="aios-plan-option-arrow" aria-hidden="true">❯</span>
+                              <span className="aios-plan-option-digit">2.</span>
+                              <span className="aios-plan-option-text">
+                                <span className="aios-plan-option-label">Only edit files</span>
+                                <span className="aios-plan-option-sub">Claude changes files but won't run any commands.</span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="aios-plan-option"
+                              onClick={() => rejectPlan(message)}
+                            >
+                              <span className="aios-plan-option-arrow" aria-hidden="true">❯</span>
+                              <span className="aios-plan-option-digit">3.</span>
+                              <span className="aios-plan-option-text">
+                                <span className="aios-plan-option-label">Not yet — let me refine</span>
+                                <span className="aios-plan-option-sub">Dismisses the plan. Adjust your prompt and ask again.</span>
+                              </span>
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="aios-plan-card-status">
+                          {message.planProposal.status === "accepted" ? "Plan accepted — running below." : "Plan dismissed — keep refining your prompt."}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                   {message.role === "assistant" && message.askOptions && message.askOptions.options.length > 0 ? (
@@ -2148,6 +2535,53 @@ export function CommandScreen({
                         {selectedModel === m.id ? <Check size={12} /> : null}
                       </button>
                     ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="aios-mode-picker">
+                <button
+                  ref={modeButtonRef}
+                  type="button"
+                  className={`aios-mode-pill is-${mode}`}
+                  onClick={() => setModeMenuOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={modeMenuOpen}
+                  title="Permission mode for this chat (Shift+Tab to cycle)"
+                >
+                  {(() => {
+                    const current = MODE_OPTIONS.find((m) => m.id === mode) ?? MODE_OPTIONS[0];
+                    const Icon = current.Icon;
+                    return (
+                      <>
+                        <Icon size={13} />
+                        <span>{current.label}</span>
+                        <ChevronDown size={12} />
+                      </>
+                    );
+                  })()}
+                </button>
+                {modeMenuOpen ? (
+                  <div ref={modeMenuRef} className="aios-mode-menu" role="menu">
+                    {MODE_OPTIONS.map((m) => {
+                      const Icon = m.Icon;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          role="menuitem"
+                          className={`aios-mode-option ${mode === m.id ? "is-active" : ""}`}
+                          onClick={() => pickMode(m.id)}
+                        >
+                          <span className="aios-mode-option-icon"><Icon size={14} /></span>
+                          <span className="aios-mode-option-text">
+                            <strong>{m.label}</strong>
+                            <span>{m.description}</span>
+                          </span>
+                          {mode === m.id ? <Check size={12} /> : null}
+                        </button>
+                      );
+                    })}
+                    <div className="aios-mode-menu-hint">Shift+Tab to cycle</div>
                   </div>
                 ) : null}
               </div>

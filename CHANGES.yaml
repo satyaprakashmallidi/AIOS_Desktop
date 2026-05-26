@@ -230,3 +230,18 @@ releases:
     features:
       - release-pipeline-consolidation
     notes: Merged release pipeline back into the source repo (AIOS_Desktop). Builds + publishes now happen in one workflow here. AIOS_Desktop-releases is frozen as an archive of v0.2.50-v0.2.70; existing installs on those versions continue auto-updating from there.
+
+  - tag: v0.2.72
+    features:
+      - goal-autonomous-loop
+      - plan-mode-toggle
+      - plan-card-cli-style
+      - clickable-artifact-chips
+      - linked-folder-browser
+      - control-popup-tabs
+      - comfortable-dark-theme
+      - chat-column-wider
+      - mention-chips-inline
+      - mac-update-applications-check
+      - github-url-fallback-fix
+    notes: First bundle release out of the consolidated everyai-com/AIOS_Desktop pipeline. Mac auto-update is now reliable for users who have the app in /Applications (a one-time dialog prompts them to move it on first launch if not). Headline new feature is /goal — Claude Code-style autonomous loop with Haiku verifier and clickable artifact chips per turn.

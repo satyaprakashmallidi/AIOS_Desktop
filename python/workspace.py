@@ -351,6 +351,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "claude_session_id" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN claude_session_id TEXT")
+    if "permission_mode" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN permission_mode TEXT")
+    if "goal_state" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN goal_state TEXT")
     # Migrations for the tasks table (added v0.1.16 → extended for CEO synthesis)
     task_cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
     if task_cols and "parent_task_id" not in task_cols:
@@ -1035,7 +1039,7 @@ def install_module(module_id: str) -> dict[str, Any]:
 def get_sessions() -> list[dict[str, Any]]:
     with closing(connect()) as conn:
         rows = conn.execute(
-            "SELECT id, title, messages, updated_at, claude_session_id FROM sessions ORDER BY updated_at DESC"
+            "SELECT id, title, messages, updated_at, claude_session_id, permission_mode, goal_state FROM sessions ORDER BY updated_at DESC"
         ).fetchall()
     return [
         {
@@ -1044,9 +1048,30 @@ def get_sessions() -> list[dict[str, Any]]:
             "messages": repair_json_text(json.loads(row["messages"] or "[]")),
             "updatedAt": row["updated_at"],
             "claudeSessionId": row["claude_session_id"],
+            "permissionMode": row["permission_mode"] or "default",
+            "activeGoal": _decode_goal_state(row["goal_state"]),
         }
         for row in rows
     ]
+
+
+def _decode_goal_state(raw: Any) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    # If the persisted status is "active", the orchestrator that owned it has
+    # already been killed (we're loading from disk on a fresh app boot or
+    # session refetch). Coerce to "aborted" + a clear reason so the banner
+    # shows a Resume button instead of pretending the loop is live.
+    if parsed.get("status") == "active":
+        parsed["status"] = "aborted"
+        parsed["lastReason"] = "App was closed — click Resume to continue."
+    return parsed
 
 
 def create_thread(title: str | None = None) -> dict[str, Any]:
@@ -1058,6 +1083,8 @@ def create_thread(title: str | None = None) -> dict[str, Any]:
         "messages": [],
         "updatedAt": utc_now(),
         "claudeSessionId": None,
+        "permissionMode": "default",
+        "activeGoal": None,
     }
     save_session(session)
     return session
@@ -1080,6 +1107,9 @@ def rename_thread(session_id: str, title: str) -> dict[str, Any]:
     return {"id": session_id, "title": title.strip() or "Untitled"}
 
 
+_ALLOWED_PERMISSION_MODES = {"default", "plan", "acceptEdits"}
+
+
 def save_session(session: dict[str, Any]) -> dict[str, Any]:
     session_id = str(session["id"])
     title = repair_text_encoding(str(session.get("title") or "Main"))
@@ -1087,15 +1117,21 @@ def save_session(session: dict[str, Any]) -> dict[str, Any]:
     updated_at = utc_now()
     raw_claude_id = session.get("claudeSessionId")
     claude_session_id = str(raw_claude_id) if isinstance(raw_claude_id, str) and raw_claude_id else None
+    raw_perm = session.get("permissionMode")
+    permission_mode = raw_perm if isinstance(raw_perm, str) and raw_perm in _ALLOWED_PERMISSION_MODES else "default"
+    raw_goal = session.get("activeGoal")
+    goal_state = json.dumps(raw_goal, ensure_ascii=False) if isinstance(raw_goal, dict) else None
     with closing(connect()) as conn:
         conn.execute(
-            "INSERT INTO sessions (id, title, messages, updated_at, claude_session_id) VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO sessions (id, title, messages, updated_at, claude_session_id, permission_mode, goal_state) VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "title = excluded.title, "
             "messages = excluded.messages, "
             "updated_at = excluded.updated_at, "
-            "claude_session_id = excluded.claude_session_id",
-            (session_id, title, messages, updated_at, claude_session_id),
+            "claude_session_id = excluded.claude_session_id, "
+            "permission_mode = excluded.permission_mode, "
+            "goal_state = excluded.goal_state",
+            (session_id, title, messages, updated_at, claude_session_id, permission_mode, goal_state),
         )
         conn.commit()
     return {"id": session_id, "updatedAt": updated_at}

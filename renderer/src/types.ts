@@ -116,6 +116,9 @@ export type AiosCommand =
   | "voice_control_stop"
   | "voice_control_abort"
   | "voice_control_state"
+  | "goal_start"
+  | "goal_abort"
+  | "goal_status"
   | "list_tasks"
   | "get_task"
   | "create_task"
@@ -234,6 +237,9 @@ export interface ClaudeToolUseEvent {
   id: string;
   name: string;
   summary: string;
+  // Only populated when name === "ExitPlanMode" — the full plan markdown
+  // Claude proposed in plan mode. Renderer uses it to render a Plan card.
+  plan?: string;
 }
 
 export interface ClaudeToolResultEvent {
@@ -346,6 +352,27 @@ export interface ChatMessage {
   // chip — click navigates to Connectors so the user can complete OAuth
   // without manually hunting the page.
   connectRequest?: { service: string };
+  // When set, this assistant message was produced in Plan mode and Claude
+  // emitted an ExitPlanMode tool call. Renderer renders a Plan card with
+  // Accept / Reject buttons instead of a normal markdown bubble. Accepting
+  // re-invokes run_task with promptToReplay + bypassPermissions, then
+  // appends a new assistant message with the actual execution.
+  planProposal?: { content: string; promptToReplay: string; status?: "pending" | "accepted" | "rejected" };
+}
+
+export type ChatPermissionMode = "default" | "plan" | "acceptEdits";
+
+export type GoalStatus = "active" | "met" | "aborted" | "exhausted";
+
+export interface ActiveGoal {
+  condition: string;
+  turn: number;
+  maxTurns: number;
+  tokensSpent: number;
+  costUsd?: number;
+  startedAt: string;
+  lastReason?: string;
+  status: GoalStatus;
 }
 
 export interface ChatSession {
@@ -354,6 +381,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   updatedAt?: string;
   claudeSessionId?: string | null;
+  permissionMode?: ChatPermissionMode;
+  activeGoal?: ActiveGoal | null;
 }
 
 export interface WorkspaceEntry {

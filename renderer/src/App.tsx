@@ -94,7 +94,17 @@ function mergeSessions(current: ChatSession[], fresh: ChatSession[]): ChatSessio
   const merged = current.map((c) => {
     const f = freshById.get(c.id);
     if (!f) return c;
-    return c.messages.length > f.messages.length ? c : f;
+    const picked = c.messages.length > f.messages.length ? c : f;
+    // Goal state: prefer the LIVE in-memory activeGoal when it's "active"
+    // (the orchestrator is feeding goal_progress events; the DB row is at
+    // most one turn stale). Without this, a periodic get_sessions refresh
+    // would briefly clobber the live goal state with a "aborted" coerced
+    // by python/workspace.py:_decode_goal_state.
+    const liveGoal = c.activeGoal;
+    if (liveGoal && liveGoal.status === "active") {
+      return { ...picked, activeGoal: liveGoal };
+    }
+    return picked;
   });
   // Add any sessions that exist in DB but not in memory yet (e.g. auto-task
   // created one in the background).

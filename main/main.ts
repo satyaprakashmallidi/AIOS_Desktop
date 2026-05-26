@@ -14,6 +14,7 @@ import { AutoTaskScheduler } from "./scheduler";
 import { ensureRuntimeWorkspace, getSourceStarterKit, backfillStarterKit } from "./workspace";
 import { startWhatsApp, stopWhatsApp, getWhatsAppStatus, autoStartWhatsApp } from "./whatsapp-scanner";
 import { startVoiceLoop, abortVoiceLoop, getVoiceState } from "./voice-control";
+import { startGoalLoop, abortGoalLoop, isGoalRunning } from "./goal-orchestrator";
 import {
   installControlPopupHooks,
   toggleControlPopup,
@@ -124,6 +125,9 @@ const mainHandledCommands = new Set<AiosCommand>([
   "voice_control_stop",
   "voice_control_abort",
   "voice_control_state",
+  "goal_start",
+  "goal_abort",
+  "goal_status",
   "control_panel_toggle",
   "control_panel_open",
   "control_panel_close",
@@ -667,6 +671,36 @@ async function handleMainCommand(cmd: AiosCommand, args: Record<string, unknown>
     return { state: getVoiceState() };
   }
 
+  if (cmd === "goal_start") {
+    const sessionId = String(args.sessionId ?? "");
+    const condition = String(args.condition ?? "").trim();
+    const claudePath = String(args.claudePath ?? "");
+    const resumeFromTurn = Number(args.resumeFromTurn) || 0;
+    const claudeSessionId = typeof args.claudeSessionId === "string" ? args.claudeSessionId : null;
+    if (!sessionId) throw new Error("sessionId is required");
+    if (!condition) throw new Error("condition is required");
+    if (!claudePath) throw new Error("claudePath is required");
+    // Fire and forget — the loop streams progress via aios:host-event so the
+    // renderer doesn't block on the full multi-turn run.
+    startGoalLoop({ sessionId, condition, claudePath, host, broadcast: broadcastHostEvent, resumeFromTurn, claudeSessionId }).catch((err) => {
+      log("goal", "loop failed", { error: err instanceof Error ? err.message : String(err) });
+    });
+    return { ok: true, accepted: true };
+  }
+
+  if (cmd === "goal_abort") {
+    const sessionId = String(args.sessionId ?? "");
+    if (!sessionId) throw new Error("sessionId is required");
+    await abortGoalLoop(sessionId, broadcastHostEvent);
+    return { ok: true };
+  }
+
+  if (cmd === "goal_status") {
+    const sessionId = String(args.sessionId ?? "");
+    if (!sessionId) throw new Error("sessionId is required");
+    return { active: isGoalRunning(sessionId) };
+  }
+
   if (cmd === "control_panel_toggle") {
     toggleControlPopup();
     return { ok: true };
@@ -1012,6 +1046,48 @@ app.whenReady().then(() => {
   });
 
   registerIpcHandlers();
+
+  // Mac-only: Squirrel.Mac auto-update requires the .app to live in
+  // /Applications. If the user is running from /Volumes/<dmg>/ (DMG-mounted)
+  // or ~/Downloads/, autoUpdater.quitAndInstall() silently fails. Surface a
+  // one-time dialog asking them to move it. Honors a dismissal flag so we
+  // don't nag every launch. Windows-side: app.isInApplicationsFolder always
+  // returns true (non-Mac no-op), so the guard short-circuits cleanly.
+  if (process.platform === "darwin" && app.isPackaged && typeof app.isInApplicationsFolder === "function" && !app.isInApplicationsFolder()) {
+    const skipFlagPath = path.join(app.getPath("userData"), ".skip-applications-folder-prompt");
+    let dismissed = false;
+    try {
+      const fs = require("node:fs") as typeof import("node:fs");
+      dismissed = fs.existsSync(skipFlagPath);
+    } catch { /* ignore */ }
+    if (!dismissed) {
+      const result = dialog.showMessageBoxSync({
+        type: "question",
+        title: "Move AIOS Desktop to Applications?",
+        message: "AIOS works best when it lives in /Applications.",
+        detail: "Auto-update needs the app in /Applications to install new versions cleanly. Move it there now and AIOS will relaunch from the new location.",
+        buttons: ["Move to Applications", "Not now"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      });
+      if (result === 0) {
+        try {
+          app.moveToApplicationsFolder();
+          // moveToApplicationsFolder quits + relaunches; nothing more to do.
+          return;
+        } catch (err) {
+          log("main", "moveToApplicationsFolder failed", { error: err instanceof Error ? err.message : String(err) });
+        }
+      } else {
+        try {
+          const fs = require("node:fs") as typeof import("node:fs");
+          fs.writeFileSync(skipFlagPath, new Date().toISOString());
+        } catch { /* best-effort; if we can't write, we'll just ask again next launch */ }
+      }
+    }
+  }
+
   createWindow();
 
   // Run the deferred infra resync AFTER the window is on screen. The fresh-
@@ -1114,8 +1190,12 @@ app.whenReady().then(() => {
     const currentVersion = app.getVersion();
     try {
       broadcast("checking");
+      // Source of truth for the publish target is package.json `build.publish`
+      // ("everyai-com/AIOS_Desktop" since v0.2.71 — was AIOS_Desktop-releases
+       // before the pipeline consolidation). Hardcoded here for simplicity;
+      // if you ever change the publish target, update this URL too.
       const res = await fetch(
-        "https://api.github.com/repos/satyaprakashmallidi/AIOS_Desktop/releases/latest",
+        "https://api.github.com/repos/everyai-com/AIOS_Desktop/releases/latest",
         { headers: { Accept: "application/vnd.github+json", "User-Agent": "AIOS-Desktop" } }
       );
       if (!res.ok) {
@@ -1125,7 +1205,7 @@ app.whenReady().then(() => {
       const data = (await res.json()) as { tag_name?: string; html_url?: string };
       const tag = data.tag_name ?? "";
       const latestVersion = tag.replace(/^v/i, "");
-      const url = data.html_url ?? `https://github.com/satyaprakashmallidi/AIOS_Desktop/releases/latest`;
+      const url = data.html_url ?? `https://github.com/everyai-com/AIOS_Desktop/releases/latest`;
       if (isNewerVersion(latestVersion, currentVersion)) {
         broadcast("manual-available", { version: latestVersion, manualDownloadUrl: url });
         return { ok: true, currentVersion, latestVersion, hasUpdate: true, manualDownloadUrl: url };
